@@ -228,7 +228,31 @@ function collectGithubLoginNames(exePath: string): Set<string> {
   return names
 }
 
+/** macOS: Login Items via SMAppService (macOS 13+) with legacy fallback. */
+function readMacLaunchAtLogin(): LaunchAtLoginResult {
+  try {
+    const s = app.getLoginItemSettings({ type: 'mainAppService' } as Electron.LoginItemSettingsOptions) as Electron.LoginItemSettings & { status?: string }
+    if (s.status) {
+      return { enabled: s.status === 'enabled', blockedByUser: s.status === 'requires-approval', ok: true }
+    }
+    return { enabled: !!s.openAtLogin, blockedByUser: false, ok: true }
+  } catch {
+    return { enabled: false, blockedByUser: false, ok: false }
+  }
+}
+
+function applyMacLaunchAtLogin(wantLaunch: boolean): LaunchAtLoginResult {
+  try {
+    app.setLoginItemSettings({ openAtLogin: wantLaunch, type: 'mainAppService' } as Electron.Settings)
+  } catch (err) {
+    console.error('[LoginItems] macOS setLoginItemSettings failed:', err)
+  }
+  const read = readMacLaunchAtLogin()
+  return { ...read, ok: read.enabled === wantLaunch || read.blockedByUser }
+}
+
 export function readGithubLaunchAtLogin(): LaunchAtLoginResult {
+  if (process.platform === 'darwin') return readMacLaunchAtLogin()
   const exePath = app.getPath('exe')
 
   // Windows NSIS / portable builds: Read registry directly as authoritative source.
@@ -280,6 +304,7 @@ export function readGithubLaunchAtLogin(): LaunchAtLoginResult {
 }
 
 export function applyGithubLaunchAtLogin(wantLaunch: boolean): LaunchAtLoginResult {
+  if (process.platform === 'darwin') return applyMacLaunchAtLogin(wantLaunch)
   const exePath = app.getPath('exe')
   const names = collectGithubLoginNames(exePath)
 

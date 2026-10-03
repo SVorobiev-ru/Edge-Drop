@@ -19,6 +19,7 @@ import { isStoreBuild, shouldStartHidden } from './config'
 import { prewarmDragIcons } from './drag'
 import { initState, getWatcher, loadSettings, saveSettings, pushState, stopStateTimers, getStore } from './state'
 import { initAutoUpdater } from './updater'
+import { startScreenshotWatcher } from './macScreenshots'
 import { createOnboardingWindow } from './onboardingWindow'
 import { startFullscreenMonitor, stopFullscreenMonitor, triggerFullscreenCheck } from './fullscreen'
 import { flushStagedTempRegistry } from './stagedTemp'
@@ -149,6 +150,7 @@ app.whenReady().then(() => {
   getWatcher().setPaused(settings.incognito)
   pushState.settings(settings)
   if (process.platform !== 'darwin') initAutoUpdater()
+  if (process.platform === 'darwin') startScreenshotWatcher()
 
   // Keep the tray checkmarks in sync after settings change from the UI.
   // (Tray menu is rebuilt on each open, so no extra wiring is needed here.)
@@ -311,6 +313,7 @@ export function registerGlobalHotkey(targetHotkey?: string): boolean {
       pushState.togglePanel()
     })
 
+    console.log(`[Main] global hotkey ${hotkey} registered=${success}`)
     if (!success && hotkey !== 'Alt+C') {
       console.warn(`[Main] Failed to register global shortcut ${hotkey}, falling back to Alt+C`)
       globalShortcut.register('Alt+C', () => {

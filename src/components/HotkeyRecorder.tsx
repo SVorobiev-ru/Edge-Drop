@@ -9,6 +9,8 @@ interface HotkeyRecorderProps {
   onChange: (nextHotkey: string) => void
 }
 
+const IS_MAC = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform || navigator.userAgent || '')
+
 /** Formats an Electron accelerator string (e.g. "Alt+Shift+C") into individual display keys. */
 function parseKeyBadges(accelerator: string): string[] {
   if (!accelerator) return ['Alt', 'C']
@@ -16,6 +18,12 @@ function parseKeyBadges(accelerator: string): string[] {
     .split('+')
     .map((k) => {
       const trimmed = k.trim()
+      if (IS_MAC) {
+        if (trimmed === 'CommandOrControl' || trimmed === 'Meta' || trimmed === 'Super' || trimmed === 'Command') return '⌘'
+        if (trimmed === 'Ctrl' || trimmed === 'Control') return '⌃'
+        if (trimmed === 'Alt' || trimmed === 'Option') return '⌥'
+        if (trimmed === 'Shift') return '⇧'
+      }
       if (trimmed === 'CommandOrControl' || trimmed === 'Ctrl') return 'Ctrl'
       if (trimmed === 'Meta' || trimmed === 'Super' || trimmed === 'Command') return 'Win'
       return trimmed.length === 1 ? trimmed.toUpperCase() : trimmed
@@ -80,7 +88,7 @@ function eventToAccelerator(e: KeyboardEvent): { accelerator: string; isValid: b
   return {
     accelerator: allParts.join('+'),
     isValid,
-    partialBadges: allParts.map(p => (p === 'Super' ? 'Win' : p))
+    partialBadges: IS_MAC ? parseKeyBadges(allParts.join('+')) : allParts.map(p => (p === 'Super' ? 'Win' : p))
   }
 }
 

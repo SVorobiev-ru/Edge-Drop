@@ -23,6 +23,30 @@ if (process.platform === 'win32') {
   }
 }
 
+// macOS: NSPasteboard.generalPasteboard.changeCount via the ObjC runtime.
+// Cheap (no clipboard read) and bumps exactly once per copy — the macOS
+// equivalent of GetClipboardSequenceNumber.
+if (process.platform === 'darwin') {
+  try {
+    const objc = koffi.load('/usr/lib/libobjc.A.dylib')
+    const getClass = objc.func('void *objc_getClass(const char *name)')
+    const sel = objc.func('void *sel_registerName(const char *name)')
+    const msgPtr = objc.func('objc_msgSend', 'void *', ['void *', 'void *'])
+    const msgLong = objc.func('objc_msgSend', 'long', ['void *', 'void *'])
+    const cls = getClass('NSPasteboard')
+    const selGeneral = sel('generalPasteboard')
+    const selCount = sel('changeCount')
+    if (cls && selGeneral && selCount) {
+      getSeqNum = () => {
+        const pb = msgPtr(cls, selGeneral)
+        return pb ? Number(msgLong(pb, selCount)) + 1 : 0
+      }
+    }
+  } catch (err) {
+    console.error('[formats] NSPasteboard changeCount unavailable, falling back to signature polling:', err)
+  }
+}
+
 export function getClipboardSequenceNumber(): number {
   if (getSeqNum) {
     try {

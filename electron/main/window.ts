@@ -15,6 +15,7 @@
 import { BrowserWindow, screen, shell, powerMonitor, app } from 'electron'
 import { join } from 'node:path'
 import koffi from 'koffi'
+import { frontmostPid, activatePid, weAreFrontmost } from './macNative'
 import { APP_CONFIG } from './config'
 import { runtime } from './config'
 import { PATHS } from '../store/paths'
@@ -220,7 +221,13 @@ export function traceFg(tag: string): void {
 }
 
 /** Record the foreground window unless it is our own. Last-wins. */
+let lastExternalPid = 0
 export function captureExternalForeground(): void {
+  if (process.platform === 'darwin') {
+    const pid = frontmostPid()
+    if (pid && pid !== process.pid) lastExternalPid = pid
+    return
+  }
   if (process.platform !== 'win32' || !getForegroundWindowFn) return
   try {
     const fg = getForegroundWindowFn()
@@ -234,6 +241,7 @@ export function captureExternalForeground(): void {
 
 /** True when OUR window currently holds the OS foreground (search typing). */
 export function holdsOwnForeground(): boolean {
+  if (process.platform === 'darwin') return weAreFrontmost()
   if (process.platform !== 'win32' || !getForegroundWindowFn) return false
   if (!mainWindow || mainWindow.isDestroyed()) return false
   try {
@@ -299,6 +307,7 @@ export async function restoreFgAwaited(target: number | bigint, tag: string): Pr
  * Verified handoff to the captured app. Thin wrapper over restoreFgAwaited.
  */
 export function restoreExternalFocusAwaited(): Promise<boolean> {
+  if (process.platform === 'darwin') return Promise.resolve(activatePid(lastExternalPid))
   return restoreFgAwaited(lastExternalForeground, 'restore')
 }
 
@@ -317,14 +326,13 @@ export function restoreExternalFocusAwaited(): Promise<boolean> {
 export async function resolvePasteTarget(normalDelayMs: number): Promise<number> {
   if (process.platform === 'darwin') {
     try {
-      if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isFocused()) {
-        setWindowFocusable(false)
-        app.hide()
-        await new Promise((r) => setTimeout(r, 160))
-        return 60
-      }
-    } catch { /* ignore */ }
-    return normalDelayMs
+      if (!weAreFrontmost()) return normalDelayMs
+      setWindowFocusable(false)
+      await new Promise((r) => setTimeout(r, 150))
+      return weAreFrontmost() ? -1 : 80
+    } catch {
+      return normalDelayMs
+    }
   }
   if (process.platform !== 'win32') return normalDelayMs
   try {
@@ -759,7 +767,7 @@ export function createWindow(): BrowserWindow {
     skipTaskbar: true,
     alwaysOnTop: true,
     focusable: false,
-    ...(process.platform === 'darwin' ? { type: 'panel' as const, visibleOnAllWorkspaces: true } : {}),
+    ...(process.platform === 'darwin' ? { type: 'panel' as const } : {}),
     backgroundColor: '#00000000',
     roundedCorners: false,
     webPreferences: {
@@ -770,6 +778,10 @@ export function createWindow(): BrowserWindow {
       spellcheck: false
     }
   })
+
+  if (process.platform === 'darwin') {
+    try { mainWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true }) } catch { /* ignore */ }
+  }
 
   // Start click-through with no forwarding — edge detection is done via cursor poll.
   mainWindow.setIgnoreMouseEvents(true, { forward: false })
@@ -1097,6 +1109,23 @@ export function setVisible(visible: boolean): void {
 }
 
 export function setWindowFocusable(focusable: boolean): void {
+  if (process.platform === 'darwin' && mainWindow && !mainWindow.isDestroyed()) {
+    try {
+      if (focusable) {
+        const pid = frontmostPid()
+        if (pid && pid !== process.pid) lastExternalPid = pid
+        mainWindow.setFocusable(true)
+        focusabilityApplied = true
+        app.focus({ steal: true })
+        mainWindow.focus()
+      } else {
+        mainWindow.setFocusable(false)
+        focusabilityApplied = false
+        if (weAreFrontmost() && lastExternalPid) activatePid(lastExternalPid)
+      }
+    } catch { /* ignore */ }
+    return
+  }
   if (mainWindow && !mainWindow.isDestroyed()) {
     try {
       // Skip redundant native writes: even "no-op" style/focusability calls

@@ -65,6 +65,18 @@ export function isTaskbarLightTheme(): boolean {
 
 /** Resolves the appropriate 32x32 tray icon based on the current taskbar theme. */
 export function getTrayImage(): Electron.NativeImage {
+  if (process.platform === 'darwin') {
+    // macOS menu bar: 18pt template image (black glyph, auto-tinted by the OS).
+    const p = existsSync(PATHS.trayDarkIcon()) ? PATHS.trayDarkIcon() : PATHS.trayIcon()
+    const src = nativeImage.createFromPath(p)
+    if (!src.isEmpty()) {
+      const img = nativeImage.createEmpty()
+      img.addRepresentation({ scaleFactor: 1, buffer: src.resize({ width: 18, height: 18, quality: 'best' }).toPNG() })
+      img.addRepresentation({ scaleFactor: 2, buffer: src.resize({ width: 36, height: 36, quality: 'best' }).toPNG() })
+      img.setTemplateImage(true)
+      return img
+    }
+  }
   const isLight = isTaskbarLightTheme()
   const preferredPath = isLight ? PATHS.trayDarkIcon() : PATHS.trayIcon()
   const fallbackPath = PATHS.trayIcon()

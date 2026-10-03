@@ -81,7 +81,23 @@ export function t(path: string, params?: Record<string, string | number>): strin
     }
   }
 
-  return val
+  return IS_MAC ? macify(val) : val
+}
+
+const IS_MAC = (() => {
+  const g = globalThis as any
+  if (g.process && g.process.platform) return g.process.platform === 'darwin'
+  const nav = g.navigator
+  return !!nav && /Mac/i.test(nav.platform || nav.userAgent || '')
+})()
+
+/** Rewrite Windows-specific wording/shortcuts for macOS users. */
+export function macify(s: string): string {
+  return s
+    .replace(/Ctrl\s*\+\s*/g, '⌘')
+    .replace(/Alt\s*\+\s*/g, '⌥')
+    .replace(/Win\s*\+\s*V/g, '⌘V')
+    .replace(/Explorer/g, 'Finder')
 }
 
 /**

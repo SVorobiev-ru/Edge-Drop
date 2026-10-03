@@ -1,3 +1,4 @@
+import { app } from 'electron'
 /**
  * Central runtime state & renderer notification hub.
  *
@@ -72,6 +73,7 @@ export function initState(): void {
     }
   }
   watcher.start((data, png) => {
+    if (!app.isPackaged) console.log('[Capture]', data.kind, data.kind === 'files' ? (data.paths ?? []).length + ' file(s)' : '')
     if (loadSettings().incognito) return
     store.pruneExpired(loadSettings().autoDeleteHours)
     if (data.kind === 'image' && png && data.imageId) {
