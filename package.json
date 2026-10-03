@@ -19,7 +19,8 @@
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json --composite false",
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
-    "test": "vitest run"
+    "test": "vitest run",
+    "build:mac": "npm run build && electron-builder --mac dir"
   },
   "build": {
     "appId": "com.edgedrop.app",
@@ -49,10 +50,6 @@
       "!**/node_modules/koffi/doc/**"
     ],
     "extraResources": [
-      {
-        "from": "resources/startup/EdgeDropStartup.exe",
-        "to": "startup/EdgeDropStartup.exe"
-      },
       {
         "from": "node_modules/emoji-datasource-twitter/img/twitter/64",
         "to": "emoji/64"
@@ -84,7 +81,13 @@
           ]
         }
       ],
-      "icon": "resources/icon.ico"
+      "icon": "resources/icon.ico",
+      "extraResources": [
+        {
+          "from": "resources/startup/EdgeDropStartup.exe",
+          "to": "startup/EdgeDropStartup.exe"
+        }
+      ]
     },
     "nsis": {
       "oneClick": false,
@@ -106,6 +109,23 @@
         "internetClient"
       ],
       "customExtensionsPath": "resources/appx/startup-extensions.xml"
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dir",
+          "arch": [
+            "arm64"
+          ]
+        }
+      ],
+      "icon": "resources/icon.icns",
+      "category": "public.app-category.productivity",
+      "identity": null,
+      "extendInfo": {
+        "LSUIElement": true,
+        "NSAppleEventsUsageDescription": "Edge-Drop вставляет выбранный элемент в активное приложение."
+      }
     }
   },
   "devDependencies": {

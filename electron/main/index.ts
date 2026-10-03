@@ -91,6 +91,7 @@ app.on('before-quit', () => {
 })
 
 app.whenReady().then(() => {
+  if (process.platform === 'darwin') { try { app.dock?.hide() } catch { /* ignore */ } }
   // GitHub NSIS needs an explicit AUMID. Store packages already have one from
   // the AppX identity; overriding it breaks toasts and taskbar grouping.
   if (!isStoreBuild()) {
@@ -147,7 +148,7 @@ app.whenReady().then(() => {
   registerIncognitoApplier((v) => getWatcher().setPaused(v))
   getWatcher().setPaused(settings.incognito)
   pushState.settings(settings)
-  initAutoUpdater()
+  if (process.platform !== 'darwin') initAutoUpdater()
 
   // Keep the tray checkmarks in sync after settings change from the UI.
   // (Tray menu is rebuilt on each open, so no extra wiring is needed here.)

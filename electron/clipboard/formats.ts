@@ -39,6 +39,28 @@ import { isStoreBuild } from '../main/config'
 
 const execFileAsync = promisify(execFile)
 
+
+/** macOS: list of file paths currently on the pasteboard (Finder copy). */
+function macFilePaths(): string[] | null {
+  if (process.platform !== 'darwin') return null
+  try {
+    const plist = clipboard.read('NSFilenamesPboardType')
+    if (plist) {
+      const paths = Array.from(plist.matchAll(/<string>([\s\S]*?)<\/string>/g)).map((m) =>
+        m[1].replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'")
+      )
+      if (paths.length) return paths
+    }
+    const url = clipboard.read('public.file-url')
+    if (url && url.startsWith('file://')) {
+      return [decodeURIComponent(url.replace(/^file:\/\//, '').replace(/^localhost/, ''))]
+    }
+  } catch {
+    /* ignore */
+  }
+  return null
+}
+
 /** Windows clipboard format name for a copied-file list. */
 export const CF_FILE_LIST = 'FileNameW'
 
@@ -52,6 +74,12 @@ export const CF_FILE_LIST = 'FileNameW'
  * is unavailable or times out.
  */
 async function readFileListAsync(): Promise<string[] | null> {
+  if (process.platform === 'darwin') {
+    const mp = macFilePaths()
+    if (!mp) return null
+    const valid = filterValidPaths(mp)
+    return valid.length ? valid : null
+  }
   try {
     // First, confirm there is actually a file list on the clipboard before
     // spawning a process.  FileNameW being present is sufficient signal.
@@ -96,6 +124,7 @@ async function readFileListAsync(): Promise<string[] | null> {
 
 /** Fast, non-blocking check of FileNameW contents for clipboard signatures. */
 function readFileListFast(): string[] | null {
+  if (process.platform === 'darwin') return macFilePaths()
   try {
     const buf = clipboard.readBuffer(CF_FILE_LIST)
     if (!buf || buf.length < 4) return null
@@ -115,6 +144,7 @@ function readFileListFast(): string[] | null {
  * retrigger Explorer's delayed-render pipeline.
  */
 export function clipboardHasFileNameW(): boolean {
+  if (process.platform === 'darwin') return !!macFilePaths()
   try {
     const buf = clipboard.readBuffer(CF_FILE_LIST)
     return !!(buf && buf.length >= 4)
@@ -136,6 +166,10 @@ export function clipboardHasFileNameW(): boolean {
  * the last capture and ignores that flush.
  */
 export function clipboardFilesContentKey(): string | null {
+  if (process.platform === 'darwin') {
+    const mp = macFilePaths()
+    return mp ? `files|${mp.join('\n')}` : null
+  }
   try {
     const buf = clipboard.readBuffer(CF_FILE_LIST)
     if (!buf || buf.length < 4) return null

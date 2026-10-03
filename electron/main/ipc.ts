@@ -55,6 +55,12 @@ function toast(message: string, tone: 'info' | 'error' = 'info', params?: Record
 
 /** Simulate pressing Ctrl+V via PowerShell after returning focus to the previous active window. */
 function simulatePaste(): void {
+  if (process.platform === 'darwin') {
+    execFile('osascript', ['-e', 'tell application "System Events" to keystroke "v" using command down'], (err) => {
+      if (err) console.error('[Main] simulatePaste (macOS) failed — grant Accessibility permission:', err)
+    })
+    return
+  }
   if (process.platform === 'win32') {
     // Run via the persistent powershell host for near-zero latency (no process spawn overhead)
     psHost.run("Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('^v')", 2000)
@@ -105,6 +111,17 @@ async function writeFileListToClipboard(rawPaths: string[]): Promise<boolean> {
       return true
     } catch (err) {
       console.error('[ipc] writeFileListToClipboard PowerShell failed, using text fallback:', err)
+    }
+  }
+  if (process.platform === 'darwin') {
+    try {
+      const jxa = "function run(argv){ObjC.import('AppKit');var pb=$.NSPasteboard.generalPasteboard;pb.clearContents;var a=$.NSMutableArray.array;argv.forEach(function(p){a.addObject($.NSURL.fileURLWithPath(p))});return pb.writeObjects(a)}"
+      await new Promise<void>((resolve, reject) => {
+        execFile('osascript', ['-l', 'JavaScript', '-e', jxa, ...validPaths], { timeout: 3000 }, (err) => (err ? reject(err) : resolve()))
+      })
+      return true
+    } catch (err) {
+      console.error('[ipc] writeFileListToClipboard (macOS) failed, using text fallback:', err)
     }
   }
   // Non-Windows / PowerShell failure fallback: plain text paths (best-effort)

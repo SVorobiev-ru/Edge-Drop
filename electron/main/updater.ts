@@ -28,7 +28,7 @@ export function clearCachedUpdateState(): void {
  * Called from ipc.ts when the renderer clicks "Restart to Update".
  */
 export function quitAndInstallUpdate(): void {
-  if (isStoreBuild()) return
+  if (isStoreBuild() || process.platform === 'darwin') return
   if (!_autoUpdater) {
     console.error('[AutoUpdater] quitAndInstall requested but autoUpdater is not initialized.')
     return
@@ -64,7 +64,7 @@ let bgCheckTimer: ReturnType<typeof setTimeout> | null = null
  * off stays fully network-silent.
  */
 export function triggerBackgroundCheck(delayMs = 3000): void {
-  if (isStoreBuild()) return
+  if (isStoreBuild() || process.platform === 'darwin') return
   if (bgCheckTimer !== null) {
     clearTimeout(bgCheckTimer)
     bgCheckTimer = null
@@ -157,7 +157,7 @@ function checkGitHubReleaseFast(): Promise<{ tag_name?: string } | null> {
  * Manually check for updates on user click with instant fast-path resolution.
  */
 export async function checkForUpdatesManual(): Promise<{ status: string; version?: string; error?: string }> {
-  if (isStoreBuild()) {
+  if (isStoreBuild() || process.platform === 'darwin') {
     return { status: 'up-to-date', version: app.getVersion() }
   }
 
@@ -220,7 +220,7 @@ export async function checkForUpdatesManual(): Promise<{ status: string; version
  * Trigger download of the update when user clicks "Download & Update" in manual mode.
  */
 export async function startUpdateDownload(): Promise<void> {
-  if (isStoreBuild()) return
+  if (isStoreBuild() || process.platform === 'darwin') return
   if (!_autoUpdater) {
     try {
       const { autoUpdater } = require('electron-updater')
@@ -254,7 +254,7 @@ export async function startUpdateDownload(): Promise<void> {
  * Completely disabled on Microsoft Store (MSIX) builds to comply with Store policies.
  */
 export function initAutoUpdater(): void {
-  if (isStoreBuild()) {
+  if (isStoreBuild() || process.platform === 'darwin') {
     console.log('[AutoUpdater] Store build detected — auto-updater disabled.')
     return
   }

@@ -315,6 +315,17 @@ export function restoreExternalFocusAwaited(): Promise<boolean> {
  *   longer settle on success, -1 on failure.
  */
 export async function resolvePasteTarget(normalDelayMs: number): Promise<number> {
+  if (process.platform === 'darwin') {
+    try {
+      if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isFocused()) {
+        setWindowFocusable(false)
+        app.hide()
+        await new Promise((r) => setTimeout(r, 160))
+        return 60
+      }
+    } catch { /* ignore */ }
+    return normalDelayMs
+  }
   if (process.platform !== 'win32') return normalDelayMs
   try {
     if (!holdsOwnForeground()) return normalDelayMs
@@ -748,6 +759,7 @@ export function createWindow(): BrowserWindow {
     skipTaskbar: true,
     alwaysOnTop: true,
     focusable: false,
+    ...(process.platform === 'darwin' ? { type: 'panel' as const, visibleOnAllWorkspaces: true } : {}),
     backgroundColor: '#00000000',
     roundedCorners: false,
     webPreferences: {
