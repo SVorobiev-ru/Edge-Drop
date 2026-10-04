@@ -248,7 +248,7 @@ function applyMacLaunchAtLogin(wantLaunch: boolean): LaunchAtLoginResult {
     console.error('[LoginItems] macOS setLoginItemSettings failed:', err)
   }
   const read = readMacLaunchAtLogin()
-  return { ...read, ok: read.enabled === wantLaunch || read.blockedByUser }
+  return { ...read, ok: read.ok && (read.enabled === wantLaunch || read.blockedByUser) }
 }
 
 export function readGithubLaunchAtLogin(): LaunchAtLoginResult {
@@ -433,7 +433,7 @@ export async function applyLaunchAtLogin(wantLaunch: boolean): Promise<LaunchAtL
     }
     try {
       const result = applyGithubLaunchAtLogin(wantLaunch)
-      if (wantLaunch) return result
+      if (wantLaunch || process.platform === 'darwin') return result
       return { ...result, ok: !result.enabled }
     } catch (err) {
       console.error('[LoginItems] GitHub Run-key update failed:', err)
@@ -454,7 +454,7 @@ export async function reconcileLaunchAtLoginOnStartup(): Promise<Settings> {
   if (!os.ok) {
     // GitHub: even when the Electron query fails, a healthy raw key means
     // we are actually fine. Heal the quoting/stale path opportunistically.
-    if (settings.launchAtLogin && !isStoreBuild()) {
+    if (settings.launchAtLogin && !isStoreBuild() && process.platform !== 'darwin') {
       try {
         if (!isGithubRunKeyHealthy()) {
           applyGithubLaunchAtLogin(true)
@@ -463,7 +463,7 @@ export async function reconcileLaunchAtLoginOnStartup(): Promise<Settings> {
         /* ignore */
       }
     }
-    return settings
+    return loadSettings()
   }
 
   if (settings.launchAtLogin === false && os.enabled) {
@@ -485,7 +485,7 @@ export async function reconcileLaunchAtLoginOnStartup(): Promise<Settings> {
     if (applied.enabled !== settings.launchAtLogin) {
       return saveSettings({ launchAtLogin: applied.enabled })
     }
-    return settings
+    return loadSettings()
   }
 
   if (settings.launchAtLogin === true && !os.enabled) {
@@ -503,13 +503,13 @@ export async function reconcileLaunchAtLoginOnStartup(): Promise<Settings> {
       if (healed.blockedByUser) {
         return saveSettings({ launchAtLogin: false })
       }
-      return settings
+      return loadSettings()
     } catch {
-      return settings
+      return loadSettings()
     }
   }
 
-  if (settings.launchAtLogin && os.enabled && !isStoreBuild()) {
+  if (settings.launchAtLogin && os.enabled && !isStoreBuild() && process.platform !== 'darwin') {
     // Self-heal quoting / stale path / missing --hidden on every launch so
     // users updating from 0.3.0 (unquoted) get fixed without touching UI.
     try {

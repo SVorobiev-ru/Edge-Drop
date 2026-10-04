@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest'
 import { existsSync, readFileSync } from 'node:fs'
 
 const mocks = vi.hoisted(() => ({
@@ -60,6 +60,16 @@ vi.mock('electron', () => {
 import { PATHS } from '../electron/store/paths'
 import { isTaskbarLightTheme, getTrayImage } from '../electron/main/tray'
 import { nativeTheme } from 'electron'
+
+const platformDescriptor = Object.getOwnPropertyDescriptor(process, 'platform')!
+
+beforeAll(() => {
+  Object.defineProperty(process, 'platform', { value: 'win32' })
+})
+
+afterAll(() => {
+  Object.defineProperty(process, 'platform', platformDescriptor)
+})
 
 describe('Tray Icon Theme Adaptation (Issue #64)', () => {
   beforeEach(() => {

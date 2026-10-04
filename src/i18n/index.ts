@@ -1,5 +1,6 @@
 import { useStore } from '../store/appStore'
 import { LANGUAGES, TRANSLATIONS, en } from './translations'
+import { RTL_LANGUAGES, macify, resolveText } from '../../shared/platformText'
 
 /**
  * Resolves the active language code.
@@ -48,19 +49,6 @@ export function getResolvedLanguage(settingLang?: string): string {
 }
 
 /**
- * Retrieves a nested string property safely from a translation dictionary.
- */
-function getNestedProp(obj: any, path: string): string | undefined {
-  const parts = path.split('.')
-  let curr = obj
-  for (const part of parts) {
-    if (!curr || typeof curr !== 'object') return undefined
-    curr = curr[part]
-  }
-  return typeof curr === 'string' ? curr : undefined
-}
-
-/**
  * Main translation function.
  * E.g., t('header.searchPlaceholder')
  * E.g., t('behaviour.updateAvailableTitle', { version: '0.3.1' })
@@ -68,20 +56,7 @@ function getNestedProp(obj: any, path: string): string | undefined {
 export function t(path: string, params?: Record<string, string | number>): string {
   const settingsLang = useStore.getState().settings.language
   const langCode = getResolvedLanguage(settingsLang)
-  const dict = TRANSLATIONS[langCode]
-
-  let val = dict ? getNestedProp(dict, path) : undefined
-  if (!val) {
-    val = getNestedProp(en, path) || path
-  }
-
-  if (params) {
-    for (const [k, v] of Object.entries(params)) {
-      val = val.replace(new RegExp(`\\{${k}\\}`, 'g'), String(v))
-    }
-  }
-
-  return IS_MAC ? macify(val) : val
+  return resolveText(TRANSLATIONS[langCode], en, path, langCode, IS_MAC, params)
 }
 
 const IS_MAC = (() => {
@@ -91,14 +66,7 @@ const IS_MAC = (() => {
   return !!nav && /Mac/i.test(nav.platform || nav.userAgent || '')
 })()
 
-/** Rewrite Windows-specific wording/shortcuts for macOS users. */
-export function macify(s: string): string {
-  return s
-    .replace(/Ctrl\s*\+\s*/g, '⌘')
-    .replace(/Alt\s*\+\s*/g, '⌥')
-    .replace(/Win\s*\+\s*V/g, '⌘V')
-    .replace(/Explorer/g, 'Finder')
-}
+export { macify, RTL_LANGUAGES }
 
 /**
  * Hook that subscribes to settings.language changes and returns the translation function t.
@@ -110,7 +78,7 @@ export function useTranslation() {
   // Update text direction for RTL languages like Arabic, Persian & Hebrew
   const g = globalThis as any
   if (g.document && g.document.documentElement) {
-    const isRtl = resolvedLang === 'ar' || resolvedLang === 'fa' || resolvedLang === 'he'
+    const isRtl = RTL_LANGUAGES.includes(resolvedLang)
     g.document.documentElement.dir = isRtl ? 'rtl' : 'ltr'
   }
 

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
   version: '0.3.1',
@@ -38,6 +38,16 @@ import {
   startUpdateDownload,
   syncAutoUpdaterState
 } from '../electron/main/updater'
+
+const platformDescriptor = Object.getOwnPropertyDescriptor(process, 'platform')!
+
+beforeAll(() => {
+  Object.defineProperty(process, 'platform', { value: 'win32' })
+})
+
+afterAll(() => {
+  Object.defineProperty(process, 'platform', platformDescriptor)
+})
 
 function mockGithubRelease(tag: string, statusCode = 200): void {
   mocks.netRequest.mockImplementation(() => {

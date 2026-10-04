@@ -2,6 +2,7 @@ import { useStore } from '../store/appStore'
 import RubberSegment from './RubberSegment'
 import { GearIcon, CloseIcon, InfoIcon, ClockIcon, TypeIcon, LinkIcon, ImageIcon, FilesIcon, PaletteIcon, EmojiSmileIcon } from './icons'
 import { playButtonClickSound } from '../lib/soundEffects'
+import { CHANGELOG_URL } from '../lib/links'
 import { loadEmojiCatalog } from '../lib/emoji/load'
 import { ShelfSearch } from './ShelfSearch'
 import { EmojiCategoryBar } from './EmojiCategoryBar'
@@ -43,7 +44,7 @@ export function Header({ isHorizontal = false, itemCount, clearProps }: HeaderPr
     if (currentVersion) {
       patchSettings({ lastSeenChangelogVersion: currentVersion })
     }
-    window.open('https://www.edgedrop.app/changelog', '_blank')
+    window.open(CHANGELOG_URL, '_blank')
   }
 
   const typeFilter = useStore((s) => s.typeFilter)

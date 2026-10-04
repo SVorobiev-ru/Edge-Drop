@@ -170,7 +170,7 @@ describe('Store vs exe filesystem interop', () => {
       expect(readFileSync(dest, 'utf8')).toBe('real-png-bytes')
     })
 
-    it('copies files whose path is under Packages\\ (virtualized package root)', () => {
+    it.skipIf(process.platform !== 'win32')('copies files whose path is under Packages\\ (virtualized package root)', () => {
       const pkg = join(fsRoots.home, 'AppData', 'Local', 'Packages', 'Deepender.EdgeDrop_test', 'LocalCache', 'shot.png')
       mkdirSync(join(pkg, '..'), { recursive: true })
       writeFileSync(pkg, 'pkg-bytes')
@@ -180,7 +180,7 @@ describe('Store vs exe filesystem interop', () => {
       expect(readFileSync(dest, 'utf8')).toBe('pkg-bytes')
     })
 
-    it('copies files whose path is under WindowsApps\\', () => {
+    it.skipIf(process.platform !== 'win32')('copies files whose path is under WindowsApps\\', () => {
       const winapps = join(fsRoots.home, 'WindowsApps', 'Deepender.EdgeDrop', 'resources', 'icon.png')
       mkdirSync(join(winapps, '..'), { recursive: true })
       writeFileSync(winapps, 'icon')

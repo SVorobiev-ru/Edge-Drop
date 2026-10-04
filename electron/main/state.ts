@@ -1,4 +1,3 @@
-import { app } from 'electron'
 /**
  * Central runtime state & renderer notification hub.
  *
@@ -7,11 +6,12 @@ import { app } from 'electron'
  * here so there's one path that re-pushes the DTO list.
  */
 import { ItemStore } from '../store/ItemStore'
-import { ClipboardWatcher } from '../clipboard/ClipboardWatcher'
+import { ClipboardWatcher, stampCapturedImage } from '../clipboard/ClipboardWatcher'
+import { clipboardSequenceAvailable } from '../clipboard/formats'
 import { loadSettings, saveSettings } from '../store/settings'
-import type { ClipboardItemDto, Settings } from '../../shared/types'
+import type { ClipboardItemDto, ItemData, Settings } from '../../shared/types'
 import { MAX_STACK } from '../../shared/types'
-import { BrowserWindow, powerMonitor } from 'electron'
+import { BrowserWindow, nativeImage, powerMonitor } from 'electron'
 import { isStagedTempPath } from '../store/paths'
 import { prefetchFileIcons } from './drag'
 import { forgetStagedItems, reconcileTempOnStartup } from './stagedTemp'
@@ -19,7 +19,7 @@ import { runtime } from './config'
 import { getMainWindow, registerClipboardUpdateListener, requestPollBoost } from './window'
 
 const store = new ItemStore((removed) => forgetStagedItems(removed))
-const watcher = new ClipboardWatcher(600, 220)
+const watcher = new ClipboardWatcher(process.platform === 'darwin' && clipboardSequenceAvailable() ? 250 : 600, 220)
 let pruneTimer: ReturnType<typeof setInterval> | null = null
 let wakeTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -40,6 +40,38 @@ function handleSystemWake(): void {
     watcher.resyncSignature()
     watcher.setPaused(loadSettings().incognito)
   }, 1500)
+}
+
+function recordCapture(data: ItemData, png?: Buffer): void {
+  if (loadSettings().incognito) return
+  store.pruneExpired(loadSettings().autoDeleteHours)
+  if (data.kind === 'image' && png && data.imageId) {
+    store.stageImageBytes(data.imageId, png)
+    png = undefined as any
+  }
+  if (data.kind === 'files' && data.paths) {
+    prefetchFileIcons(data.paths)
+  }
+  store.add(data, loadSettings().historyLimit)
+  pushState.items()
+}
+
+export function addScreenshotToHistory(png: Buffer, fileName?: string): boolean {
+  if (loadSettings().incognito) return false
+  const size = nativeImage.createFromBuffer(png).getSize()
+  if (!size.width || !size.height) return false
+  const data: ItemData = {
+    kind: 'image',
+    imageId: '',
+    width: size.width,
+    height: size.height,
+    bytes: 0,
+    source: 'screenshot',
+    fileName
+  }
+  stampCapturedImage(data, png)
+  recordCapture(data, png)
+  return true
 }
 
 /** Initialize persistence + start the clipboard watcher. */
@@ -72,20 +104,7 @@ export function initState(): void {
       prefetchFileIcons(item.data.paths)
     }
   }
-  watcher.start((data, png) => {
-    if (!app.isPackaged) console.log('[Capture]', data.kind, data.kind === 'files' ? (data.paths ?? []).length + ' file(s)' : '')
-    if (loadSettings().incognito) return
-    store.pruneExpired(loadSettings().autoDeleteHours)
-    if (data.kind === 'image' && png && data.imageId) {
-      store.stageImageBytes(data.imageId, png)
-      png = undefined as any
-    }
-    if (data.kind === 'files' && data.paths) {
-      prefetchFileIcons(data.paths)
-    }
-    store.add(data, loadSettings().historyLimit)
-    pushState.items()
-  }, () => {
+  watcher.start(recordCapture, () => {
     if (loadSettings().incognito) return
     const win = getMainWindow()
     if (win && !win.isDestroyed()) {

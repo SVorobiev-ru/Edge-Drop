@@ -832,6 +832,10 @@ function isImageExt(p: string): boolean {
   return /\.(png|jpe?g|gif|webp|bmp|svg|avif|ico|tiff?|jfif|pjpeg|pjp)$/i.test(p)
 }
 
+function isPreviewableImage(p: string): boolean {
+  return isImageExt(p) || (process.platform === 'darwin' && /\.hei[cf]$/i.test(p))
+}
+
 /**
  * Build display metadata for a single file path. `size` is best-effort (0 when
  * the file can't be stat'd — e.g. a path on a disconnected drive); the renderer
@@ -847,6 +851,10 @@ function buildFileEntry(p: string): FileEntry {
     const st = statSync(p)
     size = st.size
     isDirectory = st.isDirectory()
+    if (isDirectory && process.platform === 'darwin' && /\.app\/*$/i.test(p)) {
+      isDirectory = false
+      size = 0
+    }
   } catch {
     /* file missing / unreadable — size stays 0 */
   }
@@ -856,7 +864,7 @@ function buildFileEntry(p: string): FileEntry {
     name,
     ext,
     size,
-    isImage: !isDirectory && isImageExt(p),
+    isImage: !isDirectory && isPreviewableImage(p),
     isDirectory
   }
   if (fileEntryCache.size > 500) fileEntryCache.clear()

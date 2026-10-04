@@ -5,7 +5,7 @@
  * renderer calls them through the typed preload bridge, so a signature mismatch
  * is a compile-time error rather than a runtime one.
  */
-import { app, ipcMain, clipboard, nativeImage, shell, net } from 'electron'
+import { app, ipcMain, clipboard, nativeImage, shell, net, screen, BrowserWindow, systemPreferences, Notification } from 'electron'
 import { existsSync } from 'node:fs'
 import { execFile } from 'node:child_process'
 import { psHost, getSystemPowerShellPath, getWritableCwd } from './powershell'
@@ -17,16 +17,24 @@ import { registerGlobalHotkey } from './index'
 import { getOnboardingWindow } from './onboardingWindow'
 import { rebuildTrayMenu } from './tray'
 import { startDragOut, resolveDragData, prestageDrag, stageDragFile } from './drag'
-import { clipboardSignature, formatTabularDataForClipboard, signatureMatchesItem } from '../clipboard/formats'
-import type { ClipboardItem, ItemData, MergeResult } from '../../shared/types'
+import { clipboardSignature, formatTabularDataForClipboard, signatureMatchesItem, localPathFromFileUrl } from '../clipboard/formats'
+import type { ClipboardItem, DragRequest, ItemData, MergeResult } from '../../shared/types'
 import { quitAndInstallUpdate, checkForUpdatesManual, startUpdateDownload, syncAutoUpdaterState, getCachedUpdateState, triggerBackgroundCheck } from './updater'
 import { createId } from '../store/ids'
 import { isStoreBuild } from './config'
 import { applyLaunchAtLogin, refreshLaunchAtLoginFromOs } from './loginItems'
-import { toUnpackagedFilePath, toUnpackagedFilePaths } from '../store/paths'
+import { PATHS, toUnpackagedFilePath, toUnpackagedFilePaths } from '../store/paths'
 import { isPasteableEmoji } from '../../shared/emoji'
+import { pressedMouseButtons, postCommandV, mouseButtonsAvailable, canPostEvents, requestPostEvents } from './macNative'
+import { TRANSLATIONS, en } from '../../src/i18n/translations'
+import { waitForMouseRelease } from './macDrag'
+import { refreshScreenshotWatcher } from './macScreenshots'
+import { writeFileUrls, addFileUrlToCurrentItem, addImageDataToFirstItem, pasteboardChangeCount } from './macPasteboard'
+import { resolveUiLanguage } from './language'
 
 export { isStoreBuild }
+
+let macNamedImageWrite: { src: string; named: string } | null = null
 
 /**
  * Returns true if the current system clipboard content matches the given item data.
@@ -45,7 +53,15 @@ function clipboardMatchesItem(item: ClipboardItem): boolean {
     item.data.kind === 'text' && item.data.hasFullPayload
       ? getStore().getFullText(item.id)
       : undefined
-  return signatureMatchesItem(clipboardSignature(), item.data, fullText)
+  const sig = clipboardSignature()
+  if (process.platform === 'darwin' && macNamedImageWrite && sig.replace(/^seq:\d+:/, '') === `files:${macNamedImageWrite.named}`) {
+    const image = item.data.kind === 'image' ? item.data : item.data.kind === 'image-collection' ? item.data.images[0] : null
+    if (image) {
+      const src = getStore().resolveStoredImagePath(image.imageId, image.ext)
+      return !!src && toUnpackagedFilePath(src) === macNamedImageWrite.src
+    }
+  }
+  return signatureMatchesItem(sig, item.data, fullText)
 }
 
 /** Fire a transient toast to the renderer (best-effort; renderer may be closed). Message is a translation key resolved renderer-side; params fill {placeholders}. */
@@ -53,11 +69,73 @@ function toast(message: string, tone: 'info' | 'error' = 'info', params?: Record
   sendToMainWindow('ui:toast', { id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, message, tone, params })
 }
 
+const ACCESSIBILITY_SETTINGS_URL = 'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility'
+let accessibilityNoticeShown = false
+const accessibilityNotifications = new Set<Notification>()
+let accessibilityPrompted = false
+
+function openAccessibilitySettings(): void {
+  shell.openExternal(ACCESSIBILITY_SETTINGS_URL).catch((err) => {
+    console.error('[Main] could not open Accessibility settings:', err)
+  })
+}
+
+function pasteAccessGranted(): boolean {
+  return systemPreferences.isTrustedAccessibilityClient(false) && canPostEvents()
+}
+
+function promptAccessibility(): boolean {
+  accessibilityPrompted = true
+  const trusted = systemPreferences.isTrustedAccessibilityClient(true)
+  const canPost = requestPostEvents()
+  return trusted && canPost
+}
+
+function accessibilityDialogText(key: keyof NonNullable<typeof en['accessibilityDialog']>): string {
+  const lang = resolveUiLanguage(loadSettings().language)
+  return TRANSLATIONS[lang]?.accessibilityDialog?.[key] || en.accessibilityDialog?.[key] || key
+}
+
+function showAccessibilityNotification(): boolean {
+  try {
+    if (!Notification.isSupported()) return false
+    const notification = new Notification({
+      title: accessibilityDialogText('title'),
+      body: accessibilityDialogText('body'),
+      icon: PATHS.icon()
+    })
+    notification.on('click', () => {
+      openAccessibilitySettings()
+    })
+    notification.on('close', () => {
+      accessibilityNotifications.delete(notification)
+    })
+    accessibilityNotifications.add(notification)
+    notification.show()
+    return true
+  } catch (err) {
+    console.error('[Main] accessibility notification failed:', err)
+    return false
+  }
+}
+
 /** Simulate pressing Ctrl+V via PowerShell after returning focus to the previous active window. */
-function simulatePaste(): void {
+export function simulatePaste(): void {
   if (process.platform === 'darwin') {
-    execFile('osascript', ['-e', 'tell application "System Events" to keystroke "v" using command down'], (err) => {
-      if (err) console.error('[Main] simulatePaste (macOS) failed — grant Accessibility permission:', err)
+    if (!pasteAccessGranted()) {
+      toast('toast.pasteNeedsAccessibility', 'info')
+      if (accessibilityNoticeShown) return
+      accessibilityNoticeShown = true
+      promptAccessibility()
+      showAccessibilityNotification()
+      return
+    }
+    if (postCommandV()) return
+    execFile('osascript', ['-e', 'tell application "System Events" to key code 9 using command down'], (err) => {
+      if (err) {
+        console.error('[Main] simulatePaste (macOS) failed — grant Accessibility permission:', err)
+        toast('toast.pasteNeedsAccessibility', 'info')
+      }
     })
     return
   }
@@ -114,11 +192,13 @@ async function writeFileListToClipboard(rawPaths: string[]): Promise<boolean> {
     }
   }
   if (process.platform === 'darwin') {
+    if (writeFileUrls(validPaths)) return true
     try {
-      const jxa = "function run(argv){ObjC.import('AppKit');var pb=$.NSPasteboard.generalPasteboard;pb.clearContents;var a=$.NSMutableArray.array;argv.forEach(function(p){a.addObject($.NSURL.fileURLWithPath(p))});return pb.writeObjects(a)}"
-      await new Promise<void>((resolve, reject) => {
-        execFile('osascript', ['-l', 'JavaScript', '-e', jxa, ...validPaths], { timeout: 3000 }, (err) => (err ? reject(err) : resolve()))
+      const jxa = "function run(argv){ObjC.import('AppKit');var pb=$.NSPasteboard.generalPasteboard;pb.clearContents;var a=$.NSMutableArray.array;argv.forEach(function(p){a.addObject($.NSURL.fileURLWithPath(p))});return pb.writeObjects(a)&&pb.pasteboardItems.count==argv.length}"
+      const out = await new Promise<string>((resolve, reject) => {
+        execFile('osascript', ['-l', 'JavaScript', '-e', jxa, ...validPaths], { timeout: 3000 }, (err, stdout) => (err ? reject(err) : resolve(String(stdout ?? ''))))
       })
+      if (out.trim() !== 'true') throw new Error(`pasteboard does not hold all ${validPaths.length} files`)
       return true
     } catch (err) {
       console.error('[ipc] writeFileListToClipboard (macOS) failed, using text fallback:', err)
@@ -153,11 +233,33 @@ export async function writeImageToClipboard(imagePath: string | null): Promise<b
   return false
 }
 
+function addFirstImageToMacFileList(imagePath: string): boolean {
+  try {
+    const img = nativeImage.createFromPath(imagePath)
+    if (img.isEmpty()) return false
+    if (addImageDataToFirstItem(img.toPNG(), pasteboardChangeCount())) return true
+    console.error('[ipc] image-collection clipboard write (macOS) could not add the first image:', imagePath)
+  } catch (err) {
+    console.error('[ipc] image-collection clipboard write (macOS) failed to add the first image:', err)
+  }
+  return false
+}
+
 /**
  * Bitmap for apps that read CF_DIB, plus a named file so Explorer paste keeps
  * our friendly filename. Atomic multi-format write via PowerShell DataObject.
  */
 async function writeImageWithNamedFile(imagePath: string, namedPath: string): Promise<boolean> {
+  if (process.platform === 'darwin') {
+    macNamedImageWrite = null
+    if (!(await writeImageToClipboard(imagePath))) return false
+    if (addFileUrlToCurrentItem(namedPath, pasteboardChangeCount())) {
+      macNamedImageWrite = { src: imagePath, named: namedPath }
+    } else {
+      console.error('[ipc] writeImageWithNamedFile (macOS) could not add the file reference:', namedPath)
+    }
+    return true
+  }
   if (process.platform !== 'win32') return false
   try {
     const b64Img = Buffer.from(imagePath, 'utf8').toString('base64')
@@ -599,7 +701,13 @@ export function registerIpc(): void {
 
     if (data.kind === 'image' && (data as any).imageUrl) {
       const imageUrl = (data as any).imageUrl as string
-      if (/^file:/i.test(imageUrl)) {
+      if (/^file:/i.test(imageUrl) && process.platform !== 'win32') {
+        const posixPath = localPathFromFileUrl(imageUrl)
+        if (posixPath) {
+          addFiles([posixPath])
+          return getStore().toDto()
+        }
+      } else if (/^file:/i.test(imageUrl)) {
         const local = imageUrl.replace(/^file:\/\//i, '').replace(/^\/([a-zA-Z]:)/, '$1')
         try {
           const decoded = decodeURIComponent(local).replace(/\//g, '\\')
@@ -732,6 +840,9 @@ export function registerIpc(): void {
     if (patch.toggleHotkey !== undefined) {
       registerGlobalHotkey(patch.toggleHotkey)
     }
+    if (patch.captureScreenshots !== undefined) {
+      refreshScreenshotWatcher()
+    }
     pushState.settings(next)
     rebuildTrayMenu()
     return next
@@ -783,6 +894,26 @@ export function registerIpc(): void {
   handle('displays:list', () => {
     return getDisplayListOptions()
   })
+
+  handle('accessibility:status', () => {
+    if (process.platform !== 'darwin') return null
+    return pasteAccessGranted()
+  })
+
+  handle('accessibility:request', () => {
+    if (process.platform !== 'darwin') return null
+    if (!accessibilityPrompted) {
+      const granted = promptAccessibility()
+      if (!granted) openAccessibilitySettings()
+      return granted
+    }
+    const granted = pasteAccessGranted()
+    if (!granted) {
+      requestPostEvents()
+      openAccessibilitySettings()
+    }
+    return granted
+  })
 }
 
 /**
@@ -799,6 +930,44 @@ function on<C extends SendChannel>(
 ): void {
   ipcMain.on(channel, (event, ...args) => fn(event.sender, ...(args as SendMap[C]['args'])))
 }
+
+export function finishDragOut(sender: Electron.WebContents, req: DragRequest, dragStarted: boolean, isWholeItemDrag: boolean): void {
+  const isMac = process.platform === 'darwin'
+  console.log(isMac ? '[IPC] drag finished, sending drag-end' : '[IPC] start-drag returned, sending drag-end')
+  sender.send('item:drag-end')
+
+  // Re-enable the heartbeat now that the drag is over.
+  if (!isMac) setHeartbeatPaused(false)
+
+  // Check if the user dropped the item back onto our window!
+  const point = screen.getCursorScreenPoint()
+  const win = BrowserWindow.fromWebContents(sender)
+  let isInside = false
+  if (win && !win.isDestroyed()) {
+    const bounds = win.getBounds()
+    isInside = point.x >= bounds.x && point.x <= bounds.x + bounds.width &&
+               point.y >= bounds.y && point.y <= bounds.y + bounds.height
+    if (isInside) {
+      console.log(`[IPC] Drag ended inside window! Triggering internal-drop at x=${point.x - bounds.x}, y=${point.y - bounds.y}`)
+      sender.send('item:internal-drop', { x: point.x - bounds.x, y: point.y - bounds.y })
+    }
+  }
+
+  if (dragStarted && isWholeItemDrag && !isInside) {
+    // Usage accounting parity with click-to-paste: a whole-item drag counts
+    // as a use ONLY when successfully dropped outside into another application.
+    // Dropping back onto the shelf or cancelling does not bump hitCount.
+    if (loadSettings().movePastedToTop !== false && getStore().get(req.id)) {
+      getStore().touch(req.id)
+    }
+    // 'usage' reason: this push is bookkeeping from a manual drag-out, so
+    // the renderer must NOT flash the capture copy-indicator for it.
+    pushState.items({ reason: 'usage' })
+  }
+}
+
+let dragGeneration = 0
+let mouseBridgeWarned = false
 
 export function registerSendListeners(): void {
   on('item:start-drag', (sender, req) => {
@@ -817,46 +986,45 @@ export function registerSendListeners(): void {
     // (one file out of a bundle, one image out of a collection) deliberately
     // do not reorder history - same rule as item:paste-subitem.
     const isWholeItemDrag = !(req.paths && req.paths.length > 0) && !req.imageId
+    const isMac = process.platform === 'darwin'
 
     // Pause the always-on-top heartbeat for the duration of the drag.
     // The heartbeat fires SetWindowPos(HWND_TOPMOST) every 500 ms, which
     // pushes our window in front of the DWM drag-ghost image — making the
     // dragged item appear to vanish ~0.5 s into any drag gesture.
-    setHeartbeatPaused(true)
+    if (!isMac) setHeartbeatPaused(true)
 
+    const generation = ++dragGeneration
     const dragStarted = startDragOut(sender, data, capturedAt, subIndex)
-    console.log('[IPC] start-drag returned, sending drag-end')
-    sender.send('item:drag-end')
-
-    // Re-enable the heartbeat now that the drag is over.
-    setHeartbeatPaused(false)
-
-    // Check if the user dropped the item back onto our window!
-    const { screen, BrowserWindow } = require('electron')
-    const point = screen.getCursorScreenPoint()
-    const win = BrowserWindow.fromWebContents(sender)
-    let isInside = false
-    if (win && !win.isDestroyed()) {
-      const bounds = win.getBounds()
-      isInside = point.x >= bounds.x && point.x <= bounds.x + bounds.width &&
-                 point.y >= bounds.y && point.y <= bounds.y + bounds.height
-      if (isInside) {
-        console.log(`[IPC] Drag ended inside window! Triggering internal-drop at x=${point.x - bounds.x}, y=${point.y - bounds.y}`)
-        sender.send('item:internal-drop', { x: point.x - bounds.x, y: point.y - bounds.y })
-      }
+    if (!isMac || !dragStarted) {
+      finishDragOut(sender, req, dragStarted, isWholeItemDrag)
+      return
     }
-
-    if (dragStarted && isWholeItemDrag && !isInside) {
-      // Usage accounting parity with click-to-paste: a whole-item drag counts
-      // as a use ONLY when successfully dropped outside into another application.
-      // Dropping back onto the shelf or cancelling does not bump hitCount.
-      if (loadSettings().movePastedToTop !== false && getStore().get(req.id)) {
-        getStore().touch(req.id)
+    if (!mouseButtonsAvailable()) {
+      if (!mouseBridgeWarned) {
+        mouseBridgeWarned = true
+        console.warn('[IPC] start-drag: mouse button state is unavailable (ObjC bridge not loaded), sending drag-end only')
       }
-      // 'usage' reason: this push is bookkeeping from a manual drag-out, so
-      // the renderer must NOT flash the capture copy-indicator for it.
-      pushState.items({ reason: 'usage' })
+      sender.send('item:drag-end')
+      return
     }
+    waitForMouseRelease(pressedMouseButtons).then((result) => {
+      if (generation !== dragGeneration || sender.isDestroyed()) return
+      if (result === 'timeout') {
+        console.warn('[IPC] start-drag: mouse release wait timed out, sending drag-end only')
+        sender.send('item:drag-end')
+        return
+      }
+      finishDragOut(sender, req, dragStarted, isWholeItemDrag)
+    }).catch((err) => {
+      console.error('[IPC] start-drag: drag completion failed:', err)
+      if (generation !== dragGeneration) return
+      try {
+        if (!sender.isDestroyed()) sender.send('item:drag-end')
+      } catch (sendErr) {
+        console.error('[IPC] start-drag: could not send drag-end after failure:', sendErr)
+      }
+    })
   })
 
   on('item:prestage-drag', (_sender, req) => {
@@ -924,6 +1092,12 @@ export async function writeItemToClipboard(data: ItemData, capturedAt?: number):
         // No bitmap recoverable — the surviving named file references are
         // still perfectly valid for Explorer-style targets.
         return writeFileListToClipboard(stagedFiles)
+      }
+
+      if (process.platform === 'darwin') {
+        if (!(await writeFileListToClipboard(stagedFiles))) return false
+        addFirstImageToMacFileList(toUnpackagedFilePath(firstSrc))
+        return true
       }
 
       // Multi-file: all pretty-named refs + first image as bitmap.

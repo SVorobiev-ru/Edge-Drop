@@ -3,6 +3,13 @@
  */
 import { t, getResolvedLanguage } from '../i18n'
 
+export const IS_MAC = (() => {
+  const g = globalThis as any
+  if (g.process && g.process.platform) return g.process.platform === 'darwin'
+  const nav = g.navigator
+  return !!nav && /Mac/i.test(nav.platform || nav.userAgent || '')
+})()
+
 /** Truncate long text for list previews. */
 export function previewText(text: string, max = 160): string {
   if (!text) return ''
@@ -93,6 +100,17 @@ export function formatImageDisplayName(
 
 /** Is this a path to an image (by extension)? */
 const IMG_EXT = /\.(png|jpe?g|gif|webp|bmp|svg|avif|ico|tiff?|jfif|pjpeg|pjp)$/i
+const HEIC_EXT = /\.hei[cf]$/i
 export function isImagePath(p: string): boolean {
-  return IMG_EXT.test(p)
+  return IMG_EXT.test(p) || (IS_MAC && HEIC_EXT.test(p))
+}
+
+const WINDOWS_PATH = /^(?:[a-z]:[\\/]|\\\\)/i
+
+export function toUrlPath(p: string): string {
+  return WINDOWS_PATH.test(p) ? p.replace(/\\/g, '/') : p
+}
+
+export function fileStreamUrl(filePath: string): string {
+  return `edgelocal://file/${encodeURIComponent(toUrlPath(filePath))}`
 }

@@ -11,23 +11,24 @@
 import { app, BrowserWindow, protocol, session } from 'electron'
 import { APP_CONFIG, runtime } from './config'
 import { ensureDirs, PATHS } from '../store/paths'
-import { createWindow, getMainWindow, setInteractive, setVisible, startCursorPoll, stopCursorPoll, stopHeartbeat, setHotZoneWidth, registerTaskbarCreatedListener } from './window'
+import { createWindow, getMainWindow, setInteractive, markExplicitOpen, setVisible, startCursorPoll, stopCursorPoll, stopHeartbeat, setHotZoneWidth, registerTaskbarCreatedListener } from './window'
 import { createTray, registerIncognitoApplier, refreshTray } from './tray'
 import { registerIpc, registerSendListeners } from './ipc'
 import { reconcileLaunchAtLoginOnStartup } from './loginItems'
 import { isStoreBuild, shouldStartHidden } from './config'
 import { prewarmDragIcons } from './drag'
-import { initState, getWatcher, loadSettings, saveSettings, pushState, stopStateTimers, getStore } from './state'
+import { initState, getWatcher, loadSettings, saveSettings, pushState, stopStateTimers, getStore, addScreenshotToHistory } from './state'
 import { initAutoUpdater } from './updater'
-import { startScreenshotWatcher } from './macScreenshots'
+import { startScreenshotWatcher, stopScreenshotWatcher } from './macScreenshots'
 import { createOnboardingWindow } from './onboardingWindow'
+import { installMacAppMenu } from './macAppMenu'
 import { startFullscreenMonitor, stopFullscreenMonitor, triggerFullscreenCheck } from './fullscreen'
 import { flushStagedTempRegistry } from './stagedTemp'
 import { extname, normalize } from 'node:path'
 import { existsSync, createReadStream } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { resolveStoredImage, resolveEmojiAsset, emojiAssetDir } from './imageProtocol'
-import { getThumbnailPayload, thumbnailCacheControl } from './thumbnailCache'
+import { getThumbnailPayloadAsync, thumbnailCacheControl, isMacHeicPath, getHeicPreviewPng } from './thumbnailCache'
 
 // Edge-Drop renders a small, mostly static transparent panel. Chromium's GPU
 // process costs substantially more memory (~150–250 MB) than the iGPU compositing
@@ -78,6 +79,7 @@ app.on('before-quit', () => {
   stopHeartbeat()
   stopStateTimers()
   stopFullscreenMonitor()
+  stopScreenshotWatcher()
   getWatcher().stop()
   try {
     getStore().persistSync()
@@ -93,6 +95,7 @@ app.on('before-quit', () => {
 
 app.whenReady().then(() => {
   if (process.platform === 'darwin') { try { app.dock?.hide() } catch { /* ignore */ } }
+  installMacAppMenu()
   // GitHub NSIS needs an explicit AUMID. Store packages already have one from
   // the AppX identity; overriding it breaks toasts and taskbar grouping.
   if (!isStoreBuild()) {
@@ -149,8 +152,8 @@ app.whenReady().then(() => {
   registerIncognitoApplier((v) => getWatcher().setPaused(v))
   getWatcher().setPaused(settings.incognito)
   pushState.settings(settings)
-  if (process.platform !== 'darwin') initAutoUpdater()
-  if (process.platform === 'darwin') startScreenshotWatcher()
+  initAutoUpdater()
+  if (process.platform === 'darwin') startScreenshotWatcher(addScreenshotToHistory, () => loadSettings().captureScreenshots !== false)
 
   // Keep the tray checkmarks in sync after settings change from the UI.
   // (Tray menu is rebuilt on each open, so no extra wiring is needed here.)
@@ -207,6 +210,17 @@ function registerImageProtocol(): void {
         const rawPath = request.url.slice(`${APP_CONFIG.imageProtocol}://file/`.length)
         const filePath = normalize(decodeURIComponent(rawPath))
         if (existsSync(filePath)) {
+          if (isMacHeicPath(filePath)) {
+            const png = await getHeicPreviewPng(filePath)
+            if (!png) return new Response('Unsupported image', { status: 415 })
+            return new Response(new Uint8Array(png), {
+              status: 200,
+              headers: new Headers({
+                'Content-Type': 'image/png',
+                'Cache-Control': 'max-age=3600'
+              })
+            })
+          }
           const ext = extname(filePath).toLowerCase()
           let contentType = 'image/png'
           if (ext === '.jpg' || ext === '.jpeg') contentType = 'image/jpeg'
@@ -259,7 +273,7 @@ function registerImageProtocol(): void {
  * files. Payloads come from the LRU thumbnail engine so repeated requests do
  * zero decode work in the main process.
  */
-function createThumbnailResponse(filePath: string, isStoredCapture: boolean, request?: Request): Response {
+async function createThumbnailResponse(filePath: string, isStoredCapture: boolean, request?: Request): Promise<Response> {
   const ext = extname(filePath).toLowerCase()
   // SVG files are vector XML documents; stream them directly with correct MIME type
   // rather than failing inside nativeImage.createFromPath (which only supports raster bitmaps).
@@ -275,7 +289,7 @@ function createThumbnailResponse(filePath: string, isStoredCapture: boolean, req
     })
   }
 
-  const payload = getThumbnailPayload(filePath)
+  const payload = await getThumbnailPayloadAsync(filePath)
   if (!payload) return new Response('Unsupported image', { status: 415 })
 
   const headers = new Headers({
@@ -310,6 +324,7 @@ export function registerGlobalHotkey(targetHotkey?: string): boolean {
       const now = Date.now()
       if (now - _lastHotkeyToggleTime < 500) return
       _lastHotkeyToggleTime = now
+      markExplicitOpen()
       pushState.togglePanel()
     })
 
@@ -321,6 +336,7 @@ export function registerGlobalHotkey(targetHotkey?: string): boolean {
         const now = Date.now()
         if (now - _lastHotkeyToggleTime < 500) return
         _lastHotkeyToggleTime = now
+        markExplicitOpen()
         pushState.togglePanel()
       })
       return false

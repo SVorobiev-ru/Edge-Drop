@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useStore } from '../store/appStore'
-import { formatBytes, formatImageDisplayName } from '../lib/format'
+import { formatBytes, formatImageDisplayName, fileStreamUrl } from '../lib/format'
 import { getFileKind } from '../lib/fileType'
 import { FileKindIcon, FolderOpenIcon, CopyIcon, CheckIcon, ExternalLinkIcon, CloseIcon, GlobeIcon } from './icons'
 import { parseUrlPreview } from '../lib/urlPreview'
@@ -985,7 +985,7 @@ function PreviewContent({
       const p = item.data.paths[0]
       const entry = item.data.entries?.[0]
       const fileName = formatImageDisplayName(entry?.name || p, item.capturedAt)
-      const fullResUrl = `edgelocal://file/${encodeURIComponent(p.replace(/\\/g, '/'))}`
+      const fullResUrl = fileStreamUrl(p)
       return (
         <div
           draggable={true}
@@ -1136,7 +1136,7 @@ function PreviewContent({
           const isImg = !entry?.isDirectory && (entry?.isImage || info.kind === 'image')
 
           if (isImg) {
-            const fullResUrl = `edgelocal://file/${encodeURIComponent(p.replace(/\\/g, '/'))}`
+            const fullResUrl = fileStreamUrl(p)
             return (
               <div
                 key={i}

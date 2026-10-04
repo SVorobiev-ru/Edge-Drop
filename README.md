@@ -210,6 +210,18 @@ A huge thank you to the incredible sponsors and products actively sponsoring Edg
 
 ---
 
+## macOS
+
+This repository is a fork that ports Edge-Drop to macOS (Apple silicon and Intel). The original Windows app is developed by Deepender at [Deepender25/Edge-Drop](https://github.com/Deepender25/Edge-Drop); everything else in this README describes that project.
+
+1. Download the DMG for your Mac from the [fork releases](https://github.com/SVorobiev-ru/Edge-Drop/releases/latest): `arm64` for Apple silicon, `x64` for Intel.
+2. Open it and drag **Edge-Drop** into **Applications**.
+3. Run `xattr -dr com.apple.quarantine /Applications/Edge-Drop.app` in Terminal, then start the app. The build is signed ad-hoc and not notarized, so macOS blocks it until the quarantine attribute is removed.
+
+Permissions, updates, building from source and known limitations are described in [MACOS.md](MACOS.md).
+
+---
+
 ## Quick Start
 
 ### Prerequisites

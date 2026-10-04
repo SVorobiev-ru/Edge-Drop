@@ -14,6 +14,8 @@ import koffi from 'koffi'
 import type { ClipboardImageSource, ItemData } from '../../shared/types'
 
 let getSeqNum: (() => number) | null = null
+let getPasteboardTypes: (() => string[]) | null = null
+let getPasteboardFilePaths: (() => string[]) | null = null
 if (process.platform === 'win32') {
   try {
     const user32 = koffi.load('user32.dll')
@@ -33,13 +35,64 @@ if (process.platform === 'darwin') {
     const sel = objc.func('void *sel_registerName(const char *name)')
     const msgPtr = objc.func('objc_msgSend', 'void *', ['void *', 'void *'])
     const msgLong = objc.func('objc_msgSend', 'long', ['void *', 'void *'])
+    const msgAt = objc.func('objc_msgSend', 'void *', ['void *', 'void *', 'ulong'])
+    const msgStr = objc.func('objc_msgSend', 'str', ['void *', 'void *'])
+    const msgObj = objc.func('objc_msgSend', 'void *', ['void *', 'void *', 'void *'])
+    const msgFromUtf8 = objc.func('objc_msgSend', 'void *', ['void *', 'void *', 'str'])
     const cls = getClass('NSPasteboard')
+    const clsString = getClass('NSString')
+    const clsUrl = getClass('NSURL')
     const selGeneral = sel('generalPasteboard')
     const selCount = sel('changeCount')
+    const selTypes = sel('types')
+    const selLength = sel('count')
+    const selAt = sel('objectAtIndex:')
+    const selUtf8 = sel('UTF8String')
+    const selItems = sel('pasteboardItems')
+    const selStringForType = sel('stringForType:')
+    const selFromUtf8 = sel('stringWithUTF8String:')
+    const selUrlWithString = sel('URLWithString:')
+    const selPath = sel('path')
     if (cls && selGeneral && selCount) {
       getSeqNum = () => {
         const pb = msgPtr(cls, selGeneral)
         return pb ? Number(msgLong(pb, selCount)) + 1 : 0
+      }
+    }
+    if (cls && selGeneral && selTypes && selLength && selAt && selUtf8) {
+      getPasteboardTypes = () => {
+        const pb = msgPtr(cls, selGeneral)
+        const arr = pb ? msgPtr(pb, selTypes) : null
+        if (!arr) return []
+        const n = Number(msgLong(arr, selLength))
+        const out: string[] = []
+        for (let i = 0; i < n; i++) {
+          const item = msgAt(arr, selAt, i)
+          const name = item ? msgStr(item, selUtf8) : null
+          if (typeof name === 'string' && name) out.push(name)
+        }
+        return out
+      }
+    }
+    if (cls && clsString && clsUrl && selGeneral && selItems && selLength && selAt && selUtf8 && selStringForType && selFromUtf8 && selUrlWithString && selPath) {
+      getPasteboardFilePaths = () => {
+        const pb = msgPtr(cls, selGeneral)
+        const items = pb ? msgPtr(pb, selItems) : null
+        const type = items ? msgFromUtf8(clsString, selFromUtf8, 'public.file-url') : null
+        if (!items || !type) return []
+        const n = Number(msgLong(items, selLength))
+        const out: string[] = []
+        for (let i = 0; i < n; i++) {
+          const item = msgAt(items, selAt, i)
+          const raw = item ? msgObj(item, selStringForType, type) : null
+          const rawText = raw ? msgStr(raw, selUtf8) : null
+          if (typeof rawText !== 'string' || !/^file:/i.test(rawText)) continue
+          const url = msgObj(clsUrl, selUrlWithString, raw)
+          const nsPath = url ? msgPtr(url, selPath) : null
+          const path = nsPath ? msgStr(nsPath, selUtf8) : null
+          if (typeof path === 'string' && path.startsWith('/')) out.push(path)
+        }
+        return out
       }
     }
   } catch (err) {
@@ -57,6 +110,28 @@ export function getClipboardSequenceNumber(): number {
   }
   return 0
 }
+
+export function clipboardSequenceAvailable(): boolean {
+  return getClipboardSequenceNumber() > 0
+}
+
+export function macPasteboardTypes(): string[] | null {
+  if (process.platform !== 'darwin' || !getPasteboardTypes) return null
+  try {
+    return getPasteboardTypes()
+  } catch {
+    return null
+  }
+}
+
+export function macNativeFilePaths(): string[] | null {
+  if (process.platform !== 'darwin' || !getPasteboardFilePaths) return null
+  try {
+    return getPasteboardFilePaths()
+  } catch {
+    return null
+  }
+}
 import { getSystemPowerShellPath, getWritableCwd } from '../main/powershell'
 import { filterValidPaths } from '../main/pathValidation'
 import { isStoreBuild } from '../main/config'
@@ -65,13 +140,15 @@ const execFileAsync = promisify(execFile)
 
 
 /** macOS: list of file paths currently on the pasteboard (Finder copy). */
-function macFilePaths(): string[] | null {
+export function macFilePaths(): string[] | null {
   if (process.platform !== 'darwin') return null
+  const native = macNativeFilePaths()
+  if (native && native.length) return native
   try {
     const plist = clipboard.read('NSFilenamesPboardType')
     if (plist) {
       const paths = Array.from(plist.matchAll(/<string>([\s\S]*?)<\/string>/g)).map((m) =>
-        m[1].replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'")
+        m[1].replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, '&')
       )
       if (paths.length) return paths
     }
@@ -231,8 +308,12 @@ export function clipboardFilesContentKey(): string | null {
  * etc.) even if the path list is not readable yet. FileGroupDescriptor alone
  * is NOT enough — browsers use that for "Copy Image" virtual files.
  */
-function clipboardAdvertisesFileList(): boolean {
+export function clipboardAdvertisesFileList(): boolean {
   if (clipboardHasFileNameW()) return true
+  if (process.platform === 'darwin') {
+    const types = macPasteboardTypes()
+    return !!types && types.some((t) => t === 'public.file-url' || t === 'NSFilenamesPboardType')
+  }
   try {
     return clipboard.availableFormats().some((f) => {
       const l = f.toLowerCase()
@@ -260,9 +341,33 @@ export function buildFileListBuffer(paths: string[]): Buffer {
 const URL_RE = /^(https?:\/\/|www\.)[^\s]+$/i
 const COLOR_HEX_RE = /^#([0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i
 const FILE_URL_RE = /file:\/\/\/?([^\s"'<>]+)/i
+const POSIX_FILE_URL_RE = /file:\/\/(?:localhost)?(\/[^\s"'<>]+)/i
+const POSIX_BARE_FILE_URL_RE = /^file:\/\/(?:localhost)?(\/[^\s<>]+)/i
+
+export function localPathFromFileUrl(raw: string): string | null {
+  if (process.platform === 'win32') return localPathFromClipboardFileUrl(raw)
+  const posix = raw.trim().match(POSIX_BARE_FILE_URL_RE)
+  if (!posix) return null
+  try {
+    const decoded = decodeURIComponent(posix[1])
+    return existsSync(decoded) ? decoded : null
+  } catch {
+    return null
+  }
+}
 
 /** Turn a clipboard file:// URL into a local path if that file exists. */
 export function localPathFromClipboardFileUrl(raw: string): string | null {
+  if (process.platform !== 'win32') {
+    const posix = raw.match(POSIX_FILE_URL_RE)
+    if (!posix) return null
+    try {
+      const decoded = decodeURIComponent(posix[1])
+      return existsSync(decoded) ? decoded : null
+    } catch {
+      return null
+    }
+  }
   const m = raw.match(FILE_URL_RE)
   if (!m) return null
   try {
@@ -300,7 +405,20 @@ export function extractClipboardImageFileName(text: string, html: string): strin
   return undefined
 }
 
+function detectMacClipboardImageSource(text: string, html: string): ClipboardImageSource {
+  if (text.trim() || html.trim()) return 'image'
+  try {
+    const formats = clipboard.availableFormats().map((f) => f.toLowerCase())
+    if (formats.some((f) => !f.startsWith('image/'))) return 'image'
+  } catch {}
+  if (macFilePaths()) return 'image'
+  const types = macPasteboardTypes()
+  if (types && types.some((t) => /file-url|public\.url|filenames|promise|plain-text|html|rtf/i.test(t))) return 'image'
+  return 'screenshot'
+}
+
 export function detectClipboardImageSource(text: string, html: string): ClipboardImageSource {
+  if (process.platform === 'darwin') return detectMacClipboardImageSource(text, html)
   try {
     const formats = clipboard.availableFormats().map((f) => f.toLowerCase())
     if (formats.some((f) => /screenshot|snipping|screen\s*clip|screenclip/.test(f))) {
@@ -375,6 +493,35 @@ function isIgnoredFormat(format: string): boolean {
   return IGNORED_FORMATS.some((f) => f.toLowerCase() === lower)
 }
 
+export const MAC_EXCLUDED_PASTEBOARD_TYPES = [
+  'org.nspasteboard.ConcealedType',
+  'org.nspasteboard.TransientType',
+  'org.nspasteboard.AutoGeneratedType',
+  'com.agilebits.onepassword',
+  'de.petermaurer.TransientPasteboardType',
+  'com.typeit4me.clipping',
+  'Pasteboard generator type'
+]
+
+export function hasExcludedPasteboardType(types: readonly string[]): boolean {
+  return types.some((type) => {
+    const lower = type.toLowerCase()
+    return MAC_EXCLUDED_PASTEBOARD_TYPES.some((t) => t.toLowerCase() === lower) || isIgnoredFormat(type)
+  })
+}
+
+function isMacClipboardExcluded(): boolean {
+  const types = macPasteboardTypes()
+  if (types && hasExcludedPasteboardType(types)) return true
+  return MAC_EXCLUDED_PASTEBOARD_TYPES.some((t) => {
+    try {
+      return clipboard.has(t)
+    } catch {
+      return false
+    }
+  })
+}
+
 /**
  * Checks whether the current clipboard content is marked as sensitive, confidential,
  * or transient (e.g. by password managers, dictation tools, or macro scripts)
@@ -384,6 +531,10 @@ export function isClipboardExcluded(): boolean {
   const formats = clipboard.availableFormats()
 
   if (formats.some((f) => isIgnoredFormat(f))) {
+    return true
+  }
+
+  if (process.platform === 'darwin' && isMacClipboardExcluded()) {
     return true
   }
 
@@ -481,6 +632,12 @@ export function isScreenshotOrImageIntent(hasImage: boolean, rawText: string, ra
   if (!hasImage) return false
   if (!rawText) return true
 
+  if (process.platform === 'darwin') {
+    if (/^<img\b[^>]*>$/i.test(rawText)) return true
+    if (/^(?:<meta\b[^>]*>\s*)*<img\b[^>]*>$/i.test(rawHtml)) return true
+    return URL_RE.test(rawText)
+  }
+
   // Single bare image tag from browser "Copy Image" (e.g. <img src="...">)
   if (/^<img\b[^>]*>$/i.test(rawText) || /^<img\b[^>]*\/?>$/i.test(rawHtml)) return true
 
@@ -523,7 +680,7 @@ export function formatTabularDataForClipboard(text: string, rawHtml?: string): {
   if (!text) return { text: '', html: rawHtml && rawHtml.length <= MAX_ITEM_HTML_CHARS ? rawHtml : undefined }
 
   // Normalize all line breaks to CRLF (\r\n) for Windows
-  const crlfText = text.replace(/\r?\n/g, '\r\n')
+  const crlfText = process.platform === 'win32' ? text.replace(/\r?\n/g, '\r\n') : text
   const htmlIfSmall = rawHtml && rawHtml.length <= MAX_ITEM_HTML_CHARS ? rawHtml : undefined
 
   // Check if content has tab characters indicating column separators

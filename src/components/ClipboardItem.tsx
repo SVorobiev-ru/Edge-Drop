@@ -22,7 +22,7 @@ import type { DragRequest } from '../../shared/types'
 import { useStore } from '../store/appStore'
 import { useDragOut } from '../hooks/useDragOut'
 import { itemRenderKey } from '../lib/itemSignature'
-import { basename, formatBytes, previewText, relativeTime, formatImageDisplayName } from '../lib/format'
+import { basename, formatBytes, previewText, relativeTime, formatImageDisplayName, fileStreamUrl as localFileStreamUrl } from '../lib/format'
 import { getFileKind } from '../lib/fileType'
 import { playButtonClickSound, playToggleSound, playDeleteSound, playCardExpandSound } from '../lib/soundEffects'
 import { CopyIcon, FileKindIcon, FileStackPhoto, PinIcon, PinFillIcon, TrashIcon, MinusIcon, ChevronUpIcon, ChevronLeftIcon, ExpandIcon, ContractIcon, ExternalLinkIcon } from './icons'
@@ -49,7 +49,7 @@ interface Props {
  * tile swaps to this URL — Chromium then renders (and animates) natively.
  */
 export function fileStreamUrl(filePath: string): string {
-  return `edgelocal://file/${encodeURIComponent(filePath.replace(/\\/g, '/'))}`
+  return localFileStreamUrl(filePath)
 }
 
 /* ------------------------------------------------------------------ */
@@ -1078,7 +1078,7 @@ function Preview({ item }: { item: ClipboardItemDto }) {
                   className="thumb"
                   src={entry.preview}
                   onError={(e) => {
-                    const fallback = `edgelocal://file/${encodeURIComponent(first.replace(/\\/g, '/'))}`
+                    const fallback = fileStreamUrl(first)
                     if (e.currentTarget.src !== fallback) {
                       e.currentTarget.src = fallback
                     }

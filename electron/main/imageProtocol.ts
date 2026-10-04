@@ -31,7 +31,8 @@ export function thumbnailUrlForStoredImage(imageId: string): string {
 
 /** URL for a bounded thumbnail of an external image file. */
 export function thumbnailUrlForFile(filePath: string): string {
-  return `${APP_CONFIG.imageProtocol}://thumb/file/${encodeURIComponent(filePath.replace(/\\/g, '/'))}`
+  const urlPath = process.platform === 'win32' ? filePath.replace(/\\/g, '/') : filePath
+  return `${APP_CONFIG.imageProtocol}://thumb/file/${encodeURIComponent(urlPath)}`
 }
 
 const EMOJI_FILE_RE = /^[0-9a-f][0-9a-f0-9-]*\.png$/

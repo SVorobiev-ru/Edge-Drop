@@ -33,10 +33,11 @@ export interface WorkAreaRect {
 export interface ResolvedWorkArea {
   displayId: number
   workArea: WorkAreaRect
+  bounds?: WorkAreaRect
 }
 
 export class WorkAreaCache {
-  private entry: { id: number | undefined; workArea: WorkAreaRect } | null = null
+  private entry: { id: number | undefined; workArea: WorkAreaRect; bounds?: WorkAreaRect } | null = null
 
   constructor(
     /**
@@ -58,12 +59,23 @@ export class WorkAreaCache {
     return this.entry ? this.entry.workArea : null
   }
 
+  getBounds(displayId: number | undefined): WorkAreaRect | null {
+    if (!this.entry || this.entry.id !== displayId) {
+      this.refresh(displayId)
+    }
+    return this.entry?.bounds ?? null
+  }
+
   /** Force a re-read (display topology events, stick re-resolution). */
   refresh(displayId: number | undefined): void {
     try {
       const resolved = this.lookup(displayId)
       if (resolved && resolved.workArea) {
-        this.entry = { id: displayId, workArea: { ...resolved.workArea } }
+        this.entry = {
+          id: displayId,
+          workArea: { ...resolved.workArea },
+          bounds: resolved.bounds ? { ...resolved.bounds } : undefined
+        }
       }
     } catch (err) {
       console.error('[WorkAreaCache] refresh failed; retaining last-known-good:', err)

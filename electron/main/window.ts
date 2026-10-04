@@ -14,6 +14,7 @@
  */
 import { BrowserWindow, screen, shell, powerMonitor, app } from 'electron'
 import { join } from 'node:path'
+import { existsSync } from 'node:fs'
 import koffi from 'koffi'
 import { frontmostPid, activatePid, weAreFrontmost } from './macNative'
 import { APP_CONFIG } from './config'
@@ -25,6 +26,8 @@ import { WorkAreaCache } from './workAreaCache'
 import { probeSeamAware, isNearProximity, type SeamTickState } from './stickProbe'
 import { loadSettings, saveSettings } from '../store/settings'
 import { isFullscreenAppActive, registerFullscreenActiveListener } from './fullscreen'
+import { macTriggerZone, macReportedPoint, pickInitialStickPosition, readDockOrientation } from './macScreen'
+import { DEFAULT_SETTINGS } from '../../shared/types'
 
 type RegisterWindowMessageFn = (lpString: string) => number
 type SetWindowLongPtrFn = (hWnd: number | bigint, nIndex: number, dwNewLong: number | bigint) => number | bigint
@@ -120,6 +123,9 @@ export const COLLAPSED_WIDTH = 0
 
 let mainWindow: BrowserWindow | null = null
 let interactive = false
+let openedExplicitly = false
+let explicitOpenMarkedAt = 0
+const EXPLICIT_OPEN_TTL_MS = 1000
 export let previewActive = false
 
 export let currentHotZoneWidth = 3
@@ -136,7 +142,7 @@ let staleIdConsecutiveCount = 0
 const workAreaCache = new WorkAreaCache((displayId) => {
   const all = screen.getAllDisplays()
   const stick = all.find(d => d.id === displayId) ?? screen.getPrimaryDisplay()
-  return stick?.workArea ? { displayId: stick.id, workArea: stick.workArea } : null
+  return stick?.workArea ? { displayId: stick.id, workArea: stick.workArea, bounds: stick.bounds } : null
 })
 
 /** Force a cache re-read (display topology events). */
@@ -358,9 +364,16 @@ export async function resolvePasteTarget(normalDelayMs: number): Promise<number>
  */
 let gcTimer: ReturnType<typeof setTimeout> | null = null
 
+export function markExplicitOpen(): void {
+  if (process.platform !== 'darwin' || interactive) return
+  explicitOpenMarkedAt = Date.now()
+}
+
 export function setInteractive(value: boolean): void {
   if (!mainWindow || value === interactive) return
   interactive = value
+  openedExplicitly = value && explicitOpenMarkedAt > 0 && Date.now() - explicitOpenMarkedAt <= EXPLICIT_OPEN_TTL_MS
+  explicitOpenMarkedAt = 0
   if (value) {
     // Panel is open: disable click-through so user can interact.
     // Remember who is in front BEFORE any search typing can steal focus.
@@ -488,6 +501,7 @@ let _seamState: SeamTickState = {}
  */
 export function setHeartbeatPaused(paused: boolean): void {
   heartbeatPaused = paused
+  if (process.platform === 'darwin') return
   if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()) {
     if (paused) {
       // Temporarily lower window z-band from 'screen-saver' to 'normal' during active drag
@@ -514,7 +528,9 @@ function _pollTick(): void {
   if (runtime.quitting || !mainWindow || mainWindow.isDestroyed() || !mainWindow.isVisible()) return
 
   const settings = loadSettings()
-  if (settings.suppressInFullscreen && isFullscreenAppActive()) return
+  if (settings.suppressInFullscreen && isFullscreenAppActive()) {
+    if (process.platform !== 'darwin' || !interactive) return
+  }
 
   const pt = screen.getCursorScreenPoint()
 
@@ -527,12 +543,21 @@ function _pollTick(): void {
   // topologies in tests/stickProbeScenarios.test.ts). The returned
   // armedInEdge is what the renderer's dwell consumes: own pixels only,
   // slow enough to be intent, and outside any post-crossing lockout.
+  const macZone = process.platform === 'darwin'
+    ? macTriggerZone({
+        bounds: workAreaCache.getBounds(currentStickDisplayId) ?? wa,
+        workArea: wa,
+        stickPosition: settings.stickPosition,
+        hotZoneWidth: currentHotZoneWidth
+      })
+    : null
+
   const seam = probeSeamAware(
     {
       cursor: pt,
-      workArea: wa,
+      workArea: macZone ? macZone.probeArea : wa,
       stickPosition: settings.stickPosition,
-      hotZoneWidth: currentHotZoneWidth,
+      hotZoneWidth: macZone ? macZone.hotZoneWidth : currentHotZoneWidth,
       now: Date.now()
     },
     _seamState
@@ -603,9 +628,21 @@ function _pollTick(): void {
     lastEdgeState = newState
     _lastSentX = clientX
     _lastSentY = clientY
+    const reported = macZone
+      ? macReportedPoint({
+          zone: macZone,
+          stickPosition: settings.stickPosition,
+          clientX,
+          clientY,
+          distFromEdge,
+          armed: inEdge,
+          expanded: interactive,
+          hotZoneWidth: currentHotZoneWidth
+        })
+      : { x: clientX, y: clientY }
     sendToMainWindow('window:cursor-edge', {
-      x: clientX,
-      y: clientY,
+      x: reported.x,
+      y: reported.y,
       inEdge,
       inZone: true,
       stickPosition: settings.stickPosition,
@@ -745,7 +782,43 @@ function getStickGeometry(): { x: number; y: number; width: number; height: numb
   return { x: result.x, y: result.y, width: result.width, height: result.height }
 }
 
+function isFirstRunWithoutSettings(): boolean {
+  try {
+    return !existsSync(PATHS.settingsFile())
+  } catch {
+    return false
+  }
+}
+
+function sendSettingsToAllWindows(next: ReturnType<typeof loadSettings>): void {
+  if (runtime.quitting) return
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed() && !win.webContents.isDestroyed()) {
+      win.webContents.send('state:settings', next)
+    }
+  }
+}
+
+function applyMacInitialStickPosition(): void {
+  void readDockOrientation()
+    .then((orientation) => {
+      if (!orientation) return
+      const position = pickInitialStickPosition(orientation)
+      if (position === DEFAULT_SETTINGS.stickPosition) return
+      if (loadSettings().stickPosition !== DEFAULT_SETTINGS.stickPosition) return
+      const next = saveSettings({ stickPosition: position })
+      sendSettingsToAllWindows(next)
+      if (!mainWindow || mainWindow.isDestroyed()) return
+      mainWindow.setBounds({ ...getStickGeometry() })
+      onWindowRepositioned?.()
+    })
+    .catch((err) => {
+      console.error('[Main] Initial stick position from Dock failed:', err)
+    })
+}
+
 export function createWindow(): BrowserWindow {
+  const macFirstRun = process.platform === 'darwin' && isFirstRunWithoutSettings()
   const { x, y, width, height } = getStickGeometry()
 
   mainWindow = new BrowserWindow({
@@ -834,6 +907,7 @@ export function createWindow(): BrowserWindow {
   registerFullscreenActiveListener(() => {
     const settings = loadSettings()
     if (settings.suppressInFullscreen && (settings.hoverActivation ?? true)) {
+      if (process.platform === 'darwin' && (!interactive || openedExplicitly)) return
       sendToMainWindow('window:toggle', false)
       setInteractive(false)
     }
@@ -924,12 +998,17 @@ export function createWindow(): BrowserWindow {
   // no perceptible difference — the panel reappears within 2s of a fullscreen
   // app losing focus, which is already faster than the user notices.
   if (heartbeatTimer !== null) clearInterval(heartbeatTimer)
-  heartbeatTimer = setInterval(() => {
-    if (runtime.quitting || heartbeatPaused || interactive) return
-    if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()) {
-      mainWindow.setAlwaysOnTop(true, 'screen-saver')
-    }
-  }, 2000)
+  heartbeatTimer = null
+  if (process.platform !== 'darwin') {
+    heartbeatTimer = setInterval(() => {
+      if (runtime.quitting || heartbeatPaused || interactive) return
+      if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()) {
+        mainWindow.setAlwaysOnTop(true, 'screen-saver')
+      }
+    }, 2000)
+  }
+
+  if (macFirstRun) applyMacInitialStickPosition()
 
   return mainWindow
 }

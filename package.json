@@ -1,6 +1,7 @@
 {
   "name": "edge-drop",
   "version": "0.3.2",
+  "macRevision": 1,
   "description": "Edge-Drop — a clipboard manager that lives on the left edge of your screen and expands on hover.",
   "author": "Edge-Drop",
   "license": "Apache-2.0",
@@ -20,7 +21,11 @@
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json --composite false",
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
     "test": "vitest run",
-    "build:mac": "npm run build && electron-builder --mac dir"
+    "build:mac": "npm run build && MAC_VERSION=$(node scripts/mac-version.cjs) && electron-builder --mac dir --publish never -c.extraMetadata.version=$MAC_VERSION",
+    "dist:mac": "npm run build && node scripts/check-mac-native.cjs arm64 x64 && MAC_VERSION=$(node scripts/mac-version.cjs) && electron-builder --mac dmg zip --arm64 --x64 --publish never -c.extraMetadata.version=$MAC_VERSION",
+    "dist:mac:arm64": "npm run build && node scripts/check-mac-native.cjs arm64 && MAC_VERSION=$(node scripts/mac-version.cjs) && electron-builder --mac dmg zip --arm64 --publish never -c.extraMetadata.version=$MAC_VERSION",
+    "dist:mac:x64": "npm run build && node scripts/check-mac-native.cjs x64 && MAC_VERSION=$(node scripts/mac-version.cjs) && electron-builder --mac dmg zip --x64 --publish never -c.extraMetadata.version=$MAC_VERSION",
+    "install:mac": "bash scripts/install-mac.sh"
   },
   "build": {
     "appId": "com.edgedrop.app",
@@ -29,6 +34,7 @@
       "output": "dist",
       "buildResources": "resources"
     },
+    "afterPack": "./scripts/mac-adhoc-sign.cjs",
     "files": [
       "out/**/*",
       "!out/renderer/**/*.gif",
@@ -113,18 +119,45 @@
     "mac": {
       "target": [
         {
-          "target": "dir",
+          "target": "dmg",
           "arch": [
-            "arm64"
+            "arm64",
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "arm64",
+            "x64"
           ]
         }
       ],
       "icon": "resources/icon.icns",
       "category": "public.app-category.productivity",
+      "artifactName": "Edge-Drop-${version}-mac-${arch}.${ext}",
       "identity": null,
+      "hardenedRuntime": false,
+      "notarize": false,
+      "files": [
+        "!**/node_modules/@koromix/koffi-!(darwin-${arch})/**",
+        "!**/node_modules/@resvg/resvg-js-!(darwin-${arch})/**"
+      ],
+      "publish": {
+        "provider": "github",
+        "owner": "SVorobiev-ru",
+        "repo": "Edge-Drop"
+      },
       "extendInfo": {
         "LSUIElement": true,
-        "NSAppleEventsUsageDescription": "Edge-Drop вставляет выбранный элемент в активное приложение."
+        "NSAppleEventsUsageDescription": "Edge-Drop uses System Events to paste the selected item into the active app.",
+        "NSDesktopFolderUsageDescription": "Edge-Drop reads copied files and screenshots from your Desktop folder.",
+        "NSDocumentsFolderUsageDescription": "Edge-Drop reads copied files and screenshots from your Documents folder.",
+        "NSDownloadsFolderUsageDescription": "Edge-Drop reads copied files and screenshots from your Downloads folder.",
+        "NSCameraUsageDescription": null,
+        "NSMicrophoneUsageDescription": null,
+        "NSBluetoothAlwaysUsageDescription": null,
+        "NSBluetoothPeripheralUsageDescription": null
       }
     }
   },

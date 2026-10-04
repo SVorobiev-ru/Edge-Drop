@@ -76,6 +76,9 @@ class PersistentPowerShell {
   }
 
   public run(script: string, timeoutMs = 3000): Promise<void> {
+    if (process.platform !== 'win32') {
+      return Promise.reject(new Error('PowerShell host is only available on Windows'))
+    }
     return new Promise((resolve, reject) => {
       this.queue.push({ command: script, resolve, reject })
       this.processQueue()

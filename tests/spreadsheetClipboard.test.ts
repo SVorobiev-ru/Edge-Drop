@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest'
 import { formatTabularDataForClipboard, readClipboard } from '../electron/clipboard/formats'
 import { clipboard } from 'electron'
 
@@ -39,6 +39,16 @@ vi.mock('electron', () => {
       }
     }
   }
+})
+
+const platformDescriptor = Object.getOwnPropertyDescriptor(process, 'platform')!
+
+beforeAll(() => {
+  Object.defineProperty(process, 'platform', { value: 'win32' })
+})
+
+afterAll(() => {
+  Object.defineProperty(process, 'platform', platformDescriptor)
 })
 
 describe('Spreadsheet Tabular Clipboard Formatting', () => {

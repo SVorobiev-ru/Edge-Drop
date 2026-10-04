@@ -1,4 +1,4 @@
-import { BrowserWindow } from 'electron'
+import { BrowserWindow, app } from 'electron'
 import { join } from 'node:path'
 import { saveSettings, loadSettings, pushState } from './state'
 
@@ -10,6 +10,7 @@ export function getOnboardingWindow(): BrowserWindow | null {
 
 export function createOnboardingWindow(): void {
   if (onboardingWindow) {
+    if (process.platform === 'darwin') app.focus({ steal: true })
     onboardingWindow.focus()
     return
   }
@@ -42,6 +43,7 @@ export function createOnboardingWindow(): void {
     // Force the window to the very front to steal focus on initial launch
     onboardingWindow.setAlwaysOnTop(true)
     onboardingWindow.show()
+    if (process.platform === 'darwin') app.focus({ steal: true })
     onboardingWindow.focus()
     // Then immediately revert to normal window behavior so it can go behind others
     onboardingWindow.setAlwaysOnTop(false)

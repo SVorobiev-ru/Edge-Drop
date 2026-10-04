@@ -15,7 +15,10 @@ import { SlideCommit } from './SlideCommit'
 import { WakeSlider } from './WakeSlider'
 import { playDialTickSound, playToggleSound, playButtonClickSound } from '../lib/soundEffects'
 import { useTranslation } from '../i18n'
+import { REPO_URL, CHANGELOG_URL } from '../lib/links'
 import '../styles/settings.css'
+
+const IS_MAC = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform || navigator.userAgent || '')
 
 type SettingsTab = 'behaviour' | 'position' | 'appearance'
 
@@ -175,10 +178,16 @@ export function Settings({
 
   const checkState = useStore((s) => s.manualCheckState)
   const handleManualCheck = () => useStore.getState().startManualCheck()
-  const handleStartDownload = () => useStore.getState().startManualDownload()
+  const handleStartDownload = () => {
+    if (IS_MAC) {
+      void window.edge.startUpdateDownload()
+      return
+    }
+    void useStore.getState().startManualDownload()
+  }
 
   const isManualDownloading = checkState.status === 'downloading'
-  const isDownloading = isManualDownloading || (!updateDownloaded && !!updateInfo?.hasUpdate && (updateMode === 'auto' || !!updateInfo?.downloadProgress))
+  const isDownloading = !IS_MAC && (isManualDownloading || (!updateDownloaded && !!updateInfo?.hasUpdate && (updateMode === 'auto' || !!updateInfo?.downloadProgress)))
   // Update waiting for a user decision (Notify mode prompt or available check).
   const hasBackgroundUpdate = !updateDownloaded && !isDownloading && (!!updateInfo?.hasUpdate || checkState.status === 'available')
   const downloadPercent = updateInfo?.downloadProgress?.percent ?? 0
@@ -273,7 +282,7 @@ export function Settings({
             style={{ width: '100%', justifyContent: 'center', padding: '7px 14px', cursor: 'pointer', whiteSpace: 'nowrap', fontSize: '12.5px' }}
             onClick={() => {
               playButtonClickSound()
-              window.open('https://github.com/Deepender25/Edge-Drop/issues/new/choose', '_blank')
+              window.open(`${REPO_URL}/issues/new/choose`, '_blank')
             }}
           >
             {t('footer.submitFeedback')}
@@ -321,7 +330,7 @@ export function Settings({
                 className="github-promo-btn"
                 onClick={() => {
                   playButtonClickSound()
-                  window.open('https://github.com/Deepender25/Edge-Drop', '_blank')
+                  window.open(REPO_URL, '_blank')
                 }}
               >
                 <GithubOctocatLogo width={14} height={14} className="github-octocat-icon" />
@@ -341,7 +350,7 @@ export function Settings({
                 if (currentVersion) {
                   patch({ lastSeenChangelogVersion: currentVersion })
                 }
-                window.open('https://www.edgedrop.app/changelog', '_blank')
+                window.open(CHANGELOG_URL, '_blank')
               }}
             >
               <span>{t('header.whatsNew')}</span>
@@ -373,7 +382,7 @@ export function Settings({
     if (targetVersion) {
       patch({ lastSeenChangelogVersion: targetVersion })
     }
-    window.open('https://www.edgedrop.app/changelog', '_blank')
+    window.open(CHANGELOG_URL, '_blank')
   }
 
   // ── Promoted Top Update Card Renderer (Vertical Layout) ────────────────────
@@ -500,7 +509,7 @@ export function Settings({
                   handleStartDownload()
                 }}
               >
-                {t('behaviour.update') || 'Update'}
+                {IS_MAC ? t('behaviour.openReleasePage') : (t('behaviour.update') || 'Update')}
               </button>
               <button
                 type="button"
@@ -646,7 +655,7 @@ export function Settings({
                   handleStartDownload()
                 }}
               >
-                {t('behaviour.update') || 'Update'}
+                {IS_MAC ? t('behaviour.openReleasePage') : (t('behaviour.update') || 'Update')}
               </button>
               <button
                 type="button"
@@ -819,7 +828,7 @@ export function Settings({
               className="shelf-github-btn"
               onClick={() => {
                 playButtonClickSound()
-                window.open('https://github.com/Deepender25/Edge-Drop', '_blank')
+                window.open(REPO_URL, '_blank')
               }}
             >
               <GithubOctocatLogo width={13} height={13} className="github-octocat-icon" />
@@ -845,7 +854,7 @@ export function Settings({
             style={{ width: '100%', justifyContent: 'center', height: 30, fontSize: 11.5, fontWeight: 550, borderRadius: 999 }}
             onClick={() => {
               playButtonClickSound()
-              window.open('https://github.com/Deepender25/Edge-Drop/issues/new/choose', '_blank')
+              window.open(`${REPO_URL}/issues/new/choose`, '_blank')
             }}
           >
             {t('footer.submitFeedback')}
@@ -859,7 +868,7 @@ export function Settings({
               onClick={() => {
                 playButtonClickSound()
                 if (currentVersion) patch({ lastSeenChangelogVersion: currentVersion })
-                window.open('https://www.edgedrop.app/changelog', '_blank')
+                window.open(CHANGELOG_URL, '_blank')
               }}
             >
               {t('header.whatsNew')} ↗
@@ -980,6 +989,26 @@ export function Settings({
                   </div>
                 </div>
               </div>
+
+              {IS_MAC && (
+                <div className="settings-shelf-card incognito-card behaviour-col">
+                  <div className="shelf-card-top">
+                    <div className="setting-group-label">{t('groups.privacy') || 'PRIVACY'}</div>
+                  </div>
+                  <div className="shelf-card-inline">
+                    <div className="shelf-card-inline-text">
+                      <div className="setting-title">{t('behaviour.captureScreenshotsTitle')}</div>
+                      <div className="setting-desc">{t('behaviour.captureScreenshotsDesc')}</div>
+                    </div>
+                    <div className="shelf-card-inline-action">
+                      <Toggle
+                        checked={settings.captureScreenshots !== false}
+                        onChange={(v) => patch({ captureScreenshots: v })}
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* ── SUB-GROUP 2 DIVIDER: Shortcuts & Hover ── */}
               <div className="shelf-section-divider">
@@ -1707,6 +1736,26 @@ export function Settings({
                       </div>
                     </div>
                   </div>
+
+                  {IS_MAC && (
+                    <div className="setting-card">
+                      <div className="shelf-card-top">
+                        <div className="setting-group-label">{t('groups.privacy') || 'PRIVACY'}</div>
+                      </div>
+                      <div className="shelf-card-inline">
+                        <div className="shelf-card-inline-text">
+                          <div className="setting-title">{t('behaviour.captureScreenshotsTitle')}</div>
+                          <div className="setting-desc">{t('behaviour.captureScreenshotsDesc')}</div>
+                        </div>
+                        <div className="shelf-card-inline-action">
+                          <Toggle
+                            checked={settings.captureScreenshots !== false}
+                            onChange={(v) => patch({ captureScreenshots: v })}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  )}
 
                   {/* ── SUB-GROUP 2: Shortcuts & Hover ──────────────── */}
                   <div className="setting-section-divider">

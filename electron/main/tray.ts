@@ -11,10 +11,12 @@ import { existsSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { PATHS } from '../store/paths'
 import { loadSettings, saveSettings } from '../store/settings'
-import { getMainWindow, setVisible, repositionWindow, getDisplayListOptions, registerWindowRepositionListener, popUpAndRetract } from './window'
+import { getMainWindow, setVisible, repositionWindow, getDisplayListOptions, registerWindowRepositionListener, popUpAndRetract, markExplicitOpen } from './window'
 import type { StickPosition } from '../../shared/types'
 import { pushState } from './state'
 import { TRANSLATIONS, en } from '../../src/i18n/translations'
+import { macify, withMacHotkey } from '../../shared/platformText'
+import { resolveUiLanguage } from './language'
 
 let tray: Tray | null = null
 let themeListenerRegistered = false
@@ -111,6 +113,7 @@ export function createTray(): Tray {
   const image = getTrayImage()
   tray = new Tray(image)
   tray.setToolTip('Edge-Drop')
+  if (process.platform === 'darwin') tray.setIgnoreDoubleClickEvents(true)
 
   // Register system theme change listener once
   if (!themeListenerRegistered) {
@@ -178,45 +181,16 @@ export function createTray(): Tray {
   }
 
 function getTrayText(settingsLang: string | undefined, key: keyof typeof en['tray']): string {
-  let langCode = settingsLang || 'system'
-  if (langCode === 'system') {
-    const sysLangs = app.getPreferredSystemLanguages()
-    const first = (sysLangs[0] || '').toLowerCase()
-    if (first.startsWith('zh-tw') || first.startsWith('zh-hk')) langCode = 'zh-TW'
-    else if (first.startsWith('zh')) langCode = 'zh-CN'
-    else if (first.startsWith('es')) langCode = 'es'
-    else if (first.startsWith('fr')) langCode = 'fr'
-    else if (first.startsWith('de')) langCode = 'de'
-    else if (first.startsWith('hi')) langCode = 'hi'
-    else if (first.startsWith('ja')) langCode = 'ja'
-    else if (first.startsWith('ru')) langCode = 'ru'
-    else if (first.startsWith('it')) langCode = 'it'
-    else if (first.startsWith('pt')) langCode = 'pt'
-    else if (first.startsWith('ko')) langCode = 'ko'
-    else if (first.startsWith('ar')) langCode = 'ar'
-    else if (first.startsWith('fa')) langCode = 'fa'
-    else if (first.startsWith('bn')) langCode = 'bn'
-    else if (first.startsWith('tr')) langCode = 'tr'
-    else if (first.startsWith('vi')) langCode = 'vi'
-    else if (first.startsWith('pl')) langCode = 'pl'
-    else if (first.startsWith('nl')) langCode = 'nl'
-    else if (first.startsWith('sv')) langCode = 'sv'
-    else if (first.startsWith('id')) langCode = 'id'
-    else if (first.startsWith('uk')) langCode = 'uk'
-    else if (first.startsWith('el')) langCode = 'el'
-    else if (first.startsWith('cs')) langCode = 'cs'
-    else if (first.startsWith('ro')) langCode = 'ro'
-    else if (first.startsWith('hu')) langCode = 'hu'
-    else if (first.startsWith('da')) langCode = 'da'
-    else if (first.startsWith('fi')) langCode = 'fi'
-    else if (first.startsWith('th')) langCode = 'th'
-    else if (first.startsWith('he')) langCode = 'he'
-    else if (first.startsWith('no') || first.startsWith('nb') || first.startsWith('nn')) langCode = 'no'
-    else langCode = 'en'
-  }
+  const langCode = resolveUiLanguage(settingsLang)
   const dict = TRANSLATIONS[langCode]
+  if (process.platform === 'darwin') {
+    const raw = (dict?.tray?.[key]) || en.tray[key] || key
+    return macify(withMacHotkey(raw, loadSettings().toggleHotkey || 'Alt+C'), langCode)
+  }
   return (dict?.tray?.[key]) || en.tray[key] || key
 }
+
+  let macMenu: Electron.Menu | null = null
 
   const rebuild = () => {
     const settings = loadSettings()
@@ -229,6 +203,7 @@ function getTrayText(settingsLang: string | undefined, key: keyof typeof en['tra
           console.log('[Main] Context menu "Show Clipboard" clicked')
           setVisible(true)
           getMainWindow()?.focus()
+          markExplicitOpen()
           pushState.togglePanel()
         }
       },
@@ -237,6 +212,10 @@ function getTrayText(settingsLang: string | undefined, key: keyof typeof en['tra
         click: () => {
           console.log('[Main] Context menu "Settings" clicked')
           setVisible(true)
+          if (process.platform === 'darwin') {
+            markExplicitOpen()
+            app.focus({ steal: true })
+          }
           getMainWindow()?.focus()
           pushState.openSettings()
         }
@@ -283,15 +262,25 @@ function getTrayText(settingsLang: string | undefined, key: keyof typeof en['tra
         }
       }
     ])
-    tray?.setContextMenu(menu)
+    if (process.platform === 'darwin') {
+      macMenu = menu
+    } else {
+      tray?.setContextMenu(menu)
+    }
   }
 
-  tray.on('click', () => {
+  tray.on('click', (event) => {
     updateTrayIcon()
+    if (process.platform === 'darwin' && event?.ctrlKey) {
+      rebuild()
+      if (macMenu) tray?.popUpContextMenu(macMenu)
+      return
+    }
     console.log('[Main] Tray icon left-clicked')
     const win = getMainWindow()
     if (!win) return
     setVisible(true)
+    markExplicitOpen()
     pushState.togglePanel()
   })
 
@@ -299,6 +288,10 @@ function getTrayText(settingsLang: string | undefined, key: keyof typeof en['tra
   tray.on('right-click', () => {
     updateTrayIcon()
     rebuild()
+    if (process.platform === 'darwin') {
+      if (macMenu) tray?.popUpContextMenu(macMenu)
+      return
+    }
     tray?.popUpContextMenu()
   })
 

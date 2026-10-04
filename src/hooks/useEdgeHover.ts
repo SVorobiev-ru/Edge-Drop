@@ -23,8 +23,8 @@
 import { useEffect, useRef } from 'react'
 import { edge } from '../lib/edge'
 import { useStore } from '../store/appStore'
+import { TRIGGER_PX, BUFFER_PX } from '../../shared/edgeZones'
 
-const TRIGGER_PX = 3    // leftmost px that count as "the edge"
 const DWELL_MS = 40      // cursor must linger this long to open
 const GRACE_MS = 250     // close delay after leaving
 const PANEL_WIDE = 270   // blade is 270px (var(--panel-width))
@@ -36,7 +36,6 @@ const PANEL_WIDE = 270   // blade is 270px (var(--panel-width))
  */
 const KEEP_OPEN_PX = PANEL_WIDE - 15  // 255 — clearly inside blade
 const START_CLOSE_PX = PANEL_WIDE + 20 // 290 — 20px buffer outside the visual boundary
-const BUFFER_PX = 30                 // 30px overshoot buffer across adjacent monitors
 const PREVIEW_WIDE = 740             // Extended width when preview flyout is active
 
 export const PANEL_LEAVE_EVENT = 'panel:leave'

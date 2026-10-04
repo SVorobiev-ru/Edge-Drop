@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
   isPackaged: true,
@@ -67,6 +67,16 @@ import { isStoreBuild, shouldStartHidden, wasLaunchedAtLogin } from '../electron
 import { parseStartupHelperState } from '../electron/main/storeStartup'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+
+const platformDescriptor = Object.getOwnPropertyDescriptor(process, 'platform')!
+
+beforeAll(() => {
+  Object.defineProperty(process, 'platform', { value: 'win32' })
+})
+
+afterAll(() => {
+  Object.defineProperty(process, 'platform', platformDescriptor)
+})
 
 function regQueryOutput(value: string): string {
   return `\r\nHKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\r\n    Edge-Drop    REG_SZ    ${value}\r\n`

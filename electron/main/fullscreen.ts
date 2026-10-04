@@ -14,6 +14,8 @@
  * the panel suppresses itself after a game goes fullscreen, which is fine.
  */
 import koffi from 'koffi'
+import { systemPreferences } from 'electron'
+import { systemPresentationOptions, isFullscreenPresentation } from './macPresentation'
 
 // Windows QUERY_USER_NOTIFICATION_STATE enum values:
 // 1 = QUNS_NOT_PRESENT        (screen saver / locked)
@@ -111,7 +113,22 @@ export function isFullscreenAppActive(): boolean {
   return isFullscreenActiveCache
 }
 
+function triggerMacFullscreenCheck(): void {
+  const options = systemPresentationOptions()
+  if (options === null) return
+
+  const isNowFullscreen = isFullscreenPresentation(options)
+  isFullscreenActiveCache = isNowFullscreen
+  if (isNowFullscreen) {
+    onFullscreenDetectedFn?.()
+  }
+}
+
 export function triggerFullscreenCheck(): void {
+  if (process.platform === 'darwin') {
+    triggerMacFullscreenCheck()
+    return
+  }
   if (process.platform !== 'win32') return
   const state = queryNotificationState()
   if (state < 0) return   // koffi unavailable or call failed
@@ -141,10 +158,49 @@ export function triggerFullscreenCheck(): void {
  * detection latency for Alt+Tab scenarios is still ~0ms.
  */
 const FULLSCREEN_CHECK_INTERVAL_MS = 800
+const MAC_SPACE_CHANGE_RECHECK_MS = 300
+
+let macSpaceSubscriptionId: number | null = null
+let macSpaceRecheckTimer: ReturnType<typeof setTimeout> | null = null
+
+function subscribeMacSpaceChange(): void {
+  if (macSpaceSubscriptionId !== null) return
+  try {
+    macSpaceSubscriptionId = systemPreferences.subscribeWorkspaceNotification(
+      'NSWorkspaceActiveSpaceDidChangeNotification',
+      () => {
+        triggerFullscreenCheck()
+        if (macSpaceRecheckTimer !== null) clearTimeout(macSpaceRecheckTimer)
+        macSpaceRecheckTimer = setTimeout(() => {
+          macSpaceRecheckTimer = null
+          triggerFullscreenCheck()
+        }, MAC_SPACE_CHANGE_RECHECK_MS)
+      }
+    )
+  } catch (err) {
+    console.error('[Fullscreen] workspace notification subscribe failed:', err)
+  }
+}
+
+function unsubscribeMacSpaceChange(): void {
+  if (macSpaceRecheckTimer !== null) {
+    clearTimeout(macSpaceRecheckTimer)
+    macSpaceRecheckTimer = null
+  }
+  if (macSpaceSubscriptionId === null) return
+  try {
+    systemPreferences.unsubscribeWorkspaceNotification(macSpaceSubscriptionId)
+  } catch (err) {
+    console.error('[Fullscreen] workspace notification unsubscribe failed:', err)
+  }
+  macSpaceSubscriptionId = null
+}
 
 export function startFullscreenMonitor(): void {
-  if (process.platform !== 'win32') return
+  if (process.platform !== 'win32' && process.platform !== 'darwin') return
   if (checkTimer !== null) return
+
+  if (process.platform === 'darwin') subscribeMacSpaceChange()
 
   triggerFullscreenCheck()  // seed cache immediately
   checkTimer = setInterval(triggerFullscreenCheck, FULLSCREEN_CHECK_INTERVAL_MS)
@@ -155,5 +211,6 @@ export function stopFullscreenMonitor(): void {
     clearInterval(checkTimer)
     checkTimer = null
   }
+  unsubscribeMacSpaceChange()
   isFullscreenActiveCache = false
 }

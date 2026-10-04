@@ -1,0 +1,102 @@
+name: Release macOS
+
+on:
+  push:
+    tags:
+      - 'v*-mac.*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-mac-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build (${{ matrix.arch }})
+    if: github.repository == 'SVorobiev-ru/Edge-Drop'
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-latest
+          - arch: x64
+            runner: macos-15-intel
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Check that the tag matches the macOS version
+        run: |
+          version="$(node scripts/mac-version.cjs)"
+          if [ "v${version}" != "${GITHUB_REF_NAME}" ]; then
+            echo "Tag ${GITHUB_REF_NAME} does not match the macOS version ${version}" >&2
+            exit 1
+          fi
+      - name: Check the runner architecture
+        run: |
+          case "${{ matrix.arch }}" in
+            arm64) expected=arm64 ;;
+            x64) expected=x86_64 ;;
+          esac
+          if [ "$(uname -m)" != "$expected" ]; then
+            echo "Runner is $(uname -m), expected ${expected}" >&2
+            exit 1
+          fi
+      - run: npm ci
+      - run: npm run dist:mac:${{ matrix.arch }}
+      - run: bash scripts/verify-mac-dist.sh ${{ matrix.arch }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: edge-drop-mac-${{ matrix.arch }}
+          path: |
+            dist/Edge-Drop-*-mac-${{ matrix.arch }}.dmg
+            dist/Edge-Drop-*-mac-${{ matrix.arch }}.zip
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: Publish release
+    if: github.repository == 'SVorobiev-ru/Edge-Drop'
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: edge-drop-mac-*
+          path: artifacts
+          merge-multiple: true
+      - name: Create or update the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          shopt -s nullglob
+          files=(artifacts/*.dmg artifacts/*.zip)
+          if [ "${#files[@]}" -ne 4 ]; then
+            echo "Expected 4 artifacts, found ${#files[@]}" >&2
+            ls -la artifacts >&2
+            exit 1
+          fi
+          if gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            gh release upload "${GITHUB_REF_NAME}" "${files[@]}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --clobber
+          else
+            gh release create "${GITHUB_REF_NAME}" "${files[@]}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --verify-tag \
+              --title "Edge-Drop ${GITHUB_REF_NAME#v} for macOS" \
+              --notes-file .github/release-notes-mac.md \
+              --prerelease=false \
+              --latest
+          fi

@@ -32,6 +32,9 @@ export interface TranslationKeys {
     launchAtLoginDesc: string
     incognitoTitle: string
     incognitoDesc: string
+    captureScreenshotsTitle?: string
+    captureScreenshotsDesc?: string
+    openReleasePage?: string
     hoverActivationTitle: string
     hoverActivationDescOn: string
     hoverActivationDescOff: string
@@ -256,6 +259,11 @@ export interface TranslationKeys {
     proTip2: string
     proTip3: string
     proTip4: string
+    accessibilityTitle?: string
+    accessibilityDesc?: string
+    accessibilityGranted?: string
+    accessibilityMissing?: string
+    accessibilityButton?: string
   }
   tray: {
     showClipboard: string
@@ -310,11 +318,13 @@ export interface TranslationKeys {
     imageUnavailable?: string
     fileUnavailable?: string
     launchBlockedByWindows?: string
+    launchBlockedByMac?: string
     launchUpdateFailed?: string
     shortcutUpdated?: string
     deleteFailed?: string
     clearFailed?: string
     pasteFallback?: string
+    pasteNeedsAccessibility?: string
     splitStacks?: string
     mergeTextLinks?: string
     mergeImagesFull?: string
@@ -366,6 +376,10 @@ export interface TranslationKeys {
     reviewOnStore?: string
     githubPromo: string
     version: string
+  }
+  accessibilityDialog?: {
+    title: string
+    body: string
   }
 }
 
@@ -576,6 +590,9 @@ export const en: TranslationKeys = {
     "launchAtLoginDesc": "Start silently in background when computer boots",
     "incognitoTitle": "Incognito mode",
     "incognitoDesc": "Temporarily pause recording new clipboard items",
+    "captureScreenshotsTitle": "Capture screenshots",
+    "captureScreenshotsDesc": "Add screenshots saved to a file (⌘⇧3 / ⌘⇧4 / ⌘⇧5) to history. Screenshots sent to the clipboard (⌃⌘⇧3 / ⌃⌘⇧4) are added as a regular copy",
+    "openReleasePage": "Open release page",
     "hoverActivationTitle": "Hover Activation",
     "hoverActivationDescOn": "Slide open shelf when hovering cursor near screen edge",
     "hoverActivationDescOff": "Hover trigger paused. Use {shortcut} to open",
@@ -798,7 +815,12 @@ export const en: TranslationKeys = {
     "proTip1": "Press Alt + C to instantly toggle the shelf.",
     "proTip2": "Access settings anytime via the gear icon (top right).",
     "proTip3": "Drag & drop files to the left edge to add them.",
-    "proTip4": "Click a text box, then a clipboard item to auto-paste."
+    "proTip4": "Click a text box, then a clipboard item to auto-paste.",
+    "accessibilityTitle": "Accessibility",
+    "accessibilityDesc": "Needed to paste on click.",
+    "accessibilityGranted": "Allowed",
+    "accessibilityMissing": "Not allowed",
+    "accessibilityButton": "Allow"
   },
   "tray": {
     "showClipboard": "Show Clipboard",
@@ -844,6 +866,10 @@ export const en: TranslationKeys = {
     "clickToDeselect": "Click to deselect",
     "current": "Current"
   },
+  "accessibilityDialog": {
+    "title": "Copied — press ⌘V",
+    "body": "To let Edge-Drop paste for you, enable it in Privacy & Security → Accessibility."
+  },
   "toast": {
     "copiedToClipboard": "Copied to clipboard",
     "itemDeleted": "Item deleted",
@@ -853,11 +879,13 @@ export const en: TranslationKeys = {
     "imageUnavailable": "Original image no longer available",
     "fileUnavailable": "Original file no longer available",
     "launchBlockedByWindows": "Windows blocked launch at login. Enable Edge-Drop in Settings → Apps → Startup.",
+    "launchBlockedByMac": "macOS blocked launch at login. Enable Edge-Drop in System Settings → General → Login Items.",
     "launchUpdateFailed": "Could not update launch at login.",
     "shortcutUpdated": "Global shortcut set to {shortcut}",
     "deleteFailed": "Could not delete this item. Please try again.",
     "clearFailed": "Could not clear history. Please try again.",
     "pasteFallback": "Clipboard ready — click your app and press Ctrl+V to paste",
+    "pasteNeedsAccessibility": "Copied — press ⌘V (no Accessibility permission)",
     "splitStacks": "Split into {count} stacks (max 10 each)",
     "mergeTextLinks": "Text and links cannot be grouped together",
     "mergeImagesFull": "An image collection can hold a maximum of 10 items",
@@ -2807,6 +2835,9 @@ export const ru: TranslationKeys = {
     "launchAtLoginDesc": "Запускать тихо в фоновом режиме при включении компьютера",
     "incognitoTitle": "Режим инкогнито",
     "incognitoDesc": "Временно приостановить запись новых элементов буфера обмена",
+    "captureScreenshotsTitle": "Захват скриншотов",
+    "captureScreenshotsDesc": "Добавлять в историю скриншоты, сохранённые в файл (⌘⇧3 / ⌘⇧4 / ⌘⇧5). Скриншоты в буфер обмена (⌃⌘⇧3 / ⌃⌘⇧4) попадают как обычное копирование",
+    "openReleasePage": "Открыть страницу релиза",
     "hoverActivationTitle": "Активация при наведении",
     "hoverActivationDescOn": "Открывать полку при наведении курсора у края экрана",
     "hoverActivationDescOff": "Активация наведением приостановлена. Нажмите Alt + C, чтобы открыть",
@@ -3018,7 +3049,12 @@ export const ru: TranslationKeys = {
     "proTip1": "Нажмите Alt + C, чтобы мгновенно открыть/закрыть полку.",
     "proTip2": "Откройте настройки в любое время через значок шестерёнки (вверху справа).",
     "proTip3": "Перетащите файлы на левый край, чтобы добавить их.",
-    "proTip4": "Щёлкните текстовое поле, затем элемент буфера обмена для автоматической вставки."
+    "proTip4": "Щёлкните текстовое поле, затем элемент буфера обмена для автоматической вставки.",
+    "accessibilityTitle": "Универсальный доступ",
+    "accessibilityDesc": "Нужен для вставки по клику.",
+    "accessibilityGranted": "Разрешено",
+    "accessibilityMissing": "Не разрешено",
+    "accessibilityButton": "Разрешить"
   },
   "tray": {
     "bottom": "Снизу",
@@ -3064,6 +3100,10 @@ export const ru: TranslationKeys = {
     "openInExplorer": "Открыть расположение в Проводнике",
     "current": "Текущий"
   },
+  "accessibilityDialog": {
+    "title": "Скопировано — нажмите ⌘V",
+    "body": "Чтобы Edge-Drop вставлял сам, включите его в «Конфиденциальность и безопасность → Универсальный доступ»."
+  },
   "toast": {
     "mergeIncompatible": "Нельзя объединять элементы разных типов",
     "mergeFilesFull": "Папка может содержать не более 10 файлов",
@@ -3071,6 +3111,7 @@ export const ru: TranslationKeys = {
     "mergeTextLinks": "Текст и ссылки нельзя объединить в одну группу",
     "splitStacks": "Разделено на {count} групп (макс. 10 в каждой)",
     "pasteFallback": "Буфер обмена готов — нажмите на приложение и нажмите Ctrl+V для вставки",
+    "pasteNeedsAccessibility": "Скопировано — нажмите ⌘V (нет доступа «Универсальный доступ»)",
     "clearFailed": "Не удалось очистить историю. Попробуйте ещё раз.",
     "deleteFailed": "Не удалось удалить этот элемент. Попробуйте ещё раз.",
     "copiedToClipboard": "Скопировано в буфер обмена",
@@ -3081,6 +3122,7 @@ export const ru: TranslationKeys = {
     "imageUnavailable": "Исходное изображение больше недоступно",
     "fileUnavailable": "Исходный файл больше недоступен",
     "launchBlockedByWindows": "Windows заблокировала запуск при входе в систему. Включите Edge-Drop в Параметры → Приложения → Автозагрузка.",
+    "launchBlockedByMac": "macOS заблокировала запуск при входе в систему. Включите Edge-Drop в «Системные настройки» → «Основные» → «Объекты входа».",
     "launchUpdateFailed": "Не удалось обновить запуск при входе в систему.",
     "shortcutUpdated": "Глобальная горячая клавиша установлена: {shortcut}"
   },

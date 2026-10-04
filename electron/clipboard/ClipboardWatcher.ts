@@ -29,6 +29,14 @@ import {
 import { contentSignature } from '../store/signature'
 import type { ItemData } from '../../shared/types'
 
+type ImageItemData = Extract<ItemData, { kind: 'image' }>
+
+export function stampCapturedImage(data: ImageItemData, png: Buffer): void {
+  data.imageId = createId()
+  data.bytes = png.length
+  data.ext = 'png'
+}
+
 /**
  * Fired when genuinely new clipboard content lands on the clipboard. For image captures
  * the raw PNG bytes are handed over as the second argument so the store can
@@ -184,9 +192,7 @@ export class ClipboardWatcher {
       if (data.kind === 'image') {
         const img = clipboard.readImage()
         png = img.toPNG()
-        data.imageId = createId()
-        data.bytes = png.length
-        data.ext = 'png'
+        stampCapturedImage(data, png)
         this.lastSeq = getClipboardSequenceNumber()
       }
 

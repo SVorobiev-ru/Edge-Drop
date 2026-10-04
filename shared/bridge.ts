@@ -66,6 +66,8 @@ export interface EdgeApi {
   minimizeWindow: () => Promise<void>
   focusWindow: (focusable?: boolean) => Promise<void>
   getDisplays: () => Promise<import('./types').DisplayInfo[]>
+  getAccessibilityStatus: () => Promise<boolean | null>
+  requestAccessibility: () => Promise<boolean | null>
   setInternalDrag: (active: boolean) => void
   broadcastTutorialStep: (step: number) => void
 

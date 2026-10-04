@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest'
 import { readClipboard, clipboardSignature } from '../electron/clipboard/formats'
 import { clipboard } from 'electron'
 
@@ -39,6 +39,16 @@ vi.mock('electron', () => {
       }
     }
   }
+})
+
+const platformDescriptor = Object.getOwnPropertyDescriptor(process, 'platform')!
+
+beforeAll(() => {
+  Object.defineProperty(process, 'platform', { value: 'win32' })
+})
+
+afterAll(() => {
+  Object.defineProperty(process, 'platform', platformDescriptor)
 })
 
 describe('Windows Snipping Tool & Clipboard Image Detection (#41)', () => {

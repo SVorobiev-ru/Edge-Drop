@@ -1,6 +1,7 @@
 /** App-wide constants and environment flags for the main process. */
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { uptime } from 'node:os'
 import { app } from 'electron'
 
 /** Mutable runtime flags (kept separate from the frozen config object). */
@@ -67,6 +68,19 @@ export function isStoreBuild(): boolean {
   return false
 }
 
+const MAC_LOGIN_LAUNCH_WINDOW_S = 300
+
+function wasLaunchedByMacLoginItem(): boolean {
+  try {
+    if (!app.isPackaged) return false
+    const s = app.getLoginItemSettings({ type: 'mainAppService' } as Electron.LoginItemSettingsOptions) as Electron.LoginItemSettings & { status?: string }
+    const registered = s.status ? s.status === 'enabled' : !!s.openAtLogin
+    return registered && uptime() <= MAC_LOGIN_LAUNCH_WINDOW_S
+  } catch {
+    return false
+  }
+}
+
 /**
  * True when this process was launched by Windows at login/startup
  * rather than by the user clicking the icon.
@@ -90,6 +104,7 @@ export function wasLaunchedAtLogin(): boolean {
     } catch {
       /* app not ready / mocked */
     }
+    if (process.platform === 'darwin' && wasLaunchedByMacLoginItem()) return true
   } catch {
     /* ignore */
   }

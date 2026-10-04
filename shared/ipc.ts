@@ -110,6 +110,10 @@ export interface InvokeMap {
 
   /** Get the list of connected displays. */
   'displays:list': { args: []; result: import('./types').DisplayInfo[] }
+
+  'accessibility:status': { args: []; result: boolean | null }
+
+  'accessibility:request': { args: []; result: boolean | null }
 }
 
 /* ------------------------------------------------------------------ */

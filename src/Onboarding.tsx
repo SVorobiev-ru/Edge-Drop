@@ -9,6 +9,31 @@ import { edge } from './lib/edge'
 export function Onboarding() {
   const { t } = useTranslation()
   const [currentIndex, setCurrentIndex] = useState(0)
+  const [accessibilityTrusted, setAccessibilityTrusted] = useState<boolean | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    const refresh = () => {
+      Promise.resolve(edge.getAccessibilityStatus())
+        .then((trusted) => {
+          if (!cancelled) setAccessibilityTrusted(typeof trusted === 'boolean' ? trusted : null)
+        })
+        .catch(() => {})
+    }
+    refresh()
+    window.addEventListener('focus', refresh)
+    return () => {
+      cancelled = true
+      window.removeEventListener('focus', refresh)
+    }
+  }, [])
+
+  const handleRequestAccessibility = async () => {
+    try {
+      const trusted = await edge.requestAccessibility()
+      setAccessibilityTrusted(typeof trusted === 'boolean' ? trusted : null)
+    } catch {}
+  }
 
   useEffect(() => {
     void useStore.getState().hydrate()
@@ -147,7 +172,7 @@ export function Onboarding() {
       {/* Main Content Area */}
       {currentSlide.id === 'slide-6' ? (
         <div style={{ flex: 1, display: 'flex', gap: '32px', padding: '24px 32px', boxSizing: 'border-box', overflow: 'hidden' }}>
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'safe center', overflowY: 'auto', minHeight: 0 }}>
             <h1 style={{ fontSize: '28px', margin: '0 0 12px 0', fontWeight: 700, letterSpacing: '-0.02em' }}>
               {currentSlide.title}
             </h1>
@@ -165,6 +190,45 @@ export function Onboarding() {
                 <li>{t('onboarding.proTip4')}</li>
               </ul>
             </div>
+            {accessibilityTrusted !== null && (
+              <div style={{ flexShrink: 0, background: '#1a1a1c', padding: '10px 20px', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.08)', marginTop: '12px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
+                  <div style={{ fontSize: '13px', fontWeight: 600, color: '#fff', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                    {t('onboarding.accessibilityTitle')}
+                  </div>
+                  <div style={{ fontSize: '13px', fontWeight: 600, color: accessibilityTrusted ? '#43E97B' : '#FF8E53', whiteSpace: 'nowrap' }}>
+                    {accessibilityTrusted ? t('onboarding.accessibilityGranted') : t('onboarding.accessibilityMissing')}
+                  </div>
+                </div>
+                {!accessibilityTrusted && (
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', marginTop: '6px' }}>
+                    <div style={{ fontSize: '13px', color: 'rgba(255,255,255,0.6)', lineHeight: 1.4 }}>
+                      {t('onboarding.accessibilityDesc')}
+                    </div>
+                    <button
+                      onClick={handleRequestAccessibility}
+                      style={{
+                        background: '#2a2a2a',
+                        border: '1px solid #444',
+                        color: '#fff',
+                        fontSize: '13px',
+                        fontWeight: 500,
+                        cursor: 'pointer',
+                        padding: '4px 12px',
+                        borderRadius: '6px',
+                        whiteSpace: 'nowrap',
+                        flexShrink: 0,
+                        transition: 'background 0.2s'
+                      }}
+                      onMouseOver={(e) => { e.currentTarget.style.background = '#333' }}
+                      onMouseOut={(e) => { e.currentTarget.style.background = '#2a2a2a' }}
+                    >
+                      {t('onboarding.accessibilityButton')}
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
           <div style={{ flex: 1, background: '#1a1a1c', borderRadius: '16px', border: '1px solid rgba(255, 255, 255, 0.05)', overflow: 'hidden', display: 'flex', minHeight: 0 }}>
             <div style={{ flex: 1, overflowY: 'auto', padding: '16px' }}>

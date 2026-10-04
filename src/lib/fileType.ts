@@ -74,6 +74,14 @@ export function extOf(path: string): string {
 }
 
 import { t } from '../i18n'
+import { IS_MAC } from './format'
+
+const MAC_IMAGE_EXTS: ReadonlySet<string> = new Set(['heic', 'heif'])
+
+function kindOfExt(ext: string): FileKind {
+  if (IS_MAC && MAC_IMAGE_EXTS.has(ext)) return 'image'
+  return EXT_MAP[ext] ?? 'file'
+}
 
 const KEY_MAP: Record<FileKind, any> = {
   pdf: 'fileKinds.pdf',
@@ -107,7 +115,7 @@ export function getFileKind(path: string, isDirectory?: boolean): FileKindInfo {
     }
   }
   const ext = extOf(path)
-  const kind = EXT_MAP[ext] ?? 'file'
+  const kind = kindOfExt(ext)
   const base = KIND_INFO[kind]
   return {
     ...base,
@@ -124,7 +132,7 @@ export function getFileKindByExt(ext: string, isDirectory?: boolean): FileKindIn
       label: translateKind('fileKinds.folder', base.label)
     }
   }
-  const kind = EXT_MAP[ext.toLowerCase()] ?? 'file'
+  const kind = kindOfExt(ext.toLowerCase())
   const base = KIND_INFO[kind]
   return {
     ...base,

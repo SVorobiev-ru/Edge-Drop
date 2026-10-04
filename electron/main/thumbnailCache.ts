@@ -16,12 +16,16 @@
  *
  * Keys include mtime+size so externally replaced files are never served stale.
  */
-import { statSync } from 'node:fs'
+import { readFileSync, rmSync, statSync } from 'node:fs'
+import { extname } from 'node:path'
 import { createHash } from 'node:crypto'
 import { nativeImage } from 'electron'
+import { convertHeicToPng } from './macHeic'
 
 const MAX_THUMBNAIL_EDGE_PX = 240
 const LRU_MAX_ENTRIES = 64
+const HEIC_EXTS = new Set(['.heic', '.heif'])
+const HEIC_PREVIEW_EDGE_PX = 2048
 
 export interface ThumbnailPayload {
   etag: string
@@ -86,8 +90,12 @@ export function getThumbnailPayload(filePath: string): ThumbnailPayload | null {
   const cached = lruGet(key)
   if (cached) return cached
 
+  return encodeThumbnail(filePath, key)
+}
+
+function encodeThumbnail(sourcePath: string, key: string): ThumbnailPayload | null {
   try {
-    const img = nativeImage.createFromPath(filePath)
+    const img = nativeImage.createFromPath(sourcePath)
     if (img.isEmpty()) return null
 
     const { width, height } = img.getSize()
@@ -105,7 +113,7 @@ export function getThumbnailPayload(filePath: string): ThumbnailPayload | null {
     const payload: ThumbnailPayload = {
       // Content-fingerprint validator: any change to the source file flips
       // mtime/size, producing a fresh key AND a fresh etag together.
-      etag: `"${createHash('sha256').update(`${filePath}|${facts.mtimeMs}:${facts.size}`).digest('hex')}"`,
+      etag: `"${createHash('sha256').update(key).digest('hex')}"`,
       contentType: 'image/png',
       body
     }
@@ -113,6 +121,61 @@ export function getThumbnailPayload(filePath: string): ThumbnailPayload | null {
     return payload
   } catch {
     return null
+  }
+}
+
+const pendingHeic = new Map<string, Promise<ThumbnailPayload | null>>()
+
+export function isMacHeicPath(filePath: string): boolean {
+  return process.platform === 'darwin' && HEIC_EXTS.has(extname(filePath).toLowerCase())
+}
+
+export async function getHeicPreviewPng(filePath: string): Promise<Buffer | null> {
+  if (!isMacHeicPath(filePath)) return null
+  const tmp = await convertHeicToPng(filePath, HEIC_PREVIEW_EDGE_PX, 'preview')
+  if (!tmp) return null
+  try {
+    return readFileSync(tmp)
+  } catch {
+    return null
+  } finally {
+    try {
+      rmSync(tmp, { force: true })
+    } catch {}
+  }
+}
+
+export async function getThumbnailPayloadAsync(filePath: string): Promise<ThumbnailPayload | null> {
+  if (!isMacHeicPath(filePath)) {
+    return getThumbnailPayload(filePath)
+  }
+
+  const facts = readFacts(filePath)
+  if (!facts) return null
+
+  const key = `${filePath}|${facts.mtimeMs}:${facts.size}`
+  const cached = lruGet(key)
+  if (cached) return cached
+
+  const inFlight = pendingHeic.get(key)
+  if (inFlight) return inFlight
+
+  const job = (async () => {
+    const tmp = await convertHeicToPng(filePath, MAX_THUMBNAIL_EDGE_PX, 'thumb')
+    if (!tmp) return null
+    try {
+      return encodeThumbnail(tmp, key)
+    } finally {
+      try {
+        rmSync(tmp, { force: true })
+      } catch {}
+    }
+  })()
+  pendingHeic.set(key, job)
+  try {
+    return await job
+  } finally {
+    pendingHeic.delete(key)
   }
 }
 

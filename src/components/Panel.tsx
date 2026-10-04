@@ -23,6 +23,7 @@ import { IndicatorStyleFlyout } from './IndicatorStyleFlyout'
 import { LanguageFlyout } from './LanguageFlyout'
 import { CopyIndicatorCurve } from './CopyIndicatorCurve'
 import { useFilteredItems } from '../hooks/useFilteredItems'
+import { isInSplitEdgeZone } from '../../shared/edgeZones'
 
 import { useTranslation } from '../i18n'
 
@@ -123,10 +124,11 @@ export function Panel() {
 
     const unsubInternalDrop = window.edge.onInternalDrop((pos) => {
       // The OS drag ended inside our window, but Electron/Windows swallowed the drop event.
-      if (!internalDragReq) return
+      const activeDrag = useStore.getState().internalDragReq
+      if (!activeDrag) return
       
-      const req = { ...internalDragReq }
-      setInternalDragReq(null)
+      const req = { ...activeDrag }
+      useStore.getState().setInternalDragReq(null)
       setDragActive(false)
       
       const el = document.elementFromPoint(pos.x, pos.y)
@@ -148,14 +150,14 @@ export function Panel() {
         }
       }
 
-      const isTop = (settings.stickPosition === 'top')
-      const isRight = (settings.stickPosition === 'right')
-      
       const isInsideSplitZone = 
         !!el.closest('.split-dropzone') ||
-        (isTop && pos.y <= 80) ||
-        (!isTop && isRight && pos.x >= window.innerWidth - 100) ||
-        (!isTop && !isRight && pos.x <= 100)
+        isInSplitEdgeZone({
+          x: pos.x,
+          y: pos.y,
+          windowWidth: window.innerWidth,
+          stickPosition: useStore.getState().settings.stickPosition
+        })
 
       if (isInsideSplitZone) {
         console.log('[Panel] Dropped in split dropzone, splitting')
@@ -182,7 +184,7 @@ export function Panel() {
       unsubDragEnd()
       unsubInternalDrop()
     }
-  }, [internalDragReq, setInternalDragReq, setDragActive])
+  }, [setInternalDragReq, setDragActive])
 
   const hasDragContent = (e: React.DragEvent) => {
     const types = Array.from(e.dataTransfer?.types || [])

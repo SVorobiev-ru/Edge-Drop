@@ -29,6 +29,7 @@ describe('GitHub vs Store packaging contracts (on-disk, not assumed)', () => {
       }
       publish: { provider: string; owner: string; repo: string }
       nsis: { artifactName: string }
+      win: { extraResources?: Array<{ from: string; to: string }> }
     }
   }
 
@@ -64,7 +65,7 @@ describe('GitHub vs Store packaging contracts (on-disk, not assumed)', () => {
 
   it('ships the windowless StartupTask helper outside the asar', () => {
     expect(pkg.build.files).toEqual(expect.arrayContaining(['!resources/startup/**/*.exe']))
-    expect(pkg.build.extraResources).toEqual(expect.arrayContaining([
+    expect([...(pkg.build.extraResources ?? []), ...(pkg.build.win?.extraResources ?? [])]).toEqual(expect.arrayContaining([
       { from: 'resources/startup/EdgeDropStartup.exe', to: 'startup/EdgeDropStartup.exe' }
     ]))
     expect(existsSync(join(root, 'resources/startup/EdgeDropStartup.exe'))).toBe(true)
@@ -195,7 +196,7 @@ describe('GitHub vs Store packaging contracts (on-disk, not assumed)', () => {
     expect(src).toContain('store-review-promo-btn')
     expect(src).toContain('ms-windows-store://review/?ProductId=9P3JMHN9M4NR')
     expect(src).toContain('github-promo-btn')
-    expect(src).toContain('https://github.com/Deepender25/Edge-Drop')
+    expect(read('src/lib/links.ts')).toContain('https://github.com/Deepender25/Edge-Drop')
   })
 
   it('updater module hard-returns on Store for every public entry', () => {

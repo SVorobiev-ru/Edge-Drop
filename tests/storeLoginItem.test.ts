@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
   isPackaged: true,
@@ -80,6 +80,16 @@ import {
   reconcileLaunchAtLoginOnStartup
 } from '../electron/main/loginItems'
 import { syncLoginItemSettings } from '../electron/main/ipc'
+
+const platformDescriptor = Object.getOwnPropertyDescriptor(process, 'platform')!
+
+beforeAll(() => {
+  Object.defineProperty(process, 'platform', { value: 'win32' })
+})
+
+afterAll(() => {
+  Object.defineProperty(process, 'platform', platformDescriptor)
+})
 
 /** How Windows parses an unquoted HKCU Run value (CreateProcess command line). */
 function parseWindowsRunCommand(cmd: string): { exe: string; args: string[] } {

@@ -215,6 +215,7 @@ export interface Settings {
   v026UpgradeCleaned?: boolean
   /** Configurable global hotkey accelerator to toggle Edge-Drop shelf (e.g. 'Alt+C', 'Alt+Shift+C'). Default: 'Alt+C'. */
   toggleHotkey?: string
+  captureScreenshots?: boolean
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -249,7 +250,8 @@ export const DEFAULT_SETTINGS: Settings = {
   updateMode: 'auto',
   skippedUpdateVersion: undefined,
   language: 'system',
-  toggleHotkey: 'Alt+C'
+  toggleHotkey: 'Alt+C',
+  captureScreenshots: true
 }
 
 

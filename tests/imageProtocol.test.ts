@@ -50,8 +50,28 @@ describe('resolveStoredImage', () => {
     expect(thumbnailUrlForStoredImage('image-abc123')).toBe('edgelocal://thumb/image-abc123')
   })
 
-  it('encodes file thumbnail paths without exposing a raw Windows path', () => {
-    expect(thumbnailUrlForFile('C:\\Pictures\\image one.png'))
-      .toBe('edgelocal://thumb/file/C%3A%2FPictures%2Fimage%20one.png')
+  describe('file thumbnail paths', () => {
+    const realPlatform = process.platform
+
+    function setPlatform(value: string): void {
+      Object.defineProperty(process, 'platform', { value, configurable: true })
+    }
+
+    afterEach(() => {
+      setPlatform(realPlatform)
+    })
+
+    it('encodes file thumbnail paths without exposing a raw Windows path', () => {
+      setPlatform('win32')
+      expect(thumbnailUrlForFile('C:\\Pictures\\image one.png'))
+        .toBe('edgelocal://thumb/file/C%3A%2FPictures%2Fimage%20one.png')
+    })
+
+    it('keeps a backslash that is part of a macOS file name', () => {
+      setPlatform('darwin')
+      const url = thumbnailUrlForFile('/Users/a/Pictures/back\\slash.png')
+      expect(url).toBe('edgelocal://thumb/file/%2FUsers%2Fa%2FPictures%2Fback%5Cslash.png')
+      expect(decodeURIComponent(url.slice('edgelocal://thumb/file/'.length))).toBe('/Users/a/Pictures/back\\slash.png')
+    })
   })
 })

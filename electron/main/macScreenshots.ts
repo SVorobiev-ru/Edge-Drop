@@ -11,34 +11,48 @@
  * attribute macOS stamps on them, so ordinary images dropped into the folder
  * are ignored.
  */
-import { clipboard, nativeImage } from 'electron'
-import { execFile, execFileSync } from 'node:child_process'
-import { existsSync, statSync, watch, type FSWatcher } from 'node:fs'
+import { nativeImage } from 'electron'
+import { execFile } from 'node:child_process'
+import { existsSync, rmSync, statSync, watch, type FSWatcher } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, extname, basename } from 'node:path'
+import { convertHeicToPng } from './macHeic'
 
 const IMAGE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.heic', '.tiff', '.tif', '.gif', '.bmp', '.webp'])
+const NATIVE_EXTS = new Set(['.png', '.jpg', '.jpeg'])
+const DIR_POLL_MS = 180_000
+
+export type ScreenshotHandler = (png: Buffer, fileName: string) => void
 
 let watcher: FSWatcher | null = null
 let watchedDir = ''
 const seen = new Map<string, number>()
 let dirTimer: NodeJS.Timeout | null = null
+let attaching = false
+let handler: ScreenshotHandler | null = null
+let enabled: () => boolean = () => true
 
 /** Folder macOS saves screenshots to. */
-export function screenshotDir(): string {
-  try {
-    const out = execFileSync('defaults', ['read', 'com.apple.screencapture', 'location'], {
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'ignore']
-    }).trim()
-    if (out) {
-      const p = out.replace(/^~(?=$|\/)/, homedir())
-      if (existsSync(p)) return p
-    }
-  } catch {
-    /* not set → Desktop */
-  }
-  return join(homedir(), 'Desktop')
+export function screenshotDir(): Promise<string> {
+  return new Promise((resolve) => {
+    const fallback = join(homedir(), 'Desktop')
+    execFile('/usr/bin/defaults', ['read', 'com.apple.screencapture', 'location'], { encoding: 'utf8', timeout: 5000 }, (err, stdout) => {
+      if (err) {
+        /* not set → Desktop */
+        resolve(fallback)
+        return
+      }
+      const out = String(stdout).trim()
+      if (out) {
+        const p = out.replace(/^~(?=$|\/)/, homedir())
+        if (existsSync(p)) {
+          resolve(p)
+          return
+        }
+      }
+      resolve(fallback)
+    })
+  })
 }
 
 function isScreenCapture(file: string): Promise<boolean> {
@@ -47,7 +61,21 @@ function isScreenCapture(file: string): Promise<boolean> {
   })
 }
 
-async function handleCandidate(file: string, onCaptured?: (file: string) => void): Promise<void> {
+async function loadScreenshot(file: string): Promise<Electron.NativeImage | null> {
+  if (NATIVE_EXTS.has(extname(file).toLowerCase())) return nativeImage.createFromPath(file)
+  const tmp = await convertHeicToPng(file)
+  if (!tmp) return null
+  try {
+    return nativeImage.createFromPath(tmp)
+  } finally {
+    try {
+      rmSync(tmp, { force: true })
+    } catch {}
+  }
+}
+
+async function handleCandidate(file: string, onScreenshot: ScreenshotHandler, isEnabled: () => boolean): Promise<void> {
+  if (!isEnabled()) return
   const name = basename(file)
   if (name.startsWith('.')) return
   if (!IMAGE_EXTS.has(extname(name).toLowerCase())) return
@@ -71,43 +99,82 @@ async function handleCandidate(file: string, onCaptured?: (file: string) => void
   await new Promise((r) => setTimeout(r, 250))
   if (!(await isScreenCapture(file))) return
   try {
-    const img = nativeImage.createFromPath(file)
-    if (img.isEmpty()) return
-    clipboard.clear()
-    clipboard.writeImage(img)
+    const img = await loadScreenshot(file)
+    if (!img) return
+    if (img.isEmpty()) {
+      console.error('[Screenshots] empty image after loading', file)
+      return
+    }
+    onScreenshot(img.toPNG(), name.replace(/\.[^.]+$/, '.png'))
     console.log('[Screenshots] captured', name)
-    onCaptured?.(file)
   } catch (err) {
     console.error('[Screenshots] failed to load', file, err)
   }
 }
 
-export function startScreenshotWatcher(onCaptured?: (file: string) => void): void {
-  if (process.platform !== 'darwin') return
-  const attach = (): void => {
-    const dir = screenshotDir()
+async function attach(): Promise<void> {
+  const onScreenshot = handler
+  if (attaching || !onScreenshot) return
+  attaching = true
+  try {
+    const dir = await screenshotDir()
+    if (!dirTimer) return
     if (dir === watchedDir && watcher) return
     watcher?.close()
     watcher = null
     watchedDir = dir
     try {
-      watcher = watch(dir, { persistent: false }, (_evt, fname) => {
+      const w = watch(dir, { persistent: false }, (_evt, fname) => {
         if (!fname) return
-        void handleCandidate(join(dir, fname.toString()), onCaptured)
+        void handleCandidate(join(dir, fname.toString()), onScreenshot, enabled)
       })
+      w.on('error', (err) => {
+        console.error('[Screenshots] watcher error', dir, err)
+        try {
+          w.close()
+        } catch {}
+        if (watcher === w) watcher = null
+      })
+      watcher = w
       console.log('[Screenshots] watching', dir)
     } catch (err) {
       console.error('[Screenshots] cannot watch', dir, err)
     }
+  } finally {
+    attaching = false
   }
-  attach()
+}
+
+function detach(): void {
+  watcher?.close()
+  watcher = null
+  watchedDir = ''
+  if (dirTimer) clearInterval(dirTimer)
+  dirTimer = null
+}
+
+export function refreshScreenshotWatcher(): void {
+  if (process.platform !== 'darwin' || !handler) return
+  if (!enabled()) {
+    detach()
+    return
+  }
+  if (dirTimer) return
   // The user can change the save location at any time (⌘⇧5 → Options).
-  dirTimer = setInterval(attach, 30_000)
+  dirTimer = setInterval(() => void attach(), DIR_POLL_MS)
+  void attach()
+}
+
+export function startScreenshotWatcher(onScreenshot: ScreenshotHandler, isEnabled: () => boolean = () => true): void {
+  if (process.platform !== 'darwin') return
+  if (handler) return
+  handler = onScreenshot
+  enabled = isEnabled
+  refreshScreenshotWatcher()
 }
 
 export function stopScreenshotWatcher(): void {
-  watcher?.close()
-  watcher = null
-  if (dirTimer) clearInterval(dirTimer)
-  dirTimer = null
+  detach()
+  seen.clear()
+  handler = null
 }

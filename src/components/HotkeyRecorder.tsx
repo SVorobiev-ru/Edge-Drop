@@ -12,8 +12,8 @@ interface HotkeyRecorderProps {
 const IS_MAC = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform || navigator.userAgent || '')
 
 /** Formats an Electron accelerator string (e.g. "Alt+Shift+C") into individual display keys. */
-function parseKeyBadges(accelerator: string): string[] {
-  if (!accelerator) return ['Alt', 'C']
+export function parseKeyBadges(accelerator: string): string[] {
+  if (!accelerator) return IS_MAC ? ['⌥', 'C'] : ['Alt', 'C']
   return accelerator
     .split('+')
     .map((k) => {

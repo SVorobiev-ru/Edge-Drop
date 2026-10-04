@@ -65,6 +65,14 @@ export function formatScreenshotFilename(capturedAt?: number, ext = 'png', index
   return formatClipboardImageFilename(capturedAt, ext, { source: 'screenshot', indexSuffix })
 }
 
+function isMacAppBundle(p: string): boolean {
+  return process.platform === 'darwin' && /\.app\/*$/i.test(p)
+}
+
+function isDirectoryPath(p: string): boolean {
+  return statSync(p).isDirectory() && !isMacAppBundle(p)
+}
+
 /**
  * Resolve a DragRequest into concrete ItemData along with capture timestamp.
  *
@@ -87,7 +95,7 @@ export function resolveDragData(req: DragRequest): { data: ItemData; capturedAt?
         if (found) return found
         let isDir = false
         try {
-          if (existsSync(p)) isDir = statSync(p).isDirectory()
+          if (existsSync(p)) isDir = isDirectoryPath(p)
         } catch {}
         return { name: p, ext: '', size: 0, isImage: false, isDirectory: isDir }
       })
@@ -386,10 +394,11 @@ function createFileStackDragIcon(paths: string[], entries?: Array<{ isDirectory?
     if (isDir === undefined) {
       try {
         if (existsSync(p)) {
-          isDir = statSync(p).isDirectory()
+          isDir = isDirectoryPath(p)
         }
       } catch {}
     }
+    if (isDir && isMacAppBundle(p)) isDir = false
     return getFileKind(p, isDir).kind
   })
   const cacheKey = `stack|pastel-svg|${kinds.join('-')}|${count}`
