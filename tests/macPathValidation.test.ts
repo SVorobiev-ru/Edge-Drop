@@ -1,21 +1,16 @@
 import { afterAll, afterEach, describe, expect, it } from 'vitest'
 import { isValidFilePath } from '../electron/main/pathValidation'
-
-const realPlatform = process.platform
-
-function setPlatform(value: string): void {
-  Object.defineProperty(process, 'platform', { value, configurable: true })
-}
+import { restorePlatform, setPlatform } from './helpers/platform'
 
 const WINDOWS_RESERVED = ['/Users/a/what?.txt', '/Users/a/a*b.txt', '/Users/a/a<b.txt', '/Users/a/a>b.txt', '/Users/a/a|b.txt', '/Users/a/"q".txt']
 
 describe('isValidFilePath per platform', () => {
   afterEach(() => {
-    setPlatform(realPlatform)
+    restorePlatform()
   })
 
   afterAll(() => {
-    setPlatform(realPlatform)
+    restorePlatform()
   })
 
   it('accepts * ? < > | " in names on darwin', () => {

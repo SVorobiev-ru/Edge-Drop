@@ -10,16 +10,19 @@ export interface EmojiSourceSkin {
   unified: string
   image?: string
   has_img_twitter?: boolean
+  has_img_apple?: boolean
 }
 
 export interface EmojiSourceEntry {
   unified: string
   name?: string
   short_name?: string
+  short_names?: string[]
   image?: string
   category: string
   sort_order?: number
   has_img_twitter?: boolean
+  has_img_apple?: boolean
   obsoleted_by?: string
   skin_variations?: Record<string, EmojiSourceSkin>
 }
@@ -37,6 +40,11 @@ export interface EmojiEntry {
   category: string
   sort: number
   skins?: Record<string, EmojiSkin>
+  keywords?: string[]
+}
+
+interface CatalogOptions {
+  native?: boolean
 }
 
 export interface EmojiCatalog {
@@ -104,8 +112,19 @@ interface CatalogAccumulator {
   byUnified: Map<string, EmojiEntry>
 }
 
-function ingestEmojiEntry(src: EmojiSourceEntry | null | undefined, acc: CatalogAccumulator): void {
-  if (!src || src.has_img_twitter === false) return
+function keywordsOf(src: EmojiSourceEntry): string[] {
+  const words = new Set<string>()
+  for (const short of [src.short_name, ...(src.short_names ?? [])]) {
+    if (short) words.add(short.toLowerCase())
+  }
+  if (src.name) words.add(src.name.toLowerCase())
+  return [...words]
+}
+
+function ingestEmojiEntry(src: EmojiSourceEntry | null | undefined, acc: CatalogAccumulator, options: CatalogOptions = {}): void {
+  const hasImage = (s: { has_img_twitter?: boolean; has_img_apple?: boolean }) =>
+    options.native ? s.has_img_apple !== false : s.has_img_twitter !== false
+  if (!src || !hasImage(src)) return
   if (SKIP_CATEGORIES.has(src.category)) return
   if (src.obsoleted_by) return
   if (!src.unified || !src.category) return
@@ -114,7 +133,7 @@ function ingestEmojiEntry(src: EmojiSourceEntry | null | undefined, acc: Catalog
   if (src.skin_variations) {
     for (const key of SKIN_TONE_KEYS) {
       const v = src.skin_variations[key]
-      if (!v || v.has_img_twitter === false || !v.unified) continue
+      if (!v || !hasImage(v) || !v.unified) continue
       skins[key] = { unified: v.unified, file: fileOf(v.image, v.unified) }
     }
   }
@@ -126,7 +145,8 @@ function ingestEmojiEntry(src: EmojiSourceEntry | null | undefined, acc: Catalog
     file: fileOf(src.image, src.unified),
     category: src.category,
     sort: typeof src.sort_order === 'number' ? src.sort_order : 9999,
-    skins: Object.keys(skins).length > 0 ? skins : undefined
+    skins: Object.keys(skins).length > 0 ? skins : undefined,
+    keywords: keywordsOf(src)
   }
   acc.all.push(entry)
   acc.byUnified.set(entry.unified, entry)
@@ -148,11 +168,11 @@ function finalizeCatalog(acc: CatalogAccumulator): EmojiCatalog {
   return { byCategory: acc.byCategory, byUnified: acc.byUnified, all: acc.all }
 }
 
-export function buildCatalog(raw: readonly EmojiSourceEntry[]): EmojiCatalog {
+export function buildCatalog(raw: readonly EmojiSourceEntry[], options: CatalogOptions = {}): EmojiCatalog {
   const acc: CatalogAccumulator = { all: [], byCategory: {}, byUnified: new Map() }
 
   for (const src of raw) {
-    ingestEmojiEntry(src, acc)
+    ingestEmojiEntry(src, acc, options)
   }
 
   return finalizeCatalog(acc)
@@ -165,13 +185,14 @@ export function buildCatalog(raw: readonly EmojiSourceEntry[]): EmojiCatalog {
  */
 export async function buildCatalogChunked(
   raw: readonly EmojiSourceEntry[],
-  chunkSize = 600
+  chunkSize = 600,
+  options: CatalogOptions = {}
 ): Promise<EmojiCatalog> {
   const acc: CatalogAccumulator = { all: [], byCategory: {}, byUnified: new Map() }
   const yieldFrame = () => new Promise<void>((resolve) => setTimeout(resolve, 0))
 
   for (let i = 0; i < raw.length; i++) {
-    ingestEmojiEntry(raw[i], acc)
+    ingestEmojiEntry(raw[i], acc, options)
     if ((i + 1) % chunkSize === 0 && i + 1 < raw.length) {
       await yieldFrame()
     }
@@ -257,4 +278,27 @@ export const MAX_RECENTS = 7 * 11 // 77 items (exactly 11 full rows in the 7-col
 export function pushRecent(recents: readonly string[], unified: string): string[] {
   const next = [unified, ...recents.filter((u) => u !== unified)]
   return next.slice(0, MAX_RECENTS)
+}
+
+export function searchEmoji(catalog: EmojiCatalog | null, query: string, limit = 160): CatalogItem[] {
+  const q = query.trim().toLowerCase().replace(/^:+|:+$/g, '')
+  if (!catalog || !q) return []
+  const tokens = q.split(/[\s_]+/).filter(Boolean)
+  const joined = tokens.join('_')
+  const ranked: Array<{ rank: number; entry: EmojiEntry }> = []
+  for (const entry of catalog.all) {
+    const keywords = entry.keywords ?? []
+    if (keywords.length === 0) continue
+    let rank = -1
+    if (keywords.includes(joined)) {
+      rank = 0
+    } else {
+      const words = keywords.flatMap((k) => k.split(/[\s_:,-]+/)).filter(Boolean)
+      if (tokens.every((tok) => words.some((w) => w.startsWith(tok)))) rank = 1
+      else if (keywords.some((k) => k.includes(q) || k.includes(joined))) rank = 2
+    }
+    if (rank >= 0) ranked.push({ rank, entry })
+  }
+  ranked.sort((a, b) => a.rank - b.rank || a.entry.sort - b.entry.sort)
+  return ranked.slice(0, limit).map(({ entry }) => ({ key: entry.unified, file: entry.file, entry }))
 }

@@ -11,12 +11,13 @@ import { existsSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { PATHS } from '../store/paths'
 import { loadSettings, saveSettings } from '../store/settings'
-import { getMainWindow, setVisible, repositionWindow, getDisplayListOptions, registerWindowRepositionListener, popUpAndRetract, markExplicitOpen } from './window'
-import type { StickPosition } from '../../shared/types'
-import { pushState } from './state'
-import { TRANSLATIONS, en } from '../../src/i18n/translations'
-import { macify, withMacHotkey } from '../../shared/platformText'
-import { resolveUiLanguage } from './language'
+import { getMainWindow, setVisible, repositionWindow, getDisplayListOptions, registerWindowRepositionListener, popUpAndRetract, markExplicitOpen, isInteractive } from './window'
+import type { StickPosition, ToggleSource } from '../../shared/types'
+import { DEFAULT_TOGGLE_HOTKEY } from '../../shared/types'
+import { pushState, getStore } from './state'
+import type { ClipboardItem } from '../../shared/types'
+import { en } from '../../src/i18n/translations'
+import { mainText } from './language'
 
 let tray: Tray | null = null
 let themeListenerRegistered = false
@@ -109,6 +110,83 @@ export function updateTrayIcon(): void {
   }
 }
 
+export function getTrayText(settingsLang: string | undefined, key: keyof typeof en['tray']): string {
+  return mainText(settingsLang, `tray.${key}`, undefined, { hotkey: loadSettings().toggleHotkey || DEFAULT_TOGGLE_HOTKEY, missing: key })
+}
+
+export function openPanelFromShell(source: ToggleSource = 'activate'): void {
+  const win = getMainWindow()
+  if (!win || win.isDestroyed()) return
+  setVisible(true)
+  if (isInteractive()) return
+  markExplicitOpen()
+  pushState.togglePanel(true, { source })
+}
+
+export function openSettingsFromShell(): void {
+  setVisible(true)
+  if (process.platform === 'darwin') {
+    markExplicitOpen()
+    pushState.togglePanel(true, { source: 'menu' })
+  } else {
+    getMainWindow()?.focus()
+  }
+  pushState.openSettings()
+}
+
+export const TRAY_RECENT_LIMIT = 8
+const TRAY_RECENT_LABEL_MAX = 48
+
+export function trayRecentLabel(text: string, max = TRAY_RECENT_LABEL_MAX): string {
+  const singleLine = text.replace(/\s+/g, ' ').trim()
+  const chars = Array.from(singleLine)
+  if (chars.length <= max) return singleLine
+  return `${chars.slice(0, max - 1).join('').trimEnd()}…`
+}
+
+export function pickRecentTextItems(items: readonly ClipboardItem[], limit = TRAY_RECENT_LIMIT): ClipboardItem[] {
+  return items
+    .filter((item) => item.data.kind === 'text' && trayRecentLabel(item.data.previewText || item.data.text) !== '')
+    .sort((a, b) => b.capturedAt - a.capturedAt)
+    .slice(0, limit)
+}
+
+export function buildRecentItemsTemplate(
+  items: readonly ClipboardItem[],
+  onPick: (id: string) => void
+): Electron.MenuItemConstructorOptions[] {
+  const recent = pickRecentTextItems(items)
+  if (recent.length === 0) return []
+  const entries: Electron.MenuItemConstructorOptions[] = recent.map((item) => ({
+    label: trayRecentLabel(item.data.kind === 'text' ? item.data.previewText || item.data.text : '').replace(/&/g, '&&'),
+    click: () => onPick(item.id)
+  }))
+  return [...entries, { type: 'separator' }]
+}
+
+export async function pasteRecentItem(id: string): Promise<boolean> {
+  const item = getStore().get(id)
+  if (!item || item.data.kind !== 'text') return false
+  try {
+    const { pasteItemById } = await import('./ipc')
+    return await pasteItemById(id, { plain: loadSettings().pastePlainText === true })
+  } catch (err) {
+    console.error('[Tray] Failed to paste a recent item:', err)
+    return false
+  }
+}
+
+const TRAY_REBUILD_DEBOUNCE_MS = 300
+let trayRebuildTimer: ReturnType<typeof setTimeout> | null = null
+
+export function scheduleTrayMenuRebuild(): void {
+  if (trayRebuildTimer !== null) clearTimeout(trayRebuildTimer)
+  trayRebuildTimer = setTimeout(() => {
+    trayRebuildTimer = null
+    trayMenuRebuilder?.()
+  }, TRAY_REBUILD_DEBOUNCE_MS)
+}
+
 export function createTray(): Tray {
   const image = getTrayImage()
   tray = new Tray(image)
@@ -165,7 +243,8 @@ export function createTray(): Tray {
     return ([
       { pos: 'left' as const, labelKey: 'left' as const },
       { pos: 'right' as const, labelKey: 'right' as const },
-      { pos: 'top' as const, labelKey: 'top' as const }
+      { pos: 'top' as const, labelKey: 'top' as const },
+      ...(process.platform === 'darwin' ? [{ pos: 'bottom' as const, labelKey: 'bottom' as const }] : [])
     ]).map(({ pos, labelKey }) => ({
       label: getTrayText(settings.language, labelKey as any) || (pos === 'top' ? 'Top' : pos),
       type: 'radio' as const,
@@ -180,23 +259,25 @@ export function createTray(): Tray {
     }))
   }
 
-function getTrayText(settingsLang: string | undefined, key: keyof typeof en['tray']): string {
-  const langCode = resolveUiLanguage(settingsLang)
-  const dict = TRANSLATIONS[langCode]
-  if (process.platform === 'darwin') {
-    const raw = (dict?.tray?.[key]) || en.tray[key] || key
-    return macify(withMacHotkey(raw, loadSettings().toggleHotkey || 'Alt+C'), langCode)
-  }
-  return (dict?.tray?.[key]) || en.tray[key] || key
-}
-
   let macMenu: Electron.Menu | null = null
 
   const rebuild = () => {
     const settings = loadSettings()
     const t = (k: keyof typeof en['tray']) => getTrayText(settings.language, k)
 
+    let recentItems: Electron.MenuItemConstructorOptions[] = []
+    if (process.platform === 'darwin') {
+      try {
+        recentItems = buildRecentItemsTemplate(getStore().list(), (id) => {
+          void pasteRecentItem(id)
+        })
+      } catch (err) {
+        console.error('[Tray] Failed to build recent items:', err)
+      }
+    }
+
     const menu = Menu.buildFromTemplate([
+      ...recentItems,
       {
         label: t('showClipboard'),
         click: () => {
@@ -204,20 +285,14 @@ function getTrayText(settingsLang: string | undefined, key: keyof typeof en['tra
           setVisible(true)
           getMainWindow()?.focus()
           markExplicitOpen()
-          pushState.togglePanel()
+          pushState.togglePanel(undefined, { source: 'menu' })
         }
       },
       {
         label: t('settings'),
         click: () => {
           console.log('[Main] Context menu "Settings" clicked')
-          setVisible(true)
-          if (process.platform === 'darwin') {
-            markExplicitOpen()
-            app.focus({ steal: true })
-          }
-          getMainWindow()?.focus()
-          pushState.openSettings()
+          openSettingsFromShell()
         }
       },
       { type: 'separator' },
@@ -281,7 +356,7 @@ function getTrayText(settingsLang: string | undefined, key: keyof typeof en['tra
     if (!win) return
     setVisible(true)
     markExplicitOpen()
-    pushState.togglePanel()
+    pushState.togglePanel(undefined, { source: 'tray' })
   })
 
   // Rebuild menu dynamically right before showing to ensure displays & checkmarks are 100% current.

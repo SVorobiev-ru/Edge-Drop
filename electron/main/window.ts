@@ -16,18 +16,27 @@ import { BrowserWindow, screen, shell, powerMonitor, app } from 'electron'
 import { join } from 'node:path'
 import { existsSync } from 'node:fs'
 import koffi from 'koffi'
-import { frontmostPid, activatePid, weAreFrontmost } from './macNative'
+import { frontmostPid, activatePid, weAreFrontmost, pressedMouseButtons } from './macNative'
 import { APP_CONFIG } from './config'
 import { runtime } from './config'
 import { PATHS } from '../store/paths'
 import { TRANSLATIONS, en } from '../../src/i18n/translations'
-import { computeStickBounds } from './geometry'
+import { computeStickBounds, stickWindowWidth, windowFillsWorkArea } from './geometry'
+import { clampPanelWidth } from '../../shared/panelWidth'
+import { applyClickThroughMode, clickThroughVerdict, enforceClickThrough, getClickThroughState, noteForced, noteInteractive, resetRendererState } from './clickThrough'
 import { WorkAreaCache } from './workAreaCache'
-import { probeSeamAware, isNearProximity, type SeamTickState } from './stickProbe'
+import { probeSeamAware, isNearProximity, isNearProximityMac, isInMacReportBand, shouldSendCursorEdge, type SeamTickState } from './stickProbe'
 import { loadSettings, saveSettings } from '../store/settings'
 import { isFullscreenAppActive, registerFullscreenActiveListener } from './fullscreen'
-import { macTriggerZone, macReportedPoint, pickInitialStickPosition, readDockOrientation } from './macScreen'
+import { macTriggerZone, macReportedPoint, pickInitialStickPosition, readDockOrientation, panelPlacementChanged, type PanelPlacement } from './macScreen'
+import { installMacWebGuards } from './webGuard'
 import { DEFAULT_SETTINGS } from '../../shared/types'
+import { activateForKeyboard, createMacEscapeCapture, waitUntilNotFrontmost } from './macKeyboardFocus'
+import { createPanelVibrancy } from './macPanelVibrancy'
+import { applyMacWindowOptionsTo } from './macWindowOptions'
+import { createPanelDrag } from './macPanelDrag'
+import { isHorizontalEdge, type DragPlacement } from '../../shared/panelPlacement'
+import type { Settings } from '../../shared/types'
 
 type RegisterWindowMessageFn = (lpString: string) => number
 type SetWindowLongPtrFn = (hWnd: number | bigint, nIndex: number, dwNewLong: number | bigint) => number | bigint
@@ -117,7 +126,6 @@ export function registerClipboardUpdateListener(fn: () => void): void {
 
 const WM_CLIPBOARDUPDATE = 0x031D
 
-export const PANEL_WIDTH = 384
 /** Visual width of the blade when collapsed (only used by the renderer). */
 export const COLLAPSED_WIDTH = 0
 
@@ -132,6 +140,8 @@ export let currentHotZoneWidth = 3
 export let currentStickDisplayId: number | undefined
 
 let staleIdConsecutiveCount = 0
+let lastPanelPlacement: PanelPlacement | null = null
+let geometryPanelWidth: number | null = null
 
 /**
  * Stick-display work area cache (versioned, last-known-good).
@@ -334,8 +344,7 @@ export async function resolvePasteTarget(normalDelayMs: number): Promise<number>
     try {
       if (!weAreFrontmost()) return normalDelayMs
       setWindowFocusable(false)
-      await new Promise((r) => setTimeout(r, 150))
-      return weAreFrontmost() ? -1 : 80
+      return (await waitUntilNotFrontmost()) ? 80 : -1
     } catch {
       return normalDelayMs
     }
@@ -369,9 +378,23 @@ export function markExplicitOpen(): void {
   explicitOpenMarkedAt = Date.now()
 }
 
+const macEscape = createMacEscapeCapture(
+  () => interactive && openedExplicitly && focusabilityApplied !== true && !runtime.quitting && !pollPausedForLock,
+  () => {
+    if (interactive) sendToMainWindow('window:toggle', false)
+  }
+)
+
+export const syncMacEscapeCapture = macEscape.sync
+
 export function setInteractive(value: boolean): void {
-  if (!mainWindow || value === interactive) return
+  if (!mainWindow) return
+  if (value === interactive) {
+    if (!value && process.platform === 'darwin') enforceClickThrough(mainWindow)
+    return
+  }
   interactive = value
+  if (process.platform === 'darwin') noteInteractive(value, Date.now())
   openedExplicitly = value && explicitOpenMarkedAt > 0 && Date.now() - explicitOpenMarkedAt <= EXPLICIT_OPEN_TTL_MS
   explicitOpenMarkedAt = 0
   if (value) {
@@ -384,7 +407,8 @@ export function setInteractive(value: boolean): void {
       clearTimeout(gcTimer)
       gcTimer = null
     }
-    mainWindow.setIgnoreMouseEvents(false)
+    if (process.platform === 'darwin') applyClickThroughMode(mainWindow, 'solid')
+    else mainWindow.setIgnoreMouseEvents(false)
     // Use 'screen-saver' level to stay above fullscreen apps (YouTube fullscreen, games, etc.)
     // 'floating' (HWND_TOPMOST) can be pushed behind by fullscreen D3D/browser windows.
     mainWindow.setAlwaysOnTop(true, 'screen-saver')
@@ -392,7 +416,12 @@ export function setInteractive(value: boolean): void {
     applyNoActivateStyle(mainWindow, true)
   } else {
     // Panel is closed: full click-through, no forwarding needed.
-    mainWindow.setIgnoreMouseEvents(true, { forward: false })
+    if (process.platform === 'darwin') {
+      enforceClickThrough(mainWindow)
+      panelVibrancy.hide()
+    } else {
+      mainWindow.setIgnoreMouseEvents(true, { forward: false })
+    }
     mainWindow.setAlwaysOnTop(true, 'screen-saver')
     mainWindow.setSkipTaskbar(true)
     applyNoActivateStyle(mainWindow, true)
@@ -408,12 +437,74 @@ export function setInteractive(value: boolean): void {
       }, 1500)
     }
   }
+  syncMacEscapeCapture()
+}
+
+export function applyMacWindowOptions(settings: Pick<ReturnType<typeof loadSettings>, 'theme' | 'hideFromScreenCapture'> = loadSettings()): void {
+  applyMacWindowOptionsTo(mainWindow, settings)
 }
 
 export function setPreviewMode(active: boolean): void {
   if (previewActive === active) return
   previewActive = active
+  if (process.platform !== 'darwin') repositionWindow()
+}
+
+const panelVibrancy = createPanelVibrancy(() => mainWindow)
+
+export const handlePanelState = panelVibrancy.handlePanelState
+export const registerPanelStateIpc = panelVibrancy.registerIpc
+
+function commitPanelPlacement(target: DragPlacement): Settings {
+  const next = saveSettings({
+    stickPosition: target.edge,
+    stickDisplayId: target.displayId,
+    stickDisplayWorkArea: target.workArea,
+    stickDisplayScaleFactor: target.scaleFactor,
+    ...(isHorizontalEdge(target.edge) ? { horizontalOffset: target.offset } : { verticalOffset: target.offset })
+  })
+  sendSettingsToAllWindows(next)
   repositionWindow()
+  return next
+}
+
+const panelDrag = createPanelDrag({
+  getWindow: () => mainWindow,
+  getDisplayId: () => currentStickDisplayId,
+  commit: commitPanelPlacement,
+  restore: () => repositionWindow()
+})
+
+export const registerPanelDragIpc = panelDrag.registerIpc
+
+function updateClickThrough(): void {
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  const bounds = mainWindow.getBounds()
+  const pt = screen.getCursorScreenPoint()
+  const verdict = clickThroughVerdict({
+    interactive,
+    cursor: { x: pt.x - bounds.x, y: pt.y - bounds.y },
+    now: Date.now(),
+    mouseButtons: () => pressedMouseButtons(),
+    holdOpen: panelDrag.isActive()
+  })
+  if (verdict.force) {
+    noteForced(verdict.force)
+    if (verdict.closeRenderer) sendToMainWindow('window:toggle', false)
+    setInteractive(false)
+    return
+  }
+  applyClickThroughMode(mainWindow, verdict.mode)
+}
+
+function reassertClickThrough(): void {
+  if (process.platform !== 'darwin' || !mainWindow || mainWindow.isDestroyed()) return
+  if (!interactive) {
+    enforceClickThrough(mainWindow)
+    return
+  }
+  const mode = getClickThroughState().mode
+  if (mode) applyClickThroughMode(mainWindow, mode, true)
 }
 
 /**
@@ -468,6 +559,7 @@ let _lastProximityExitMs = 0
  * is unchanged (one ~8s FAST window per launch/wake).
  */
 export function requestPollBoost(durationMs = 8000): void {
+  if (process.platform === 'darwin') return
   try {
     _boostUntilMs = Date.now() + Math.max(0, durationMs)
   } catch {
@@ -484,6 +576,8 @@ let _lastSentX = -9999
 let _lastSentY = -9999
 /** Seam-policy tracker threaded between ticks (see stickProbe.ts pillars). */
 let _seamState: SeamTickState = {}
+let _lastInReportBand = false
+let pollPausedForLock = false
 
 /**
  * Temporarily suspend the always-on-top heartbeat.
@@ -528,7 +622,9 @@ function _pollTick(): void {
   if (runtime.quitting || !mainWindow || mainWindow.isDestroyed() || !mainWindow.isVisible()) return
 
   const settings = loadSettings()
-  if (settings.suppressInFullscreen && isFullscreenAppActive()) {
+  if (process.platform !== 'darwin' && geometryPanelWidth !== null && clampPanelWidth(settings.panelWidth) !== geometryPanelWidth) repositionWindow()
+  if (process.platform === 'darwin') updateClickThrough()
+  if (settings.suppressInFullscreen && isFullscreenAppActive(currentStickDisplayId)) {
     if (process.platform !== 'darwin' || !interactive) return
   }
 
@@ -572,7 +668,10 @@ function _pollTick(): void {
   // ── Adaptive speed: switch to fast poll when cursor approaches the edge ──
   // The launch/wake boost forces FAST during the cold window so the first
   // hover never waits on a SLOW tick. `isNearProximity` behavior is untouched.
-  const nearProximity = isNearProximity(distFromEdge) || Date.now() < _boostUntilMs
+  const macDisplayBounds = macZone ? (workAreaCache.getBounds(currentStickDisplayId) ?? wa) : null
+  const nearProximity = macDisplayBounds
+    ? isNearProximityMac({ distFromEdge, cursor: pt, displayBounds: macDisplayBounds })
+    : isNearProximity(distFromEdge) || Date.now() < _boostUntilMs
 
   if (nearProximity || interactive) {
     _lastProximityExitMs = 0  // reset cooldown
@@ -622,7 +721,26 @@ function _pollTick(): void {
     Math.abs(clientX - _lastSentX) >= IPC_MIN_DELTA_PX ||
     Math.abs(clientY - _lastSentY) >= IPC_MIN_DELTA_PX
 
-  const shouldSend = newState !== lastEdgeState || interactive || (nearEdge && positionChangedEnough)
+  const inReportBand = macZone && macDisplayBounds
+    ? isInMacReportBand({
+        distFromEdge,
+        cursor: pt,
+        displayBounds: macDisplayBounds,
+        stickPosition: settings.stickPosition,
+        hotZoneWidth: macZone.hotZoneWidth
+      })
+    : false
+
+  const shouldSend = shouldSendCursorEdge({
+    platform: process.platform,
+    stateChanged: newState !== lastEdgeState,
+    interactive,
+    nearEdge,
+    inReportBand,
+    wasInReportBand: _lastInReportBand,
+    positionChangedEnough
+  })
+  _lastInReportBand = inReportBand
 
   if (shouldSend) {
     lastEdgeState = newState
@@ -653,7 +771,7 @@ function _pollTick(): void {
 }
 
 export function startCursorPoll(): void {
-  if (cursorPollTimer !== null) return
+  if (cursorPollTimer !== null || pollPausedForLock) return
   // Start in slow mode; will accelerate when cursor approaches the edge.
   const slowMs = powerMonitor.isOnBatteryPower() ? POLL_SLOW_BATTERY_MS : POLL_SLOW_AC_MS
   _pollFast = false
@@ -671,6 +789,29 @@ export function stopCursorPoll(): void {
   }
 }
 
+let macLockHooksRegistered = false
+
+export function registerMacLockScreenHooks(): void {
+  if (process.platform !== 'darwin' || macLockHooksRegistered) return
+  macLockHooksRegistered = true
+  powerMonitor.on('lock-screen', () => {
+    pollPausedForLock = true
+    stopCursorPoll()
+    macEscape.release()
+  })
+  powerMonitor.on('unlock-screen', () => {
+    pollPausedForLock = false
+    if (runtime.quitting) return
+    reassertClickThrough()
+    startCursorPoll()
+    syncMacEscapeCapture()
+  })
+  powerMonitor.on('resume', () => {
+    if (runtime.quitting) return
+    reassertClickThrough()
+  })
+}
+
 function getStickGeometry(): { x: number; y: number; width: number; height: number } {
   let settings = loadSettings()
   const primaryDisplay = screen.getPrimaryDisplay()
@@ -681,7 +822,8 @@ function getStickGeometry(): { x: number; y: number; width: number; height: numb
     isPrimary: d.id === primaryDisplay.id
   }))
 
-  const currentWindowWidth = previewActive ? 820 : PANEL_WIDTH
+  geometryPanelWidth = clampPanelWidth(settings.panelWidth)
+  const currentWindowWidth = stickWindowWidth({ panelWidth: settings.panelWidth, previewActive })
 
   const result = computeStickBounds({
     position: settings.stickPosition,
@@ -692,7 +834,8 @@ function getStickGeometry(): { x: number; y: number; width: number; height: numb
     windowWidth: currentWindowWidth,
     horizontalOffset: settings.horizontalOffset,
     currentBounds: getMainWindow()?.getBounds(),
-    previewActive
+    previewActive,
+    fillWorkArea: windowFillsWorkArea(process.platform)
   })
 
   const resolved = result.resolvedDisplay
@@ -809,7 +952,9 @@ function applyMacInitialStickPosition(): void {
       const next = saveSettings({ stickPosition: position })
       sendSettingsToAllWindows(next)
       if (!mainWindow || mainWindow.isDestroyed()) return
-      mainWindow.setBounds({ ...getStickGeometry() })
+      const g = getStickGeometry()
+      mainWindow.setBounds({ ...g })
+      lastPanelPlacement = { displayId: currentStickDisplayId, bounds: { ...g } }
       onWindowRepositioned?.()
     })
     .catch((err) => {
@@ -820,6 +965,7 @@ function applyMacInitialStickPosition(): void {
 export function createWindow(): BrowserWindow {
   const macFirstRun = process.platform === 'darwin' && isFirstRunWithoutSettings()
   const { x, y, width, height } = getStickGeometry()
+  lastPanelPlacement = { displayId: currentStickDisplayId, bounds: { x, y, width, height } }
 
   mainWindow = new BrowserWindow({
     icon: PATHS.icon(),
@@ -854,10 +1000,12 @@ export function createWindow(): BrowserWindow {
 
   if (process.platform === 'darwin') {
     try { mainWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true }) } catch { /* ignore */ }
+    applyMacWindowOptions()
   }
 
   // Start click-through with no forwarding — edge detection is done via cursor poll.
-  mainWindow.setIgnoreMouseEvents(true, { forward: false })
+  if (process.platform === 'darwin') enforceClickThrough(mainWindow)
+  else mainWindow.setIgnoreMouseEvents(true, { forward: false })
 
   // Apply WS_EX_NOACTIVATE so clicking the panel never steals OS focus from the active application.
   applyNoActivateStyle(mainWindow, true)
@@ -904,10 +1052,17 @@ export function createWindow(): BrowserWindow {
     }
   }
 
-  registerFullscreenActiveListener(() => {
+  registerFullscreenActiveListener((fullscreenDisplayId) => {
+    if (panelDrag.isActive()) return
     const settings = loadSettings()
     if (settings.suppressInFullscreen && (settings.hoverActivation ?? true)) {
       if (process.platform === 'darwin' && (!interactive || openedExplicitly)) return
+      if (
+        process.platform === 'darwin' &&
+        typeof fullscreenDisplayId === 'number' &&
+        currentStickDisplayId !== undefined &&
+        fullscreenDisplayId !== currentStickDisplayId
+      ) return
       sendToMainWindow('window:toggle', false)
       setInteractive(false)
     }
@@ -916,8 +1071,10 @@ export function createWindow(): BrowserWindow {
   const handleDisplayChange = (triggerPopUp = false) => {
     updateCachedWorkArea()
     console.log('[Main] Display metrics/topology changed — validating bounds and repositioning window')
+    const placementBefore = lastPanelPlacement
     repositionWindow()
     if (triggerPopUp) {
+      if (process.platform === 'darwin' && !panelPlacementChanged(placementBefore, lastPanelPlacement)) return
       popUpAndRetract(1500)
     }
   }
@@ -958,10 +1115,14 @@ export function createWindow(): BrowserWindow {
   })
 
   // Open external links in the default browser.
-  mainWindow.webContents.setWindowOpenHandler((details) => {
-    shell.openExternal(details.url)
-    return { action: 'deny' }
-  })
+  if (process.platform === 'darwin') {
+    installMacWebGuards(mainWindow.webContents)
+  } else {
+    mainWindow.webContents.setWindowOpenHandler((details) => {
+      shell.openExternal(details.url)
+      return { action: 'deny' }
+    })
+  }
 
   // Load the renderer.
   if (APP_CONFIG.is.dev && process.env.ELECTRON_RENDERER_URL) {
@@ -978,8 +1139,21 @@ export function createWindow(): BrowserWindow {
     applyNoActivateStyle(mainWindow, true)
   })
 
-  mainWindow.webContents.on('console-message', (_event, _level, message, line, sourceId) => {
-    console.log(`[Renderer] ${message} (${sourceId}:${line})`)
+  if (process.platform === 'darwin') {
+    const resetRenderer = (source: string): void => {
+      panelDrag.cancel()
+      resetRendererState(Date.now())
+      panelVibrancy.hide()
+      if (interactive) noteForced(source)
+      setInteractive(false)
+    }
+    mainWindow.webContents.on('did-finish-load', () => resetRenderer('did-finish-load'))
+    mainWindow.webContents.on('render-process-gone', () => resetRenderer('render-process-gone'))
+    mainWindow.webContents.on('did-start-loading', () => panelDrag.cancel())
+  }
+
+  mainWindow.webContents.on('console-message', ({ message, lineNumber, sourceId }) => {
+    console.log(`[Renderer] ${message} (${sourceId}:${lineNumber})`)
   })
 
   mainWindow.on('close', (e) => {
@@ -1165,13 +1339,15 @@ export function popUpAndRetract(durationMs = 1500): void {
 }
 
 export function repositionWindow(): void {
-  if (!mainWindow || mainWindow.isDestroyed()) return
+  if (!mainWindow || mainWindow.isDestroyed() || panelDrag.isActive()) return
   if (mainWindow.isMinimized()) mainWindow.restore()
   mainWindow.showInactive()
   mainWindow.setAlwaysOnTop(true, 'screen-saver')
   mainWindow.setSkipTaskbar(true)
   const g = getStickGeometry()
   mainWindow.setBounds({ ...g })
+  lastPanelPlacement = { displayId: currentStickDisplayId, bounds: { ...g } }
+  reassertClickThrough()
   onWindowRepositioned?.()
 }
 
@@ -1195,14 +1371,14 @@ export function setWindowFocusable(focusable: boolean): void {
         if (pid && pid !== process.pid) lastExternalPid = pid
         mainWindow.setFocusable(true)
         focusabilityApplied = true
-        app.focus({ steal: true })
-        mainWindow.focus()
+        activateForKeyboard(mainWindow, () => focusabilityApplied === true)
       } else {
         mainWindow.setFocusable(false)
         focusabilityApplied = false
         if (weAreFrontmost() && lastExternalPid) activatePid(lastExternalPid)
       }
     } catch { /* ignore */ }
+    syncMacEscapeCapture()
     return
   }
   if (mainWindow && !mainWindow.isDestroyed()) {

@@ -5,8 +5,11 @@
  * No looping bob, no glow bloom. Reduce Motion fades only.
  */
 import { motion, AnimatePresence } from 'framer-motion'
-import { useStore } from '../store/appStore'
+import { useStore, selectReduceMotion } from '../store/appStore'
 import { OCTO_PATH } from './LiquidOctopusLoader'
+import { panelRect } from '../lib/panelPosition'
+import { isHorizontalEdge } from '../../shared/panelPlacement'
+import type { Settings } from '../../shared/types'
 
 /** System confirmation ease — fast settle, no bounce. */
 const EASE_OUT: [number, number, number, number] = [0.22, 1, 0.36, 1]
@@ -258,18 +261,24 @@ export function SparkleIndicatorIcon({
   )
 }
 
+function dockCenterX(settings: Settings, width: number, height: number): number {
+  const dock = panelRect(settings, { width, height }, null, null)
+  return dock.x + dock.width / 2
+}
+
 export function CopyIndicatorCurve() {
   const copyFlareActive = useStore((s) => s.copyFlareActive)
   const flareKey = useStore((s) => s.flareKey)
   const open = useStore((s) => s.open)
   const settings = useStore((s) => s.settings)
   const isRight = settings.stickPosition === 'right'
-  const isTop = settings.stickPosition === 'top'
-  const isHorizontal = isTop
+  const isBottom = settings.stickPosition === 'bottom'
+  const isHorizontal = isHorizontalEdge(settings.stickPosition)
   const indicatorStyle = settings.copyIndicatorStyle || 'logo'
-  const reduceMotion = !!settings.reduceMotion
+  const reduceMotion = useStore(selectReduceMotion)
 
   const screenH = typeof window !== 'undefined' ? window.innerHeight : 1080
+  const screenW = typeof window !== 'undefined' ? window.innerWidth : 1920
   const bulge = 48
   const hw = settings.hotZoneWidth || 3
 
@@ -323,9 +332,9 @@ export function CopyIndicatorCurve() {
             isHorizontal
               ? {
                   position: 'absolute',
-                  left: '50%',
+                  left: dockCenterX(settings, screenW, screenH),
                   x: '-50%',
-                  top: 0,
+                  [isBottom ? 'bottom' : 'top']: 0,
                   width: boxW,
                   height: boxH,
                   pointerEvents: 'none',
@@ -349,7 +358,7 @@ export function CopyIndicatorCurve() {
             viewBox={`0 0 ${boxW} ${boxH}`}
             fill="none"
             xmlns="http://www.w3.org/2000/svg"
-            style={{ overflow: 'visible' }}
+            style={{ overflow: 'visible', transform: isBottom ? 'scaleY(-1)' : undefined }}
           >
             <motion.path
               d={activePath}
@@ -373,7 +382,7 @@ export function CopyIndicatorCurve() {
                     position: 'absolute',
                     left: '50%',
                     x: '-50%',
-                    top: 2,
+                    [isBottom ? 'bottom' : 'top']: 2,
                     width: 43.3,
                     height: 43.3,
                     display: 'flex',

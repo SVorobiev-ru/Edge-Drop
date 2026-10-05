@@ -1,4 +1,5 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { restorePlatform, setPlatform } from './helpers/platform'
 
 const mocks = vi.hoisted(() => ({
   read: vi.fn(),
@@ -66,12 +67,6 @@ import { macFilePaths } from '../electron/clipboard/formats'
 
 type Formats = typeof import('../electron/clipboard/formats')
 
-const realPlatform = process.platform
-
-function setPlatform(value: string): void {
-  Object.defineProperty(process, 'platform', { value, configurable: true })
-}
-
 function plist(...paths: string[]): string {
   return (
     '<?xml version="1.0" encoding="UTF-8"?>\n' +
@@ -109,11 +104,11 @@ describe('macFilePaths', () => {
   })
 
   afterEach(() => {
-    setPlatform(realPlatform)
+    restorePlatform()
   })
 
   afterAll(() => {
-    setPlatform(realPlatform)
+    restorePlatform()
   })
 
   describe('NSFilenamesPboardType plist', () => {

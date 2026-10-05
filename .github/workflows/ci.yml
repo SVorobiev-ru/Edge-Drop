@@ -35,3 +35,20 @@ jobs:
       - run: npm ci
       - run: npx vitest run
       - run: npm run typecheck
+      - name: Build the macOS app
+        if: runner.os == 'macOS'
+        run: npm run build:mac
+      - name: Locate the built app
+        if: runner.os == 'macOS'
+        run: |
+          case "$(uname -m)" in
+            arm64) dir=dist/mac-arm64 ;;
+            *) dir=dist/mac ;;
+          esac
+          echo "MAC_APP=${dir}/Edge-Drop.app" >> "$GITHUB_ENV"
+      - name: Check the app.asar contents
+        if: runner.os == 'macOS'
+        run: node scripts/check-mac-asar.cjs "$MAC_APP"
+      - name: Smoke-test the built binary
+        if: runner.os == 'macOS'
+        run: bash scripts/smoke-test-mac.sh "$MAC_APP"

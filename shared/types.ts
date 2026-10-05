@@ -41,6 +41,7 @@ export type ClipboardImageFields = {
   width: number
   height: number
   bytes: number
+  fileBytes?: number
   ext?: string
   source?: ClipboardImageSource
   fileName?: string
@@ -70,7 +71,64 @@ export interface ClipboardItem {
   hitCount: number
   /** Pinned items never scroll off and survive app restarts. */
   pinned: boolean
+  sourceApp?: SourceApp
+  title?: string
+  ocrText?: string
 }
+
+export interface SourceApp {
+  bundleId: string
+  name?: string
+}
+
+export interface AppInfo {
+  bundleId: string
+  name: string
+  icon?: string
+}
+
+export interface PasteOptions {
+  plain?: boolean
+}
+
+export interface SolidRect {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+export interface PanelDragResult {
+  moved: boolean
+  settings: Settings
+}
+
+/** Where the dragged panel is attached right now; `area` is the size of that display's work area. */
+export interface PanelDragPlacement {
+  displayId: number
+  edge: StickPosition
+  offset: number
+  area: { width: number; height: number }
+}
+
+export type PanelCursor = 'ew-resize' | 'ns-resize' | null
+
+export interface MultiRequest {
+  ids: string[]
+  plain?: boolean
+}
+
+export type ThemeMode = 'system' | 'dark' | 'light'
+
+export interface HotkeyResult {
+  ok: boolean
+  reason?: 'reserved' | 'taken' | 'invalid'
+  settings: Settings
+}
+
+export type ItemMenuAction = 'preview' | 'rename'
+
+export type ToggleSource = 'hotkey' | 'tray' | 'menu' | 'url' | 'activate'
 
 /**
  * Display metadata for a single file inside a `files` bundle.
@@ -99,7 +157,7 @@ export interface ClipboardItemDto extends Omit<ClipboardItem, 'data'> {
 /** Section the renderer groups items into. */
 export type ItemSection = 'pinned' | 'shelf'
 
-export type StickPosition = 'left' | 'right' | 'top'
+export type StickPosition = 'left' | 'right' | 'top' | 'bottom'
 
 export interface DisplayInfo {
   id: number
@@ -123,6 +181,10 @@ export interface DragRequest {
   paths?: string[]
   imageId?: string
   splitPlacement?: 'before' | 'after'
+}
+
+export interface ItemMenuRequest extends DragRequest {
+  selection?: string[]
 }
 
 /**
@@ -216,6 +278,26 @@ export interface Settings {
   /** Configurable global hotkey accelerator to toggle Edge-Drop shelf (e.g. 'Alt+C', 'Alt+Shift+C'). Default: 'Alt+C'. */
   toggleHotkey?: string
   captureScreenshots?: boolean
+  theme?: ThemeMode
+  vibrancy?: boolean
+  hideFromScreenCapture?: boolean
+  pastePlainText?: boolean
+  ignoredApps?: string[]
+  ignoreRemoteClipboard?: boolean
+  recognizeImageText?: boolean
+  pasteQueueHotkey?: string
+  macDefaultsVersion?: number
+  panelWidth?: number
+  dockWidth?: number
+  dockHeight?: number
+}
+
+export const DEFAULT_TOGGLE_HOTKEY = 'Alt+C'
+export const MAC_TOGGLE_HOTKEY = 'Command+Shift+V'
+export const DEFAULT_PASTE_QUEUE_HOTKEY = 'Command+Control+V'
+
+export function defaultToggleHotkey(mac: boolean): string {
+  return mac ? MAC_TOGGLE_HOTKEY : DEFAULT_TOGGLE_HOTKEY
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -250,8 +332,18 @@ export const DEFAULT_SETTINGS: Settings = {
   updateMode: 'auto',
   skippedUpdateVersion: undefined,
   language: 'system',
-  toggleHotkey: 'Alt+C',
-  captureScreenshots: true
+  toggleHotkey: DEFAULT_TOGGLE_HOTKEY,
+  captureScreenshots: true,
+  theme: 'dark',
+  vibrancy: false,
+  hideFromScreenCapture: false,
+  pastePlainText: false,
+  ignoredApps: [],
+  ignoreRemoteClipboard: false,
+  recognizeImageText: true,
+  pasteQueueHotkey: DEFAULT_PASTE_QUEUE_HOTKEY,
+  macDefaultsVersion: undefined,
+  panelWidth: 270
 }
 
 

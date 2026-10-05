@@ -1,4 +1,5 @@
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
+import { restorePlatform, setPlatform } from './helpers/platform'
 
 vi.mock('../src/i18n', () => ({
   t: (key: string) => key,
@@ -7,12 +8,6 @@ vi.mock('../src/i18n', () => ({
 
 type FormatModule = typeof import('../src/lib/format')
 type FileTypeModule = typeof import('../src/lib/fileType')
-
-const realPlatform = process.platform
-
-function setPlatform(value: string): void {
-  Object.defineProperty(process, 'platform', { value, configurable: true })
-}
 
 async function load(platform: string): Promise<{ format: FormatModule; fileType: FileTypeModule }> {
   setPlatform(platform)
@@ -23,11 +18,11 @@ async function load(platform: string): Promise<{ format: FormatModule; fileType:
 }
 
 afterEach(() => {
-  setPlatform(realPlatform)
+  restorePlatform()
 })
 
 afterAll(() => {
-  setPlatform(realPlatform)
+  restorePlatform()
 })
 
 describe('toUrlPath', () => {

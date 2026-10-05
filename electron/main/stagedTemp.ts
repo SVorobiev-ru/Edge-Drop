@@ -23,10 +23,11 @@
  * is a debounced (150 ms) tiny JSON write after user-triggered staging, plus
  * one directory scan at startup. No timers, no watchers, no polling.
  */
-import { existsSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { PATHS, getUnpackagedTempDir, isStagedTempPath } from '../store/paths'
-import { contentSignature } from '../store/signature'
+import { contentSignature, isCurrentSignature } from '../store/signature'
+import { writeFileAtomicSync } from '../store/atomicWrite'
 import type { ItemData } from '../../shared/types'
 
 interface RegistryEntry {
@@ -61,6 +62,7 @@ function ensureLoaded(): void {
         (e): e is RegistryEntry =>
           !!e &&
           typeof (e as RegistryEntry).sig === 'string' &&
+          isCurrentSignature((e as RegistryEntry).sig) &&
           Array.isArray((e as RegistryEntry).files) &&
           (e as RegistryEntry).files.every((f) => typeof f === 'string')
       )
@@ -76,10 +78,9 @@ function persistSync(): void {
     persistTimer = null
   }
   try {
-    writeFileSync(
+    writeFileAtomicSync(
       PATHS.stagedTempRegistryFile(),
-      JSON.stringify({ v: REGISTRY_VERSION, entries }, null, 2),
-      'utf8'
+      JSON.stringify({ v: REGISTRY_VERSION, entries }, null, 2)
     )
   } catch {
     /* non-fatal: worst case the next startup sweep reaps orphans */

@@ -5,11 +5,28 @@
  * The store guards against partial/corrupt files by deep-merging onto the
  * defaults so a bad field never takes the whole app down.
  */
-import { readFileSync, writeFileSync, existsSync } from 'node:fs'
-import { DEFAULT_SETTINGS, isUpdateMode, type Settings } from '../../shared/types'
+import { readFileSync, existsSync } from 'node:fs'
+import { DEFAULT_SETTINGS, MAC_TOGGLE_HOTKEY, isUpdateMode, type Settings } from '../../shared/types'
 import { PATHS } from './paths'
+import { writeFileAtomicSync } from './atomicWrite'
+import { clampDockHeight, clampDockWidth, clampPanelWidth } from '../../shared/panelWidth'
 
 let cache: Settings | null = null
+
+const MAC_DEFAULTS_VERSION = 1
+const LEGACY_TOGGLE_HOTKEY = 'Alt+C'
+
+export function macDefaultsPatch(file: Partial<Settings>, fresh: boolean): Partial<Settings> | null {
+  if (typeof file.macDefaultsVersion === 'number' && file.macDefaultsVersion >= MAC_DEFAULTS_VERSION) return null
+  const patch: Partial<Settings> = { macDefaultsVersion: MAC_DEFAULTS_VERSION }
+  if (file.toggleHotkey === undefined || file.toggleHotkey === LEGACY_TOGGLE_HOTKEY) patch.toggleHotkey = MAC_TOGGLE_HOTKEY
+  if (fresh) {
+    patch.soundEffects = false
+    patch.theme = 'system'
+    patch.launchAtLogin = false
+  }
+  return patch
+}
 
 function merge(base: Settings, patch: Partial<Settings>): Settings {
   const out = { ...base, ...patch } as Settings
@@ -21,7 +38,8 @@ function merge(base: Settings, patch: Partial<Settings>): Settings {
   if (out.uiStyle !== 'modern' && out.uiStyle !== 'compact') {
     out.uiStyle = 'modern'
   }
-  if (out.stickPosition !== 'left' && out.stickPosition !== 'right' && out.stickPosition !== 'top') {
+  const bottomAllowed = process.platform === 'darwin' && out.stickPosition === 'bottom'
+  if (out.stickPosition !== 'left' && out.stickPosition !== 'right' && out.stickPosition !== 'top' && !bottomAllowed) {
     out.stickPosition = 'left'
   }
   if (out.triggerAlignment !== 'top' && out.triggerAlignment !== 'center' && out.triggerAlignment !== 'bottom' && out.triggerAlignment !== 'left' && out.triggerAlignment !== 'right') {
@@ -31,6 +49,9 @@ function merge(base: Settings, patch: Partial<Settings>): Settings {
     out.horizontalOffset = 0.5
   }
   out.horizontalOffset = Math.min(1.0, Math.max(0.0, out.horizontalOffset))
+  out.panelWidth = clampPanelWidth(out.panelWidth)
+  if (out.dockWidth !== undefined) out.dockWidth = clampDockWidth(out.dockWidth)
+  if (out.dockHeight !== undefined) out.dockHeight = clampDockHeight(out.dockHeight)
   if (typeof out.language !== 'string' || !out.language.trim()) {
     out.language = 'system'
   }
@@ -59,14 +80,25 @@ export function getSettings(): Settings {
 export function loadSettings(): Settings {
   if (cache) return cache
   let file: Partial<Settings> = {}
+  let fresh = false
   try {
     if (existsSync(PATHS.settingsFile())) {
       file = JSON.parse(readFileSync(PATHS.settingsFile(), 'utf8')) as Partial<Settings>
+    } else {
+      fresh = true
     }
   } catch {
     file = {}
   }
-  cache = merge({ ...DEFAULT_SETTINGS }, file)
+  const macPatch = process.platform === 'darwin' ? macDefaultsPatch(file, fresh) : null
+  cache = merge({ ...DEFAULT_SETTINGS }, macPatch ? { ...file, ...macPatch } : file)
+  if (macPatch && !fresh) {
+    try {
+      writeFileAtomicSync(PATHS.settingsFile(), JSON.stringify(cache, null, 2))
+    } catch {
+      /* ignore */
+    }
+  }
   return cache
 }
 
@@ -74,7 +106,7 @@ export function saveSettings(patch: Partial<Settings>): Settings {
   const next = merge(loadSettings(), patch)
   cache = next
   try {
-    writeFileSync(PATHS.settingsFile(), JSON.stringify(next, null, 2), 'utf8')
+    writeFileAtomicSync(PATHS.settingsFile(), JSON.stringify(next, null, 2))
   } catch {
     /* non-fatal; settings stay in memory */
   }

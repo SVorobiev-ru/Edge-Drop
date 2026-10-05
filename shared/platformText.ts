@@ -1,7 +1,15 @@
 export const MAC_KEY_ALIASES: Record<string, string> = {
   'toast.launchBlockedByWindows': 'toast.launchBlockedByMac',
   'footer.reviewOnStore': 'footer.starOnGithub',
-  'behaviour.autoUpdatesDescOn': 'behaviour.updateModeNotifyDesc'
+  'behaviour.autoUpdatesDescOn': 'behaviour.updateModeNotifyDesc',
+  'behaviour.launchAtLoginDesc': 'behaviour.launchAtLoginDescMac',
+  'behaviour.fullscreenProtectionDesc': 'behaviour.fullscreenProtectionDescMac',
+  'flyout.openInExplorer': 'menu.revealInFinder',
+  'onboarding.welcomeDesc': 'onboarding.welcomeDescMac',
+  'onboarding.ungroupDesc': 'onboarding.ungroupDescMac',
+  'onboarding.proTip3': 'onboarding.proTip3Mac',
+  'tray.welcomeBody': 'tray.welcomeBodyMac',
+  'footer.supportOnKofi': 'footer.projectOnGithub'
 }
 
 const MAC_LANGUAGE_RULES: Record<string, Array<[RegExp, string]>> = {
@@ -76,6 +84,11 @@ export function withMacHotkey(s: string, accelerator: string): string {
   return s.replace(/(?<![\p{Script=Latin}\p{N}])Alt\s*\+\s*C/gu, () => formatMacAccelerator(accelerator))
 }
 
+export interface ResolveTextOptions {
+  hotkey?: string
+  missing?: string
+}
+
 function getNestedProp(obj: unknown, path: string): string | undefined {
   let curr = obj as Record<string, unknown> | undefined
   for (const part of path.split('.')) {
@@ -91,15 +104,16 @@ export function resolveText(
   path: string,
   lang: string,
   mac: boolean,
-  params?: Record<string, string | number>
+  params?: Record<string, string | number>,
+  options: ResolveTextOptions = {}
 ): string {
   const key = (mac && MAC_KEY_ALIASES[path]) || path
 
   let val = dict ? getNestedProp(dict, key) : undefined
   if (!val) {
-    val = getNestedProp(fallback, key) || path
+    val = getNestedProp(fallback, key) || (options.missing ?? path)
   }
-  if (mac) val = macify(val, lang)
+  if (mac) val = macify(options.hotkey ? withMacHotkey(val, options.hotkey) : val, lang)
 
   if (params) {
     for (const [k, v] of Object.entries(params)) {

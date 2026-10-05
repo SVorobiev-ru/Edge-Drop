@@ -25,6 +25,12 @@ describe('split drop zone at the stick edge', () => {
     expect(isInSplitEdgeZone({ x: WIDTH - 20, y: 400, windowWidth: WIDTH, stickPosition: 'top' })).toBe(false)
   })
 
+  it('bottom: only the strip above the bottom edge splits', () => {
+    expect(isInSplitEdgeZone({ x: 20, y: 920, windowWidth: WIDTH, windowHeight: 1000, stickPosition: 'bottom' })).toBe(true)
+    expect(isInSplitEdgeZone({ x: 20, y: 919, windowWidth: WIDTH, windowHeight: 1000, stickPosition: 'bottom' })).toBe(false)
+    expect(isInSplitEdgeZone({ x: 20, y: 999, windowWidth: WIDTH, stickPosition: 'bottom' })).toBe(false)
+  })
+
   it('the same drop point gives a different answer after the panel moves to another edge', () => {
     const drop = { x: 20, y: 400, windowWidth: WIDTH }
     expect(isInSplitEdgeZone({ ...drop, stickPosition: 'left' })).toBe(true)

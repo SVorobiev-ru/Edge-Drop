@@ -1,6 +1,4 @@
-import { describe, expect, it } from 'vitest'
-import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { describe, expect, it, vi } from 'vitest'
 import { LANGUAGES, TRANSLATIONS, en } from '../src/i18n/translations'
 import {
   MAC_KEY_ALIASES,
@@ -10,6 +8,22 @@ import {
   resolveText,
   withMacHotkey
 } from '../shared/platformText'
+
+const i18nState = vi.hoisted(() => ({ language: 'en' }))
+
+vi.mock('react', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('react')>()),
+  useSyncExternalStore: (_subscribe: unknown, getSnapshot: () => unknown) => getSnapshot()
+}))
+
+vi.mock('../src/store/appStore', () => {
+  const state = {
+    get settings() {
+      return { language: i18nState.language }
+    }
+  }
+  return { useStore: Object.assign((select: (s: typeof state) => unknown) => select(state), { getState: () => state }) }
+})
 
 const WINDOWS_TERMS = [
   /Ctrl/i,
@@ -98,13 +112,13 @@ describe('translations in macOS mode', () => {
   it.each(LANGS)('%s shows mac key symbols in the shortcut hints', (lang) => {
     expect(resolveText(TRANSLATIONS[lang], en, 'onboarding.collectDesc', lang, true)).toContain('⌘C')
     expect(resolveText(TRANSLATIONS[lang], en, 'toast.pasteFallback', lang, true)).toContain('⌘V')
-    expect(resolveText(TRANSLATIONS[lang], en, 'onboarding.proTip1', lang, true)).toContain('⌥C')
+    expect(resolveText(TRANSLATIONS[lang], en, 'onboarding.proTip1', lang, true, { shortcut: 'Alt+C' })).toContain('⌥C')
   })
 
   it('replaces the Windows startup toast with the Login Items wording', () => {
     expect(resolveText(TRANSLATIONS.en, en, 'toast.launchBlockedByWindows', 'en', true)).toBe(en.toast.launchBlockedByMac)
     expect(resolveText(TRANSLATIONS.ru, en, 'toast.launchBlockedByWindows', 'ru', true)).toContain('Объекты входа')
-    expect(resolveText(TRANSLATIONS.de, en, 'toast.launchBlockedByWindows', 'de', true)).toBe(en.toast.launchBlockedByMac)
+    expect(resolveText(TRANSLATIONS.de, en, 'toast.launchBlockedByWindows', 'de', true)).toContain('Anmeldeobjekte')
   })
 
   it('never shows the Microsoft Store review label', () => {
@@ -197,17 +211,26 @@ describe('mac shortcuts in right-to-left languages', () => {
   const PDI = '\u2069'
   const LTR_LANGS = LANGS.filter((lang) => !RTL_LANGUAGES.includes(lang))
 
-  it('uses the same language list as the renderer text direction', () => {
+  it('drives the renderer language and text direction with the same language list', async () => {
     expect([...RTL_LANGUAGES]).toEqual(['ar', 'fa', 'he'])
-    const index = readFileSync(join(process.cwd(), 'src/i18n/index.ts'), 'utf8')
-    expect(index).toContain('const isRtl = RTL_LANGUAGES.includes(resolvedLang)')
-    expect(index).not.toMatch(/resolvedLang === '(ar|fa|he)'/)
+    const { useTranslation } = await import('../src/i18n')
+    const documentElement: Record<string, string> = {}
+    vi.stubGlobal('document', { documentElement })
+    try {
+      for (const lang of LANGS) {
+        i18nState.language = lang
+        useTranslation()
+        expect(documentElement, lang).toEqual({ lang, dir: RTL_LANGUAGES.includes(lang) ? 'rtl' : 'ltr' })
+      }
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 
   it.each([...RTL_LANGUAGES])('%s isolates the rewritten shortcuts', (lang) => {
     expect(resolveText(TRANSLATIONS[lang], en, 'onboarding.collectDesc', lang, true)).toContain(`${LRI}⌘C${PDI}`)
     expect(resolveText(TRANSLATIONS[lang], en, 'toast.pasteFallback', lang, true)).toContain(`${LRI}⌘V${PDI}`)
-    expect(resolveText(TRANSLATIONS[lang], en, 'onboarding.proTip1', lang, true)).toContain(`${LRI}⌥C${PDI}`)
+    expect(resolveText(TRANSLATIONS[lang], en, 'onboarding.proTip1', lang, true, { shortcut: 'Alt+C' })).toContain(`${LRI}⌥C${PDI}`)
   })
 
   it.each([...RTL_LANGUAGES])('%s isolates the shortcut parameter once', (lang) => {

@@ -26,3 +26,10 @@ export const edge: EdgeApi = new Proxy({} as EdgeApi, {
     return () => {}
   }
 })
+
+export const IS_DARWIN = edge.platform === 'darwin'
+
+export function isDarwin(): boolean {
+  const g = globalThis as any
+  return (g.window?.edge?.platform ?? g.process?.platform) === 'darwin'
+}

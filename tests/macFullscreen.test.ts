@@ -1,4 +1,5 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { restorePlatform, setPlatform } from './helpers/platform'
 
 const mocks = vi.hoisted(() => ({
   options: vi.fn<() => number | null>(),
@@ -7,9 +8,7 @@ const mocks = vi.hoisted(() => ({
   spaceCallback: null as (() => void) | null
 }))
 
-vi.mock('koffi', () => ({
-  default: { load: () => ({ func: () => () => null }) }
-}))
+vi.mock('koffi', () => import('./helpers/koffiMock'))
 
 vi.mock('electron', () => ({
   systemPreferences: {
@@ -30,14 +29,9 @@ vi.mock('../electron/main/macPresentation', () => ({
 
 type FullscreenModule = typeof import('../electron/main/fullscreen')
 
-const realPlatform = process.platform
 const FULLSCREEN = 1 << 10
 const AUTO_HIDE_DOCK = 1 << 0
 const AUTO_HIDE_MENU_BAR = 1 << 2
-
-function setPlatform(value: string): void {
-  Object.defineProperty(process, 'platform', { value, configurable: true })
-}
 
 let fs: FullscreenModule
 
@@ -64,11 +58,11 @@ describe('macOS fullscreen detection (fullscreen.ts)', () => {
     fs.stopFullscreenMonitor()
     vi.useRealTimers()
     vi.restoreAllMocks()
-    setPlatform(realPlatform)
+    restorePlatform()
   })
 
   afterAll(() => {
-    setPlatform(realPlatform)
+    restorePlatform()
   })
 
   it('reports no fullscreen on a normal desktop Space', () => {

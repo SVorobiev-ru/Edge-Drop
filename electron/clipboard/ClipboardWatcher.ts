@@ -24,10 +24,12 @@ import {
   getClipboardSequenceNumber,
   clipboardHasFileNameW,
   clipboardTextContent,
-  clipboardFilesContentKey
+  clipboardFilesContentKey,
+  takeCapturedImage,
+  isRemoteClipboard
 } from './formats'
-import { contentSignature } from '../store/signature'
-import type { ItemData } from '../../shared/types'
+import { contentSignature, textSignature } from '../store/signature'
+import type { ItemData, SourceApp } from '../../shared/types'
 
 type ImageItemData = Extract<ItemData, { kind: 'image' }>
 
@@ -42,7 +44,14 @@ export function stampCapturedImage(data: ImageItemData, png: Buffer): void {
  * the raw PNG bytes are handed over as the second argument so the store can
  * persist them without re-reading the clipboard.
  */
-export type NewItemHandler = (data: ItemData, imagePng?: Buffer) => void
+export type NewItemHandler = (data: ItemData, imagePng?: Buffer, image?: Electron.NativeImage, sourceApp?: SourceApp) => void
+
+export interface CapturePolicy {
+  frontmostApp: () => { bundleId: string; name?: string; pid?: number } | null
+  ownBundleId?: () => string | null
+  ignoredApps: () => readonly string[] | undefined
+  ignoreRemoteClipboard: () => boolean | undefined
+}
 
 /** Ignore a second capture of identical content this soon (Explorer late formats). */
 const COALESCE_MS = 500
@@ -54,6 +63,7 @@ export class ClipboardWatcher {
   private settleTimer: NodeJS.Timeout | null = null
   private lastSig = 'empty'
   private lastSeq = 0
+  private selfWriteSeq = 0
   private lastCapturedKey = ''
   private lastCapturedAt = 0
   private paused = false
@@ -63,6 +73,8 @@ export class ClipboardWatcher {
   private readonly settleMs: number
   private onNew: NewItemHandler | null = null
   private onHint: (() => void) | null = null
+  private policy: CapturePolicy | null = null
+  private pendingSource: SourceApp | undefined
 
   constructor(intervalMs = 300, settleMs = 220) {
     this.intervalMs = intervalMs
@@ -84,6 +96,39 @@ export class ClipboardWatcher {
     this.lastSig = this.lastSeq > 0 ? `seq:${this.lastSeq}` : clipboardSignature()
 
     this.timer = setInterval(() => this.pollTick(), this.intervalMs)
+  }
+
+  setCapturePolicy(policy: CapturePolicy | null): void {
+    this.policy = policy
+  }
+
+  private isRemoteCaptureSkipped(): boolean {
+    if (process.platform !== 'darwin' || !this.policy) return false
+    try {
+      return !!this.policy.ignoreRemoteClipboard() && isRemoteClipboard()
+    } catch (err) {
+      console.error('[ClipboardWatcher] remote clipboard check failed:', err)
+      return false
+    }
+  }
+
+  private snapshotSource(): 'ignored' | SourceApp | undefined {
+    if (process.platform !== 'darwin' || !this.policy) return undefined
+    try {
+      const app = this.policy.frontmostApp()
+      if (!app || !app.bundleId) return undefined
+      if (app.pid === process.pid || app.bundleId === this.policy.ownBundleId?.()) return undefined
+      if ((this.policy.ignoredApps() ?? []).includes(app.bundleId)) return 'ignored'
+      return app.name ? { bundleId: app.bundleId, name: app.name } : { bundleId: app.bundleId }
+    } catch (err) {
+      console.error('[ClipboardWatcher] source app lookup failed:', err)
+      return undefined
+    }
+  }
+
+  private dropCapture(): void {
+    this.pendingSource = undefined
+    this.resyncSignature()
   }
 
   /** Run one poll immediately (WM_CLIPBOARDUPDATE). Safe if not started. */
@@ -108,6 +153,7 @@ export class ClipboardWatcher {
   private absorbLateExplorerFormats(now: number): boolean {
     if (!this.lastCapturedKey) return false
     if (this.lastCapturedKey.startsWith('files|')) {
+      if (process.platform === 'darwin' && !this.inCoalesceWindow(now)) return false
       const next = clipboardFilesContentKey()
       if (next === null) return false
       if (next === this.lastCapturedKey) return true
@@ -121,7 +167,7 @@ export class ClipboardWatcher {
     if (this.lastCapturedKey.startsWith('image|')) return !clipboardHasFileNameW()
     if (this.lastCapturedKey.startsWith('text|')) {
       const t = clipboardTextContent()
-      return t !== null && this.lastCapturedKey === `text|${t}`
+      return t !== null && this.lastCapturedKey === textSignature(t)
     }
     return false
   }
@@ -133,11 +179,23 @@ export class ClipboardWatcher {
     if (seq > 0) {
       if (seq === this.lastSeq) return
       this.lastSeq = seq
+      if (seq === this.selfWriteSeq) return
     } else {
       const sig = clipboardSignature()
       if (sig === this.lastSig) return
       this.lastSig = sig
     }
+
+    if (this.isRemoteCaptureSkipped()) {
+      this.dropCapture()
+      return
+    }
+    const source = this.snapshotSource()
+    if (source === 'ignored') {
+      this.dropCapture()
+      return
+    }
+    if (this.settleTimer === null) this.pendingSource = source
 
     const now = Date.now()
     if (this.absorbLateExplorerFormats(now)) {
@@ -168,7 +226,13 @@ export class ClipboardWatcher {
     this.settleTimer = null
     if (this.paused || !this.onNew) return
 
+    if (this.isRemoteCaptureSkipped()) {
+      this.dropCapture()
+      return
+    }
+
     const seqWhenSettled = this.lastSeq
+    const sourceApp = this.pendingSource
     this.reading = true
     try {
       const data = await readClipboard()
@@ -189,8 +253,9 @@ export class ClipboardWatcher {
       this.incompleteTries = 0
 
       let png: Buffer | undefined
+      let img: Electron.NativeImage | undefined
       if (data.kind === 'image') {
-        const img = clipboard.readImage()
+        img = takeCapturedImage(data) ?? clipboard.readImage()
         png = img.toPNG()
         stampCapturedImage(data, png)
         this.lastSeq = getClipboardSequenceNumber()
@@ -199,7 +264,7 @@ export class ClipboardWatcher {
       const key = contentSignature(data)
       const now = Date.now()
       const sameAsLast = key === this.lastCapturedKey
-      const filesUnchanged = sameAsLast && data.kind === 'files'
+      const filesUnchanged = sameAsLast && data.kind === 'files' && process.platform !== 'darwin'
       if (sameAsLast && (filesUnchanged || now - this.lastCapturedAt < COALESCE_MS)) {
         // Same payload. Files stay absorbed for as long as the path list is
         // unchanged (Explorer window close is not a copy). Other kinds only
@@ -210,7 +275,8 @@ export class ClipboardWatcher {
       this.lastCapturedKey = key
       this.lastCapturedAt = now
 
-      if (data.kind === 'image') this.onNew(data, png)
+      if (sourceApp) this.onNew(data, png, img, sourceApp)
+      else if (data.kind === 'image') this.onNew(data, png, img)
       else this.onNew(data)
     } finally {
       this.reading = false
@@ -230,6 +296,17 @@ export class ClipboardWatcher {
         this.pollTick()
       }
     }
+  }
+
+  /**
+   * Remember the sequence number our own clipboard write just produced, so
+   * that exact change is never captured even when the watcher resumes early
+   * or its signature was invalidated. A later copy from any app gets a new
+   * sequence number and is captured as usual.
+   */
+  noteSelfWrite(): void {
+    const seq = getClipboardSequenceNumber()
+    if (seq > 0) this.selfWriteSeq = seq
   }
 
   /** Temporarily stop recording (incognito mode or self-copy) without tearing down the timer. */
@@ -277,6 +354,10 @@ export class ClipboardWatcher {
     this.incompleteTries = 0
     this.lastSeq = getClipboardSequenceNumber()
     this.lastSig = this.lastSeq > 0 ? `seq:${this.lastSeq}` : clipboardSignature()
+    if (process.platform === 'darwin') {
+      this.lastCapturedKey = ''
+      this.lastCapturedAt = 0
+    }
   }
 
   /**

@@ -9,15 +9,20 @@
  * dragged over the panel so the edge-hover hook knows not to close mid-drag.
  */
 import { AnimatePresence, motion } from 'framer-motion'
-import { useRef, useEffect, useLayoutEffect, useState } from 'react'
-import { useStore } from '../store/appStore'
-import { useFilteredItems } from '../hooks/useFilteredItems'
+import { useRef, useEffect, useLayoutEffect, useMemo, useState } from 'react'
+import { useStore, selectReduceMotion } from '../store/appStore'
+import { groupedCount, useFilteredItems } from '../hooks/useFilteredItems'
 import { ClipboardItemCard } from './ClipboardItem'
 import { EmptyState } from './EmptyState'
+import { ErrorBoundary, WarningGlyph } from './ErrorBoundary'
 import { ChevronDownIcon, PinFillIcon } from './icons'
 import { playExpandSound, playButtonClickSound } from '../lib/soundEffects'
+import { setNavOrder } from '../lib/keyboardNav'
+import { IS_DARWIN } from '../lib/edge'
+import { captureListAnchor, firstVisibleItemId, restoreListAnchor, type ListAnchor } from '../lib/listAnchor'
 
 import { useTranslation } from '../i18n'
+import { isHorizontalEdge } from '../../shared/panelPlacement'
 
 const getVerticalPinnedLabelStyle = (text: string): React.CSSProperties => {
   const len = text.length
@@ -29,15 +34,42 @@ const getVerticalPinnedLabelStyle = (text: string): React.CSSProperties => {
 
 export function ItemList() {
   const { t } = useTranslation()
-  const { pinned, recent } = useFilteredItems()
+  const isHorizontal = useStore((s) => isHorizontalEdge(s.settings.stickPosition))
+  const resetKey = useStore((s) => `${s.typeFilter}:${s.query}:${s.items.length}`)
+  return (
+    <ErrorBoundary
+      label="item list"
+      resetKey={resetKey}
+      fallback={(reset) => (
+        <div className={`list${isHorizontal ? ' horizontal' : ''}`}>
+          <div className="empty list-broken">
+            <WarningGlyph size={22} />
+            <button type="button" className="text-btn" onClick={reset}>
+              {t('behaviour.tryAgain')}
+            </button>
+          </div>
+        </div>
+      )}
+    >
+      <ItemListBody />
+    </ErrorBoundary>
+  )
+}
+
+function ItemListBody() {
+  const { t } = useTranslation()
+  const groups = useFilteredItems()
+  const { pinned, recent, others } = groups
   const query = useStore((s) => s.query)
   const listRef = useRef<HTMLDivElement>(null)
+  const closedAnchor = useRef<ListAnchor | null>(null)
 
-  const total = pinned.length + recent.length
+  const total = groupedCount(groups)
   
   const isDraggingAny = useStore((s) => !!s.dragActive || !!s.internalDragReq)
-  const settings = useStore((s) => s.settings)
-  const isHorizontal = settings.stickPosition === 'top'
+  const stickPosition = useStore((s) => s.settings.stickPosition)
+  const reduceMotion = useStore(selectReduceMotion)
+  const isHorizontal = isHorizontalEdge(stickPosition)
   
   const typeFilter = useStore((s) => s.typeFilter) || 'all'
   const filterScrollMap = useRef<Record<string, { top: number; left: number }>>({})
@@ -52,7 +84,28 @@ export function ItemList() {
     return { all: true, text: true, image: true, file: true, link: true }
   })
 
-  const pinnedCollapsed = collapsedMap[typeFilter] ?? true
+  const searching = query.trim().length > 0
+  const pinnedForcedOpen = IS_DARWIN && searching
+  const pinnedCollapsed = !pinnedForcedOpen && (collapsedMap[typeFilter] ?? true)
+
+  const keyboardMode = useStore((s) => s.keyboardMode)
+  const navIds = useMemo(
+    () => [...(pinnedCollapsed ? [] : pinned), ...recent, ...others].map((it) => it.id),
+    [pinned, recent, others, pinnedCollapsed]
+  )
+  const navQueryRef = useRef(query)
+  useEffect(() => {
+    setNavOrder(navIds)
+    const s = useStore.getState()
+    s.keepSelectionWithin(navIds)
+    const queryChanged = navQueryRef.current !== query
+    navQueryRef.current = query
+    if (!s.keyboardMode) return
+    if (queryChanged || !s.activeItemId || !navIds.includes(s.activeItemId)) {
+      const inView = IS_DARWIN && !queryChanged ? firstVisibleItemId(listRef.current, isHorizontal) : null
+      s.setActiveItemId(inView && navIds.includes(inView) ? inView : navIds[0] ?? null)
+    }
+  }, [navIds, keyboardMode, query, isHorizontal])
 
   const setPinnedCollapsed = (val: boolean) => {
     setCollapsedMap((prev) => {
@@ -90,7 +143,14 @@ export function ItemList() {
     const unsub = useStore.subscribe((state) => {
       const isNowOpen = !!state.open
       if (isNowOpen !== lastOpen) {
-        if (!isNowOpen && lastOpen) {
+        if (!isNowOpen && lastOpen && IS_DARWIN) {
+          const list = listRef.current
+          const atStart = !list || (isHorizontal ? list.scrollLeft : list.scrollTop) <= 1
+          closedAnchor.current = atStart ? null : captureListAnchor(list, isHorizontal)
+        } else if (isNowOpen && !lastOpen && IS_DARWIN) {
+          restoreListAnchor(listRef.current, isHorizontal, closedAnchor.current)
+          closedAnchor.current = null
+        } else if (!isNowOpen && lastOpen) {
           // Panel just closed: record timestamps and top item ids
           lastClosedAt.current = Date.now()
           lastClosedTopId.current = prevTopRecentId.current
@@ -120,7 +180,8 @@ export function ItemList() {
 
   useLayoutEffect(() => {
     // If a brand new or freshly updated item was added while panel is open, jump to top
-    if (useStore.getState().open) {
+    const state = useStore.getState()
+    if (state.open && !(IS_DARWIN && state.itemsUsageOnly)) {
       const isNewRecent = !!topRecentTime && (!prevTopRecentTime.current || topRecentTime > prevTopRecentTime.current)
       const isNewPinned = !!topPinnedTime && (!prevTopPinnedTime.current || topPinnedTime > prevTopPinnedTime.current)
 
@@ -174,17 +235,22 @@ export function ItemList() {
   }, [query, isHorizontal])
 
   // Reset scroll map when switching dock position
-  const prevStickPos = useRef(settings.stickPosition)
+  const prevStickPos = useRef(stickPosition)
   useLayoutEffect(() => {
-    if (prevStickPos.current !== settings.stickPosition) {
-      prevStickPos.current = settings.stickPosition
+    if (prevStickPos.current !== stickPosition) {
+      prevStickPos.current = stickPosition
       filterScrollMap.current = {}
       if (listRef.current) {
         listRef.current.scrollTop = 0
         listRef.current.scrollLeft = 0
       }
     }
-  }, [settings.stickPosition])
+  }, [stickPosition])
+
+  useLayoutEffect(() => {
+    if (!IS_DARWIN || useStore.getState().open) return
+    restoreListAnchor(listRef.current, isHorizontal, closedAnchor.current)
+  }, [pinned, recent, others, isHorizontal])
 
   useEffect(() => {
     if (!isDraggingAny) {
@@ -219,6 +285,7 @@ export function ItemList() {
     const el = listRef.current
     if (!el || !isHorizontal) return
     const onWheel = (e: WheelEvent) => {
+      if (IS_DARWIN && e.deltaX !== 0) return
       if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
         e.preventDefault()
         el.scrollLeft += e.deltaY
@@ -303,81 +370,95 @@ export function ItemList() {
   const filterKey = `${typeFilter}:${query}`
 
   return (
-    <div
-      className={`list${isHorizontal ? ' horizontal' : ''}`}
-      ref={listRef}
-      onDragOver={handleDragOver}
-      onDragLeave={handleDragLeaveOrDrop}
-      onDrop={handleDragLeaveOrDrop}
-      onScroll={handleScroll}
-    >
-      {total === 0 ? (
-        <EmptyState filtered={query.trim().length > 0} />
-      ) : (
-        <motion.div
-          key={filterKey}
-          className="list-stack"
-          initial={{ opacity: 0.45 }}
-          animate={{ opacity: 1 }}
-          transition={{ duration: 0.12, ease: [0.22, 1, 0.36, 1] }}
-        >
-          {pinned.length > 0 && (
-            <section className="pinned-section">
-              <div
-                className={`section-label pinned-header-interactive ${pinnedCollapsed ? 'is-collapsed' : ''}`}
-                onClick={() => {
-                  const next = !pinnedCollapsed
-                  playExpandSound(!next)
-                  setPinnedCollapsed(next)
-                }}
-                title={pinnedCollapsed ? t('item.expandPinned') : t('item.collapsePinned')}
-              >
-                <div className="pinned-header-left">
-                  <PinFillIcon width={13} height={13} style={{ opacity: 0.9, color: '#ffffff' }} />
-                  <div className="pinned-label-group">
-                    <span style={isHorizontal ? getVerticalPinnedLabelStyle(t('item.pinned')) : undefined}>
-                      {t('item.pinned')}
-                    </span>
-                    <span className="pinned-count-badge">{pinned.length}</span>
+    <>
+      <div
+        className={`list${isHorizontal ? ' horizontal' : ''}`}
+        ref={listRef}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeaveOrDrop}
+        onDrop={handleDragLeaveOrDrop}
+        onScroll={handleScroll}
+      >
+        {total === 0 ? (
+          <EmptyState filtered={searching} />
+        ) : (
+          <motion.div
+            key={filterKey}
+            className="list-stack"
+            initial={{ opacity: 0.45 }}
+            animate={{ opacity: 1 }}
+            transition={{ duration: 0.12, ease: [0.22, 1, 0.36, 1] }}
+          >
+            {pinned.length > 0 && (
+              <section className="pinned-section">
+                <div
+                  className={`section-label pinned-header-interactive ${pinnedCollapsed ? 'is-collapsed' : ''}`}
+                  onClick={() => {
+                    if (pinnedForcedOpen) return
+                    const next = !pinnedCollapsed
+                    playExpandSound(!next)
+                    setPinnedCollapsed(next)
+                  }}
+                  title={pinnedCollapsed ? t('item.expandPinned') : t('item.collapsePinned')}
+                >
+                  <div className="pinned-header-left">
+                    <PinFillIcon width={13} height={13} style={{ opacity: 0.9, color: 'var(--text-primary)' }} />
+                    <div className="pinned-label-group">
+                      <span style={isHorizontal ? getVerticalPinnedLabelStyle(t('item.pinned')) : undefined}>
+                        {t('item.pinned')}
+                      </span>
+                      <span className="pinned-count-badge">{pinned.length}</span>
+                    </div>
+                  </div>
+                  <div className="pinned-header-right">
+                    <button
+                      className="act bundle-collapse-btn"
+                      type="button"
+                      aria-label={pinnedCollapsed ? t('item.expandPinned') : t('item.collapsePinned')}
+                    >
+                      <ChevronDownIcon
+                        style={{
+                          transform: isHorizontal
+                            ? (pinnedCollapsed ? 'rotate(-90deg)' : 'rotate(90deg)')
+                            : (pinnedCollapsed ? 'rotate(0deg)' : 'rotate(180deg)'),
+                          transition: 'transform 0.14s ease'
+                        }}
+                      />
+                    </button>
                   </div>
                 </div>
-                <div className="pinned-header-right">
-                  <button
-                    className="act bundle-collapse-btn"
-                    type="button"
-                    aria-label={pinnedCollapsed ? t('item.expandPinned') : t('item.collapsePinned')}
-                  >
-                    <ChevronDownIcon
-                      style={{
-                        transform: isHorizontal
-                          ? (pinnedCollapsed ? 'rotate(-90deg)' : 'rotate(90deg)')
-                          : (pinnedCollapsed ? 'rotate(0deg)' : 'rotate(180deg)'),
-                        transition: 'transform 0.14s ease'
-                      }}
-                    />
-                  </button>
-                </div>
-              </div>
-              {!pinnedCollapsed && pinned.map((it) => (
-                <ClipboardItemCard key={it.id} item={it} />
-              ))}
-            </section>
-          )}
+                {!pinnedCollapsed && pinned.map((it) => (
+                  <ClipboardItemCard key={it.id} item={it} />
+                ))}
+              </section>
+            )}
 
-          {recent.length > 0 && (
-            <section className="recent-section">
-              {pinned.length > 0 && (
+            {recent.length > 0 && (
+              <section className="recent-section">
+                {pinned.length > 0 && (
+                  <div className="section-label recent-header">
+                    <span className="recent-label-text">{t('item.recent')}</span>
+                  </div>
+                )}
+                {recent.map((it) => (
+                  <ClipboardItemCard key={it.id} item={it} />
+                ))}
+              </section>
+            )}
+
+            {others.length > 0 && (
+              <section className="recent-section others-section">
                 <div className="section-label recent-header">
-                  <span className="recent-label-text">{t('item.recent')}</span>
+                  <span className="recent-label-text">{t('item.fromOtherTabs')}</span>
                 </div>
-              )}
-              {recent.map((it) => (
-                <ClipboardItemCard key={it.id} item={it} />
-              ))}
-            </section>
-          )}
-        </motion.div>
-      )}
+                {others.map((it) => (
+                  <ClipboardItemCard key={it.id} item={it} />
+                ))}
+              </section>
+            )}
+          </motion.div>
+        )}
+      </div>
 
       <AnimatePresence>
         {showScrollTop && (
@@ -385,7 +466,7 @@ export function ItemList() {
             initial={{ opacity: 0, scale: 0.85 }}
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: 0.85 }}
-            transition={{ duration: settings.reduceMotion ? 0.01 : 0.14, ease: 'easeOut' }}
+            transition={{ duration: reduceMotion ? 0.01 : 0.14, ease: 'easeOut' }}
             className={`scroll-top-btn${isHorizontal ? ' horizontal' : ''}`}
             onClick={scrollToTop}
             title={t('item.scrollToTop')}
@@ -403,6 +484,6 @@ export function ItemList() {
           </motion.button>
         )}
       </AnimatePresence>
-    </div>
+    </>
   )
 }

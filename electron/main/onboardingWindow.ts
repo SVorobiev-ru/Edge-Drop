@@ -1,6 +1,7 @@
 import { BrowserWindow, app } from 'electron'
 import { join } from 'node:path'
 import { saveSettings, loadSettings, pushState } from './state'
+import { installMacWebGuards } from './webGuard'
 
 let onboardingWindow: BrowserWindow | null = null
 
@@ -29,6 +30,8 @@ export function createOnboardingWindow(): void {
       contextIsolation: true
     }
   })
+
+  installMacWebGuards(onboardingWindow.webContents)
 
   // Standard window behavior (not always on top)
 

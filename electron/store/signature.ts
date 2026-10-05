@@ -6,12 +6,23 @@
  * registry MUST agree on identity, otherwise lifecycle cleanup would either
  * delete files that are still owned (data loss) or leak them forever.
  */
+import { createHash } from 'node:crypto'
 import type { ItemData } from '../../shared/types'
+
+const TEXT_SIGNATURE_RE = /^text\|sha256:[0-9a-f]{64}$/
+
+export function textSignature(text: string): string {
+  return `text|sha256:${createHash('sha256').update(text, 'utf8').digest('hex')}`
+}
+
+export function isCurrentSignature(sig: string): boolean {
+  return !sig.startsWith('text|') || TEXT_SIGNATURE_RE.test(sig)
+}
 
 export function contentSignature(data: ItemData): string {
   switch (data.kind) {
     case 'text':
-      return `text|${data.text}`
+      return textSignature(data.text)
     case 'image':
       return data.bytes && data.bytes > 0 ? `image|${data.width}x${data.height}|${data.bytes}` : `image|${data.imageId}`
     case 'image-collection':

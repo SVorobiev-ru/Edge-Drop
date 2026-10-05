@@ -8,7 +8,7 @@
  */
 import { useRef, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { useStore } from '../store/appStore'
+import { useStore, selectReduceMotion } from '../store/appStore'
 import {
   LogoIndicatorIcon,
   TickIndicatorIcon,
@@ -20,16 +20,20 @@ import { playButtonClickSound } from '../lib/soundEffects'
 import { createPortal } from 'react-dom'
 import { useAdaptiveSpring } from '../hooks/useAdaptiveSpring'
 import { useTranslation } from '../i18n'
+import { panelRect } from '../lib/panelPosition'
+import { isHorizontalEdge } from '../../shared/panelPlacement'
+import type { StickPosition } from '../../shared/types'
 
 /** Fast start, soft landing — matching PreviewFlyout */
 const flyoutEaseOpen = [0.16, 1, 0.3, 1] as const
 const flyoutEaseClose = [0.3, 0, 0.2, 1] as const
+const FLYOUT_GAP = 12
 
 const flyoutVariants = {
-  hidden: (dir: 'left' | 'right' | 'top') => ({
+  hidden: (dir: StickPosition) => ({
     opacity: 0,
     x: dir === 'right' ? 14 : dir === 'left' ? -14 : 0,
-    y: dir === 'top' ? -14 : 0,
+    y: dir === 'top' ? -14 : dir === 'bottom' ? 14 : 0,
     scale: 0.97,
   }),
   shown: {
@@ -44,10 +48,10 @@ const flyoutVariants = {
       opacity: { duration: 0.18, ease: 'easeOut' as const },
     },
   },
-  exit: (dir: 'left' | 'right' | 'top') => ({
+  exit: (dir: StickPosition) => ({
     opacity: 0,
     x: dir === 'right' ? 10 : dir === 'left' ? -10 : 0,
-    y: dir === 'top' ? -10 : 0,
+    y: dir === 'top' ? -10 : dir === 'bottom' ? 10 : 0,
     scale: 0.98,
     transition: {
       x: { duration: 0.18, ease: flyoutEaseClose },
@@ -70,12 +74,12 @@ export function IndicatorStyleFlyout({ isRight }: { isRight: boolean }) {
   const patch = useStore((s) => s.patchSettings)
   const adaptiveSpring = useAdaptiveSpring()
 
-  const stickPosition = (settings.stickPosition || (isRight ? 'right' : 'left')) as 'left' | 'right' | 'top'
-  const isHorizontal = stickPosition === 'top'
+  const stickPosition = (settings.stickPosition || (isRight ? 'right' : 'left')) as StickPosition
+  const isHorizontal = isHorizontalEdge(stickPosition)
   const isTop = stickPosition === 'top'
 
   const isVisible = styleFlyoutOpen && settingsOpen && open
-  const reduceMotion = settings.reduceMotion || adaptiveSpring.type === 'tween'
+  const reduceMotion = useStore(selectReduceMotion) || adaptiveSpring.type === 'tween'
 
   const flyoutRef = useRef<HTMLDivElement | null>(null)
 
@@ -91,9 +95,10 @@ export function IndicatorStyleFlyout({ isRight }: { isRight: boolean }) {
 
   const styleFlyoutAnchorRect = useStore((s) => s.styleFlyoutAnchorRect)
 
-  const dockWidth = Math.min(screenW - 60, 1080)
+  const dock = panelRect(settings, { width: screenW, height: screenH }, null, null)
+  const dockWidth = dock.width
   const flyoutWidth = isHorizontal ? 320 : 280
-  const dockLeft = Math.round((screenW - dockWidth) / 2)
+  const dockLeft = dock.x
   const anchorCenterX = isHorizontal && styleFlyoutAnchorRect?.x !== undefined
     ? (styleFlyoutAnchorRect.x + (styleFlyoutAnchorRect.width || 32) / 2) - dockLeft
     : dockWidth / 2
@@ -106,7 +111,7 @@ export function IndicatorStyleFlyout({ isRight }: { isRight: boolean }) {
   const originX = isHorizontal
     ? Math.max(0.08, Math.min(0.92, (anchorCenterX - flyoutLeft) / flyoutWidth))
     : (isRight ? 1 : 0)
-  const originY = isHorizontal ? 0 : 0.5
+  const originY = isHorizontal ? (isTop ? 0 : 1) : 0.5
 
   useEffect(() => {
     if (!isVisible || !flyoutRef.current) {
@@ -119,8 +124,8 @@ export function IndicatorStyleFlyout({ isRight }: { isRight: boolean }) {
       const h = flyoutRef.current.offsetHeight
       if (isHorizontal) {
         useStore.getState().setPreviewFlyoutRect({
-          top: 210,
-          bottom: 222 + h,
+          top: isTop ? dock.y + dock.height : dock.y - FLYOUT_GAP - h,
+          bottom: isTop ? dock.y + dock.height + FLYOUT_GAP + h : dock.y,
           left: flyoutLeft,
           right: flyoutLeft + flyoutWidth
         })
@@ -140,7 +145,7 @@ export function IndicatorStyleFlyout({ isRight }: { isRight: boolean }) {
       window.removeEventListener('resize', updateRect)
       useStore.getState().setPreviewFlyoutRect(null)
     }
-  }, [isVisible, isHorizontal, isTop, screenH, flyoutLeft, flyoutWidth, panelTop, panelH])
+  }, [isVisible, isHorizontal, isTop, screenH, flyoutLeft, flyoutWidth, panelTop, panelH, dock.y, dock.height])
 
   // Dismiss flyout when clicking outside
   useEffect(() => {
@@ -169,7 +174,7 @@ export function IndicatorStyleFlyout({ isRight }: { isRight: boolean }) {
   return createPortal(
     <AnimatePresence onExitComplete={() => {
       const s = useStore.getState()
-      const isHoriz = s.settings.stickPosition === 'top'
+      const isHoriz = isHorizontalEdge(s.settings.stickPosition)
       if (!isHoriz && !s.styleFlyoutOpen && !s.previewItemId) {
         window.edge.setPreviewMode(false)
       }
@@ -189,7 +194,7 @@ export function IndicatorStyleFlyout({ isRight }: { isRight: boolean }) {
                   position: 'absolute',
                   left: dockLeft + flyoutLeft,
                   width: flyoutWidth,
-                  top: 222,
+                  ...(isTop ? { top: dock.y + dock.height + FLYOUT_GAP } : { bottom: screenH - dock.y + FLYOUT_GAP }),
                   display: 'flex',
                   flexDirection: 'column',
                   pointerEvents: 'none',
@@ -225,7 +230,7 @@ export function IndicatorStyleFlyout({ isRight }: { isRight: boolean }) {
             style={{
               width: '100%',
               maxHeight: maxFlyoutHeight,
-              background: '#141414',
+              background: 'var(--bg-2)',
               borderRadius: 20,
               border: 'none',
               overflow: 'hidden',
@@ -239,7 +244,7 @@ export function IndicatorStyleFlyout({ isRight }: { isRight: boolean }) {
           >
             {/* Header */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-              <div style={{ fontSize: 13, fontWeight: 600, color: '#ffffff', letterSpacing: '-0.01em' }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', letterSpacing: '-0.01em' }}>
                 {t('flyout.copyBeaconStyleTitle')}
               </div>
               <button
@@ -249,9 +254,9 @@ export function IndicatorStyleFlyout({ isRight }: { isRight: boolean }) {
                   width: 24,
                   height: 24,
                   borderRadius: 6,
-                  background: 'rgba(255,255,255,0.06)',
+                  background: 'rgb(var(--ink) / 0.06)',
                   border: 'none',
-                  color: 'rgba(255,255,255,0.7)',
+                  color: 'rgb(var(--ink) / max(0.7, var(--text-alpha-floor)))',
                   cursor: 'pointer',
                   display: 'flex',
                   alignItems: 'center',
@@ -351,7 +356,7 @@ function StyleCard({
         justifyContent: 'center',
         gap: 6,
         padding: '10px 8px 8px',
-        background: '#141414',
+        background: 'var(--bg-2)',
         border: active ? '2px solid #ffffff' : '2px solid rgba(255, 255, 255, 0.08)',
         borderRadius: 14,
         position: 'relative',
@@ -360,7 +365,7 @@ function StyleCard({
         userSelect: 'none',
         overflow: 'hidden',
         outline: 'none',
-        boxShadow: active ? '0 4px 16px rgba(0, 0, 0, 0.5), 0 0 14px rgba(255, 255, 255, 0.12)' : 'none',
+        boxShadow: active ? '0 4px 16px rgba(0, 0, 0, 0.5), 0 0 14px rgb(var(--ink) / 0.12)' : 'none',
         boxSizing: 'border-box',
         ...style
       }}
@@ -391,7 +396,7 @@ function StyleCard({
         style={{
           fontSize: 11.5,
           fontWeight: active ? 600 : 500,
-          color: active ? '#ffffff' : 'rgba(255, 255, 255, 0.7)',
+          color: active ? 'var(--text-primary)' : 'rgb(var(--ink) / max(0.7, var(--text-alpha-floor)))',
           textAlign: 'center',
           letterSpacing: '-0.01em'
         }}

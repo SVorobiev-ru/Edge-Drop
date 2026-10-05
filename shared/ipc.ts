@@ -9,7 +9,7 @@
  *   - `Renderer -> Main` calls (invoke/handle) are listed in `InvokeMap`.
  *   - `Main -> Renderer` events (send/on) are listed in `EventMap`.
  */
-import type { ClipboardItemDto, DragRequest, MergeResult, Settings } from './types'
+import type { ClipboardItemDto, DragRequest, ItemMenuRequest, MergeResult, Settings } from './types'
 
 /* ------------------------------------------------------------------ */
 /* Renderer -> Main  (ipcMain.handle / ipcRenderer.invoke)            */
@@ -45,7 +45,7 @@ export interface InvokeMap {
   'item:copy-subitem': { args: [req: DragRequest]; result: boolean }
 
   /** Copy an item and paste it directly into the active application. */
-  'item:paste': { args: [id: string]; result: boolean }
+  'item:paste': { args: [id: string, opts?: import('./types').PasteOptions]; result: boolean }
 
   /** Copy a sub-item and paste it directly into the active application. */
   'item:paste-subitem': { args: [req: DragRequest]; result: boolean }
@@ -114,6 +114,48 @@ export interface InvokeMap {
   'accessibility:status': { args: []; result: boolean | null }
 
   'accessibility:request': { args: []; result: boolean | null }
+
+  'accessibility:open-settings': { args: []; result: void }
+
+  'hotkey:set': { args: [accelerator: string]; result: import('./types').HotkeyResult }
+
+  'item:context-menu': { args: [id: string, sub?: ItemMenuRequest]; result: void }
+
+  'item:quick-look': { args: [id: string, path?: string]; result: boolean }
+
+  'item:set-title': { args: [id: string, title: string]; result: ClipboardItemDto[] }
+
+  'apps:list-running': { args: []; result: import('./types').AppInfo[] }
+
+  'apps:pick': { args: []; result: import('./types').AppInfo | null }
+
+  'apps:icon': { args: [bundleId: string]; result: string | null }
+
+  'history:export': { args: []; result: { ok: boolean; path?: string; count?: number } }
+
+  'history:import': { args: []; result: { ok: boolean; count?: number } }
+
+  'queue:add': { args: [id: string]; result: string[] }
+
+  'queue:clear': { args: []; result: void }
+
+  'window:panel-state': { args: [state: { open: boolean; rects: import('./types').SolidRect[]; edge?: import('./types').StickPosition }]; result: void }
+
+  'window:panel-drag-start': { args: [blade: import('./types').SolidRect]; result: boolean }
+
+  'window:panel-drag-end': { args: [commit: boolean]; result: import('./types').PanelDragResult | null }
+
+  'window:panel-drag-reveal': { args: []; result: void }
+
+  'window:panel-cursor': { args: [cursor: import('./types').PanelCursor]; result: void }
+
+  'items:copy-multi': { args: [req: import('./types').MultiRequest]; result: boolean }
+
+  'items:paste-multi': { args: [req: import('./types').MultiRequest]; result: boolean }
+
+  'items:stack-multi': { args: [ids: string[]]; result: import('./types').MergeResult }
+
+  'items:pin-multi': { args: [ids: string[], pinned: boolean]; result: ClipboardItemDto[] }
 }
 
 /* ------------------------------------------------------------------ */
@@ -129,9 +171,12 @@ export interface EventMap {
   /** Settings changed (e.g. from the tray menu). */
   'state:settings': [settings: Settings]
   /** Toggle the panel open/closed from the main process (e.g. tray). */
-  'window:toggle': [open?: boolean]
+  'window:toggle': [open?: boolean, meta?: { source?: import('./types').ToggleSource }]
   /** Open the panel directly to settings from the main process (e.g. tray). */
   'window:open-settings': []
+  'window:search': [query: string]
+  'item:menu-action': [req: { id: string; action: import('./types').ItemMenuAction }]
+  'queue:state': [state: { ids: string[] }]
   /** Fired when an OS drag initiated by the app has completed. */
   'item:drag-end': []
   /** Tutorial step sync */
@@ -167,6 +212,7 @@ export interface EventMap {
     displayWidth: number
     displayHeight: number
   }]
+  'window:panel-drag-placement': [placement: import('./types').PanelDragPlacement]
 }
 
 /* ------------------------------------------------------------------ */
@@ -182,6 +228,7 @@ export interface SendMap {
   'item:start-drag': { args: [req: DragRequest] }
   /** Pre-stage drag file and warm icon in background before drag begins. */
   'item:prestage-drag': { args: [req: DragRequest] }
+  'items:start-drag-multi': { args: [ids: string[]] }
   /** Synchronize tutorial step */
   'tutorial:set-step': { args: [step: number] }
 }

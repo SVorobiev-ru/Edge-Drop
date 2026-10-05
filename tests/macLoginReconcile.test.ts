@@ -1,4 +1,5 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { restorePlatform, setPlatform } from './helpers/platform'
 
 const mocks = vi.hoisted(() => ({
   isPackaged: true,
@@ -24,14 +25,7 @@ vi.mock('electron', () => ({
   }
 }))
 
-vi.mock('../electron/store/settings', () => ({
-  loadSettings: () => mocks.settings,
-  saveSettings: (patch: { launchAtLogin?: boolean }) => {
-    mocks.saved.push(patch)
-    mocks.settings = { ...mocks.settings, ...patch }
-    return mocks.settings
-  }
-}))
+vi.mock('../electron/store/settings', async () => (await import('./helpers/settingsMock')).settingsModuleMock(mocks))
 
 vi.mock('node:child_process', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:child_process')>()
@@ -47,12 +41,6 @@ import {
   refreshLaunchAtLoginFromOs
 } from '../electron/main/loginItems'
 import { DEFAULT_SETTINGS } from '../shared/types'
-
-const realPlatform = process.platform
-
-function setPlatform(value: string): void {
-  Object.defineProperty(process, 'platform', { value, configurable: true })
-}
 
 describe('macOS launch-at-login lifecycle', () => {
   beforeEach(() => {
@@ -82,11 +70,11 @@ describe('macOS launch-at-login lifecycle', () => {
 
   afterEach(() => {
     vi.restoreAllMocks()
-    setPlatform(realPlatform)
+    restorePlatform()
   })
 
   afterAll(() => {
-    setPlatform(realPlatform)
+    restorePlatform()
   })
 
   it('keeps launch at login on by default, like on Windows', () => {

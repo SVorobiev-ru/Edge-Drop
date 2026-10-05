@@ -1,4 +1,5 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { restorePlatform, setPlatform } from './helpers/platform'
 
 type Handler = (...args: unknown[]) => void
 
@@ -14,6 +15,11 @@ interface FakeWindow {
   isDestroyed: () => boolean
   once: (event: string, fn: Handler) => void
   on: (event: string, fn: Handler) => void
+  webContents: {
+    setWindowOpenHandler: ReturnType<typeof vi.fn>
+    on: ReturnType<typeof vi.fn>
+    getURL: () => string
+  }
 }
 
 const mocks = vi.hoisted(() => ({
@@ -64,6 +70,11 @@ vi.mock('electron', () => ({
       },
       on: (event, fn) => {
         win.handlers[event] = fn
+      },
+      webContents: {
+        setWindowOpenHandler: vi.fn(),
+        on: vi.fn(),
+        getURL: () => 'file:///Applications/Edge-Drop.app/Contents/Resources/app.asar/out/renderer/index.html#onboarding'
       }
     }
     mocks.windows.push(win)
@@ -82,12 +93,7 @@ vi.mock('../electron/main/state', () => ({
   pushState: { settings: vi.fn() }
 }))
 
-const realPlatform = process.platform
 const realArgv = process.argv
-
-function setPlatform(value: string): void {
-  Object.defineProperty(process, 'platform', { value, configurable: true })
-}
 
 beforeEach(() => {
   mocks.windows.length = 0
@@ -104,12 +110,12 @@ beforeEach(() => {
 
 afterEach(() => {
   process.argv = realArgv
-  setPlatform(realPlatform)
+  restorePlatform()
   vi.resetModules()
 })
 
 afterAll(() => {
-  setPlatform(realPlatform)
+  restorePlatform()
 })
 
 describe('application menu', () => {
@@ -119,10 +125,14 @@ describe('application menu', () => {
     installMacAppMenu()
     expect(mocks.setApplicationMenu).toHaveBeenCalledTimes(1)
     const { template } = mocks.setApplicationMenu.mock.calls[0][0] as {
-      template: Array<{ label?: string; submenu: Array<{ role?: string }> }>
+      template: Array<{ label?: string; submenu: Array<{ role?: string; label?: string; accelerator?: string; type?: string }> }>
     }
     expect(template.map((m) => m.label)).toEqual(['Edge-Drop', 'Edit', 'Window'])
-    expect(template[0].submenu).toEqual([])
+    expect(template[0].submenu.map((i) => [i.label ?? i.type, i.accelerator])).toEqual([
+      ['Settings…', 'Command+,'],
+      ['separator', undefined],
+      ['Quit Edge-Drop', 'Command+Q']
+    ])
     expect(template[2].submenu.map((i) => i.role)).toEqual(['close'])
     expect(template[1].submenu.map((i) => i.role).filter(Boolean)).toEqual([
       'undo', 'redo', 'cut', 'copy', 'paste', 'selectAll'

@@ -98,10 +98,12 @@ describe('GitHub vs Store packaging contracts (on-disk, not assumed)', () => {
     expect(existsSync(join(root, 'resources/appx/startup-extensions.xml'))).toBe(true)
   })
 
-  it('ships Twemoji 64px as extraResources for GitHub and Store builds', () => {
-    expect(pkg.build.extraResources).toEqual(expect.arrayContaining([
+  it('ships Twemoji 64px as extraResources for GitHub and Store builds only', () => {
+    expect(pkg.build.win?.extraResources).toEqual(expect.arrayContaining([
       { from: 'node_modules/emoji-datasource-twitter/img/twitter/64', to: 'emoji/64' }
     ]))
+    expect(pkg.build.extraResources ?? []).toEqual([])
+    expect(JSON.stringify((pkg.build as Record<string, any>).mac ?? {})).not.toContain('emoji-datasource-twitter/img')
     expect(existsSync(join(root, 'node_modules/emoji-datasource-twitter/img/twitter/64'))).toBe(true)
     expect(pkg.devDependencies['emoji-datasource-twitter']).toBeTruthy()
   })

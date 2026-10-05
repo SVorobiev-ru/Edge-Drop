@@ -1,4 +1,5 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { restorePlatform, setPlatform } from './helpers/platform'
 
 interface FakeImage {
   label: string
@@ -104,12 +105,6 @@ vi.mock('../electron/main/state', () => ({
 import { nativeImage } from 'electron'
 import { getTrayImage } from '../electron/main/tray'
 
-const realPlatform = process.platform
-
-function setPlatform(value: string): void {
-  Object.defineProperty(process, 'platform', { value, configurable: true })
-}
-
 function createdImage(): FakeImage {
   const results = vi.mocked(nativeImage.createEmpty).mock.results
   return results[results.length - 1].value as FakeImage
@@ -129,11 +124,11 @@ describe('getTrayImage on macOS', () => {
   })
 
   afterEach(() => {
-    setPlatform(realPlatform)
+    restorePlatform()
   })
 
   afterAll(() => {
-    setPlatform(realPlatform)
+    restorePlatform()
   })
 
   it('builds a template image from an empty image with 1x and 2x representations', () => {

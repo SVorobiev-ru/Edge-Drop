@@ -8,9 +8,9 @@
  * transparent and click-through.
  */
 import { motion, AnimatePresence } from 'framer-motion'
-import { useEffect, useRef, useState, useMemo } from 'react'
-import { useStore } from '../store/appStore'
-import { PANEL_LEAVE_EVENT, PANEL_ENTER_EVENT } from '../hooks/useEdgeHover'
+import { useEffect, useLayoutEffect, useRef, useState, useMemo } from 'react'
+import { useStore, selectReduceMotion } from '../store/appStore'
+import { PANEL_LEAVE_EVENT, PANEL_ENTER_EVENT, resolvePanelWidth } from '../hooks/useEdgeHover'
 import { Header } from './Header'
 import { ShelfSearch } from './ShelfSearch'
 import { ItemList } from './ItemList'
@@ -22,26 +22,37 @@ import { PreviewFlyout } from './PreviewFlyout'
 import { IndicatorStyleFlyout } from './IndicatorStyleFlyout'
 import { LanguageFlyout } from './LanguageFlyout'
 import { CopyIndicatorCurve } from './CopyIndicatorCurve'
-import { useFilteredItems } from '../hooks/useFilteredItems'
+import { groupedCount, useFilteredItems } from '../hooks/useFilteredItems'
 import { isInSplitEdgeZone } from '../../shared/edgeZones'
+import { IS_DARWIN } from '../lib/edge'
+import { resetViewAfterClose } from '../lib/shelf'
+import { usePanelSnapping } from '../hooks/usePanelDrag'
+import { panelResizeGripProps, releasePanelCursor, usePanelSizePatch } from '../hooks/usePanelResize'
+import { applyPanelPosition, MORPH_REVEAL_MS, resizeGripStyle, usePanelMorph, type MorphPhase } from '../lib/panelPosition'
+import { isHorizontalEdge, type ResizeSide } from '../../shared/panelPlacement'
+import type { StickPosition } from '../../shared/types'
 
 import { useTranslation } from '../i18n'
 
+const usePanelWidthEffect = IS_DARWIN ? useLayoutEffect : useEffect
+const MAC_BLADE_STYLE = { width: 'var(--panel-w)', height: 'var(--panel-h)' }
+const MORPH_FADE = `${MORPH_REVEAL_MS / 1000}s ease-out`
+
 export function Panel() {
   const open = useStore((s) => s.open)
-  const { pinned, recent } = useFilteredItems()
+  const groups = useFilteredItems()
+  const { pinned, recent } = groups
   const filteredItems = useMemo(() => [...pinned, ...recent], [pinned, recent])
-  const filteredCount = filteredItems.length
+  const filteredCount = groupedCount(groups)
   const clear = useStore((s) => s.clear)
   const typeFilter = useStore((s) => s.typeFilter)
   const query = useStore((s) => s.query)
 
   const settings = useStore((s) => s.settings)
+  const sizePatch = usePanelSizePatch()
+  const panelWidth = sizePatch?.panelWidth ?? resolvePanelWidth(settings)
   const settingsOpen = useStore((s) => s.settingsOpen)
-  const setSettingsOpen = useStore((s) => s.setSettingsOpen)
-  const setQuery = useStore((s) => s.setQuery)
   const emojiOpen = useStore((s) => s.emojiOpen)
-  const setEmojiOpen = useStore((s) => s.setEmojiOpen)
   // Mount the picker on first open, then keep it. Tearing it (and ItemList)
   // down on every smile click is what made the switch hitch.
   const emojiMountedRef = useRef(false)
@@ -61,20 +72,28 @@ export function Panel() {
     return () => window.clearTimeout(timer)
   }, [])
 
+  usePanelWidthEffect(() => {
+    document.documentElement.style.setProperty('--panel-width', `${panelWidth}px`)
+  }, [panelWidth])
+
+  useLayoutEffect(() => {
+    if (IS_DARWIN) applyPanelPosition()
+  }, [settings, sizePatch])
+
+  useEffect(() => {
+    if (!IS_DARWIN) return
+    window.addEventListener('resize', applyPanelPosition)
+    return () => window.removeEventListener('resize', applyPanelPosition)
+  }, [])
+
   useEffect(() => {
     if (!open) {
       // Delay resetting view state until after the retraction spring finishes (~350ms),
       // so the blade smoothly retracts with the current view without flashing the main clipboard.
-      const timer = window.setTimeout(() => {
-        if (!useStore.getState().open) {
-          setSettingsOpen(false)
-          setQuery('')
-          setEmojiOpen(false)
-        }
-      }, 400)
+      const timer = window.setTimeout(() => resetViewAfterClose(), 400)
       return () => window.clearTimeout(timer)
     }
-  }, [open, setSettingsOpen, setQuery, setEmojiOpen])
+  }, [open])
 
   const screenH = typeof window !== 'undefined' ? window.innerHeight : 800
   const pFrac = settings.panelHeight || 0.6
@@ -156,6 +175,7 @@ export function Panel() {
           x: pos.x,
           y: pos.y,
           windowWidth: window.innerWidth,
+          windowHeight: window.innerHeight,
           stickPosition: useStore.getState().settings.stickPosition
         })
 
@@ -198,6 +218,7 @@ export function Panel() {
   }
 
   const onDragEnter = (e: React.DragEvent) => {
+    if (useStore.getState().textDragActive) return
     if (hasDragContent(e)) {
       e.preventDefault()
       setDragActive(true)
@@ -228,7 +249,10 @@ export function Panel() {
 
   const isRight = settings.stickPosition === 'right'
   const isTop = settings.stickPosition === 'top'
-  const isHorizontal = isTop
+  const isBottom = settings.stickPosition === 'bottom'
+  const isHorizontal = isHorizontalEdge(settings.stickPosition)
+  const morph = usePanelMorph()
+  const morphing = IS_DARWIN && morph !== 'idle'
 
   const isTransitioning = !!edgeTransition?.active
   const isVisuallyOpen = isTransitioning
@@ -238,12 +262,15 @@ export function Panel() {
   let containerClass = 'blade-container'
   if (isRight) containerClass += ' blade-right'
   else if (isTop) containerClass += ' blade-top'
+  else if (isBottom) containerClass += ' blade-bottom'
   else containerClass += ' blade-left'
   if (isHorizontal) containerClass += ' horizontal-dock'
   if (isVisuallyOpen) containerClass += ' is-open'
   if (isTransitioning) containerClass += ' is-transitioning'
+  if (morphing) containerClass += ' is-morphing'
 
-  const reduceMotion = !!settings.reduceMotion
+  const reduceMotion = useStore(selectReduceMotion)
+  const snapping = usePanelSnapping()
   // Single Apple-like reveal curve (no overshoot branch — bounce was dead
   // code with no UI surface; the expo ease settles without ringing).
   const clipTransition = reduceMotion
@@ -273,16 +300,23 @@ export function Panel() {
     position: 'absolute',
     zIndex: 10,
     pointerEvents: isTransitioning ? 'none' : open ? 'auto' : 'none',
-    transition: mounted ? currentTransition : 'none',
+    transition: mounted && !snapping ? currentTransition : 'none',
     opacity: currentOpacity
   }
   if (isTransitioning) {
     containerStyle.willChange = 'clip-path, opacity'
   }
+  if (morphing) {
+    containerStyle.opacity = morph === 'shape' ? 0 : 1
+    containerStyle.transition = morph === 'shape' ? 'none' : `opacity ${MORPH_FADE}`
+  }
 
   // Static centering via plain CSS transform (framer x/y shorthands removed
   // with the bounce cleanup — same visual placement, no runtime needed).
-  if (isRight) {
+  if (IS_DARWIN) {
+    containerStyle.left = 'var(--panel-x)'
+    containerStyle.top = 'var(--panel-y)'
+  } else if (isRight) {
     containerStyle.top = topOffset
     containerStyle.transform = 'translateY(-50%)'
     containerStyle.right = 0
@@ -335,6 +369,10 @@ export function Panel() {
     clipPath = isVisuallyOpen
       ? 'inset(0px calc(0% - 100px) calc(0% - 600px) calc(0% - 100px) round 0px 0px 24px 24px)'
       : `inset(0px ${insetRight} calc(100% - ${hotWidth}px) ${insetLeft} round 0px 0px 999px 999px)`
+  } else if (isBottom) {
+    clipPath = isVisuallyOpen
+      ? 'inset(calc(0% - 600px) calc(0% - 100px) 0px calc(0% - 100px) round 24px 24px 0px 0px)'
+      : `inset(calc(100% - ${hotWidth}px) ${insetRight} 0px ${insetLeft} round 999px 999px 0px 0px)`
   } else {
     clipPath = isVisuallyOpen
       ? 'inset(calc(0% - 100px) calc(0% - 800px) calc(0% - 100px) 0px round 0px 24px 24px 0px)'
@@ -345,6 +383,7 @@ export function Panel() {
   return (
     <div className="root">
       <CopyIndicatorCurve />
+      {morphing && <PanelMorphShell phase={morph} />}
       <div
         className={containerClass}
         onDragEnter={onDragEnter}
@@ -372,7 +411,7 @@ export function Panel() {
                       position: 'absolute',
                       left: insetLeft,
                       right: insetRight,
-                      top: 0,
+                      [isBottom ? 'bottom' : 'top']: 0,
                       height: 2,
                       boxSizing: 'border-box',
                       background: 'linear-gradient(to right, transparent, rgba(255, 255, 255, 0.75) 20%, rgba(255, 255, 255, 0.95) 50%, rgba(255, 255, 255, 0.75) 80%, transparent)',
@@ -402,12 +441,26 @@ export function Panel() {
           <>
             <div className="flare-horizontal flare-top-left" style={{ opacity: isVisuallyOpen ? 1 : 0 }}>
               <svg width="32" height="30" viewBox="0 0 32 30" fill="none" xmlns="http://www.w3.org/2000/svg" shapeRendering="geometricPrecision">
-                <path d="M 0 0 C 13.43 0 30 16.57 30 30 L 32 30 L 32 0 Z" fill="#000000" />
+                <path d="M 0 0 C 13.43 0 30 16.57 30 30 L 32 30 L 32 0 Z" style={{ fill: 'var(--panel-bg)' }} />
               </svg>
             </div>
             <div className="flare-horizontal flare-top-right" style={{ opacity: isVisuallyOpen ? 1 : 0 }}>
               <svg width="32" height="30" viewBox="0 0 32 30" fill="none" xmlns="http://www.w3.org/2000/svg" shapeRendering="geometricPrecision">
-                <path d="M 2 30 C 2 16.57 18.57 0 32 0 L 0 0 L 0 30 Z" fill="#000000" />
+                <path d="M 2 30 C 2 16.57 18.57 0 32 0 L 0 0 L 0 30 Z" style={{ fill: 'var(--panel-bg)' }} />
+              </svg>
+            </div>
+          </>
+        )}
+        {isBottom && (
+          <>
+            <div className="flare-horizontal flare-bottom-left" style={{ opacity: isVisuallyOpen ? 1 : 0 }}>
+              <svg width="32" height="30" viewBox="0 0 32 30" fill="none" xmlns="http://www.w3.org/2000/svg" shapeRendering="geometricPrecision">
+                <path d="M 0 30 C 13.43 30 30 13.43 30 0 L 32 0 L 32 30 Z" style={{ fill: 'var(--panel-bg)' }} />
+              </svg>
+            </div>
+            <div className="flare-horizontal flare-bottom-right" style={{ opacity: isVisuallyOpen ? 1 : 0 }}>
+              <svg width="32" height="30" viewBox="0 0 32 30" fill="none" xmlns="http://www.w3.org/2000/svg" shapeRendering="geometricPrecision">
+                <path d="M 2 0 C 2 13.43 18.57 30 32 30 L 0 30 L 0 0 Z" style={{ fill: 'var(--panel-bg)' }} />
               </svg>
             </div>
           </>
@@ -416,12 +469,12 @@ export function Panel() {
           <>
             <div className="flare-top flare-right" style={{ opacity: isVisuallyOpen ? 1 : 0 }}>
               <svg width="30" height="30" viewBox="0 0 30 30" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M 30 0 L 30 30 L 0 30 A 30 30 0 0 0 30 0 Z" fill="#000000" />
+                <path d="M 30 0 L 30 30 L 0 30 A 30 30 0 0 0 30 0 Z" style={{ fill: 'var(--panel-bg)' }} />
               </svg>
             </div>
             <div className="flare-bottom flare-right" style={{ opacity: isVisuallyOpen ? 1 : 0 }}>
               <svg width="30" height="30" viewBox="0 0 30 30" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M 30 30 L 30 0 L 0 0 A 30 30 0 0 1 30 30 Z" fill="#000000" />
+                <path d="M 30 30 L 30 0 L 0 0 A 30 30 0 0 1 30 30 Z" style={{ fill: 'var(--panel-bg)' }} />
               </svg>
             </div>
           </>
@@ -429,12 +482,12 @@ export function Panel() {
           <>
             <div className="flare-top" style={{ opacity: isVisuallyOpen ? 1 : 0 }}>
               <svg width="30" height="30" viewBox="0 0 30 30" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M 0 0 L 0 30 L 30 30 A 30 30 0 0 1 0 0 Z" fill="#000000" />
+                <path d="M 0 0 L 0 30 L 30 30 A 30 30 0 0 1 0 0 Z" style={{ fill: 'var(--panel-bg)' }} />
               </svg>
             </div>
             <div className="flare-bottom" style={{ opacity: isVisuallyOpen ? 1 : 0 }}>
               <svg width="30" height="30" viewBox="0 0 30 30" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M 0 30 L 0 0 L 30 0 A 30 30 0 0 0 0 30 Z" fill="#000000" />
+                <path d="M 0 30 L 0 0 L 30 0 A 30 30 0 0 0 0 30 Z" style={{ fill: 'var(--panel-bg)' }} />
               </svg>
             </div>
           </>
@@ -442,7 +495,7 @@ export function Panel() {
         <div
           ref={bladeRef}
           className="blade"
-          style={isHorizontal ? { width: 'min(calc(100vw - 60px), 1080px)', height: 210 } : { height: panelHeightStr }}
+          style={IS_DARWIN ? MAC_BLADE_STYLE : isHorizontal ? { width: 'min(calc(100vw - 60px), 1080px)', height: 210 } : { height: panelHeightStr }}
         >
           <Header
             isHorizontal={isHorizontal}
@@ -476,7 +529,7 @@ export function Panel() {
                 opacity: settingsOpen ? 0 : 1,
                 visibility: settingsOpen ? 'hidden' : 'visible',
                 pointerEvents: settingsOpen ? 'none' : 'auto',
-                transition: `opacity ${settings.reduceMotion ? '0.01s' : '0.16s'} ease, visibility ${settings.reduceMotion ? '0.01s' : '0.16s'} ease`
+                transition: IS_DARWIN ? 'none' : `opacity ${reduceMotion ? '0.01s' : '0.16s'} ease, visibility ${reduceMotion ? '0.01s' : '0.16s'} ease`
               }}
               aria-hidden={settingsOpen}
             >
@@ -488,7 +541,8 @@ export function Panel() {
                     flexDirection: 'column',
                     minHeight: 0,
                     height: '100%',
-                    overflow: 'hidden'
+                    overflow: 'hidden',
+                    position: 'relative'
                   }}
                   aria-hidden={emojiOpen}
                 >
@@ -538,6 +592,13 @@ export function Panel() {
             </div>
 
             {/* Settings view */}
+            {IS_DARWIN ? (
+              settingsOpen && (
+                <div style={{ gridArea: '1 / 1 / 2 / 2', display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}>
+                  <Settings isHorizontal={isHorizontal} />
+                </div>
+              )
+            ) : (
             <AnimatePresence>
               {settingsOpen && (
                 <motion.div
@@ -545,23 +606,52 @@ export function Panel() {
                   initial={{ opacity: 0, x: isHorizontal ? 0 : (isRight ? -8 : 8), y: isHorizontal ? (isTop ? -8 : 8) : 0 }}
                   animate={{ opacity: 1, x: 0, y: 0 }}
                   exit={{ opacity: 0, x: isHorizontal ? 0 : (isRight ? 8 : -8), y: isHorizontal ? (isTop ? -8 : 8) : 0 }}
-                  transition={settings.reduceMotion ? { duration: 0.01 } : { type: 'spring', stiffness: 500, damping: 32, mass: 0.5 }}
+                  transition={reduceMotion ? { duration: 0.01 } : { type: 'spring', stiffness: 500, damping: 32, mass: 0.5 }}
                   style={{ gridArea: '1 / 1 / 2 / 2', display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}
                 >
                   <Settings isHorizontal={isHorizontal} />
                 </motion.div>
               )}
             </AnimatePresence>
+            )}
           </div>
           <DropOverlay />
           <SplitDropZone stickPosition={settings.stickPosition || (isRight ? 'right' : 'left')} />
         </div>
+        {IS_DARWIN && open && !isTransitioning && !morphing && (
+          <>
+            <PanelResizeGrip side="inner" stick={settings.stickPosition} />
+            <PanelResizeGrip side="start" stick={settings.stickPosition} />
+            <PanelResizeGrip side="end" stick={settings.stickPosition} />
+          </>
+        )}
         <PreviewFlyout isRight={isRight} />
         <IndicatorStyleFlyout isRight={isRight} />
         <LanguageFlyout isRight={isRight} />
       </div>
     </div>
   )
+}
+
+function PanelResizeGrip({ side, stick }: { side: ResizeSide; stick: StickPosition }) {
+  const { cursor, ...handlers } = panelResizeGripProps(side, stick)
+  useEffect(() => releasePanelCursor, [])
+  return (
+    <div
+      className="panel-resize-handle"
+      aria-hidden="true"
+      {...handlers}
+      style={{ position: 'absolute', zIndex: 300, cursor, ...resizeGripStyle(side, stick) }}
+    />
+  )
+}
+
+function PanelMorphShell({ phase }: { phase: MorphPhase }) {
+  const ref = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    ref.current?.getBoundingClientRect()
+  }, [])
+  return <div ref={ref} className={`panel-morph-shell${phase === 'reveal' ? ' is-revealing' : ''}`} aria-hidden="true" />
 }
 
 /*
@@ -587,10 +677,11 @@ function DropOverlay() {
   const { t } = useTranslation()
   const dragActive = useStore((s) => s.dragActive)
   const internalDragReq = useStore((s) => s.internalDragReq)
+  const textDragActive = useStore((s) => s.textDragActive)
 
   return (
     <AnimatePresence>
-      {dragActive && !internalDragReq && (
+      {dragActive && !internalDragReq && !textDragActive && (
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
@@ -606,7 +697,7 @@ function DropOverlay() {
             justifyContent: 'center',
             gap: '14px',
             pointerEvents: 'none',
-            background: 'rgba(6, 6, 8, 0.95)',
+            background: 'var(--bg-drop-overlay)',
             textAlign: 'center',
             padding: '24px'
           }}
@@ -616,12 +707,12 @@ function DropOverlay() {
               width: '52px',
               height: '52px',
               borderRadius: '16px',
-              background: 'rgba(255, 255, 255, 0.05)',
-              border: '1px solid rgba(255, 255, 255, 0.1)',
+              background: 'rgb(var(--ink) / 0.05)',
+              border: '1px solid rgb(var(--ink) / 0.1)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              color: 'rgba(255, 255, 255, 0.9)'
+              color: 'rgb(var(--ink) / 0.9)'
             }}
           >
             <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -631,10 +722,10 @@ function DropOverlay() {
             </svg>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-            <div style={{ fontSize: '15px', fontWeight: 600, color: 'rgba(255, 255, 255, 0.95)', letterSpacing: '0.01em' }}>
+            <div style={{ fontSize: '15px', fontWeight: 600, color: 'rgb(var(--ink) / 0.95)', letterSpacing: '0.01em' }}>
               {t('item.dropToSave')}
             </div>
-            <div style={{ fontSize: '12px', fontWeight: 400, color: 'rgba(255, 255, 255, 0.5)', lineHeight: 1.4 }}>
+            <div style={{ fontSize: '12px', fontWeight: 400, color: 'rgb(var(--ink) / max(0.5, var(--text-alpha-floor)))', lineHeight: 1.4 }}>
               {t('item.dropToSaveDesc')}
             </div>
           </div>
@@ -644,7 +735,7 @@ function DropOverlay() {
   )
 }
 
-function SplitDropZone({ stickPosition = 'left' }: { stickPosition?: 'left' | 'right' | 'top' }) {
+function SplitDropZone({ stickPosition = 'left' }: { stickPosition?: StickPosition }) {
   const internalDragReq = useStore((s) => s.internalDragReq)
   const isSubitemDragging = !!(
     internalDragReq &&
@@ -674,6 +765,7 @@ function SplitDropZone({ stickPosition = 'left' }: { stickPosition?: 'left' | 'r
   }
 
   const isTop = stickPosition === 'top'
+  const isBottom = stickPosition === 'bottom'
   const isRight = stickPosition === 'right'
 
   // Orientation alignment:
@@ -682,7 +774,9 @@ function SplitDropZone({ stickPosition = 'left' }: { stickPosition?: 'left' | 'r
   // When dock is on TOP, drop zone is at the TOP (-15px y-offset)
   const initialMotion = isTop
     ? { opacity: 0, y: -15 }
-    : isRight
+    : isBottom
+      ? { opacity: 0, y: 15 }
+      : isRight
       ? { opacity: 0, x: 15 }
       : { opacity: 0, x: -15 }
 
@@ -698,7 +792,17 @@ function SplitDropZone({ stickPosition = 'left' }: { stickPosition?: 'left' | 'r
         alignItems: 'center',
         justifyContent: 'flex-start'
       }
-    : isRight
+    : isBottom
+      ? {
+          bottom: 0,
+          left: 0,
+          right: 0,
+          height: isOver ? 72 : 56,
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'flex-end'
+        }
+      : isRight
       ? {
           top: 0,
           bottom: 0,

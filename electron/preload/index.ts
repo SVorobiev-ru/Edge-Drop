@@ -18,7 +18,7 @@ import type {
   SendChannel
 } from '../../shared/ipc'
 import type { EdgeApi } from '../../shared/bridge'
-import type { DragRequest } from '../../shared/types'
+import type { DragRequest, ItemMenuRequest } from '../../shared/types'
 
 /** Typed invoke wrapper derived from the shared contracts. */
 function invoke<C extends InvokeChannel>(
@@ -185,7 +185,7 @@ const api = {
   getFullText: (id: string) => invoke('item:get-full-text', id),
   copyItem: (id: string) => invoke('item:copy', id),
   copySubitem: (req: import('../../shared/types').DragRequest) => invoke('item:copy-subitem', req),
-  pasteItem: (id: string) => invoke('item:paste', id),
+  pasteItem: (id: string, opts?: import('../../shared/types').PasteOptions) => invoke('item:paste', id, opts),
   pasteSubitem: (req: import('../../shared/types').DragRequest) => invoke('item:paste-subitem', req),
   pasteEmoji: (text: string) => invoke('emoji:paste', text),
   installUpdate: () => invoke('app:install-update'),
@@ -206,6 +206,32 @@ const api = {
   getDisplays: () => invoke('displays:list'),
   getAccessibilityStatus: () => invoke('accessibility:status'),
   requestAccessibility: () => invoke('accessibility:request'),
+  openAccessibilitySettings: () => invoke('accessibility:open-settings'),
+  setHotkey: (accelerator: string) => invoke('hotkey:set', accelerator),
+  showItemMenu: (id: string, sub?: ItemMenuRequest) => invoke('item:context-menu', id, sub),
+  quickLook: (id: string, path?: string) => invoke('item:quick-look', id, path),
+  setItemTitle: (id: string, title: string) => invoke('item:set-title', id, title),
+  listRunningApps: () => invoke('apps:list-running'),
+  pickApp: () => invoke('apps:pick'),
+  getAppIcon: (bundleId: string) => invoke('apps:icon', bundleId),
+  exportHistory: () => invoke('history:export'),
+  importHistory: () => invoke('history:import'),
+  queueAdd: (id: string) => invoke('queue:add', id),
+  queueClear: () => invoke('queue:clear'),
+  platform: process.platform,
+  setPanelState: (state: { open: boolean; rects: import('../../shared/types').SolidRect[]; edge?: import('../../shared/types').StickPosition }) => invoke('window:panel-state', state),
+  panelDragStart: (blade: import('../../shared/types').SolidRect) => invoke('window:panel-drag-start', blade),
+  panelDragEnd: (commit: boolean) => invoke('window:panel-drag-end', commit),
+  panelDragReveal: () => invoke('window:panel-drag-reveal'),
+  setPanelCursor: (cursor: import('../../shared/types').PanelCursor) => invoke('window:panel-cursor', cursor),
+  copyMulti: (req: import('../../shared/types').MultiRequest) => invoke('items:copy-multi', req),
+  pasteMulti: (req: import('../../shared/types').MultiRequest) => invoke('items:paste-multi', req),
+  stackMulti: (ids: string[]) => invoke('items:stack-multi', ids),
+  pinMulti: (ids: string[], pinned: boolean) => invoke('items:pin-multi', ids, pinned),
+  startDragMulti: (ids: string[]) => {
+    setInternalDragState(true)
+    send('items:start-drag-multi', ids)
+  },
   updateSettings: (patch: Partial<InvokeResult<'settings:update'>>) =>
     invoke('settings:update', patch),
   refreshLaunchAtLogin: () => invoke('startup:refresh'),
@@ -221,8 +247,11 @@ const api = {
   /* Main -> Renderer */
   onItems: (cb: (items: EventArgs<'state:items'>[0]) => void) => on('state:items', cb),
   onSettings: (cb: (settings: EventArgs<'state:settings'>[0]) => void) => on('state:settings', cb),
-  onToggle: (cb: (open?: boolean) => void) => on('window:toggle', cb),
+  onToggle: (cb: (open?: boolean, meta?: EventArgs<'window:toggle'>[1]) => void) => on('window:toggle', cb),
   onOpenSettings: (cb: () => void) => on('window:open-settings', cb),
+  onSearch: (cb: (query: string) => void) => on('window:search', cb),
+  onItemMenuAction: (cb: (req: EventArgs<'item:menu-action'>[0]) => void) => on('item:menu-action', cb),
+  onQueueState: (cb: (state: EventArgs<'queue:state'>[0]) => void) => on('queue:state', cb),
   onDragEnd: (cb: () => void) => {
     return on('item:drag-end', () => {
       setInternalDragState(false)
@@ -231,6 +260,7 @@ const api = {
   },
   onInternalDrop: (cb: (pos: { x: number; y: number }) => void) => on('item:internal-drop', cb),
   onCursorEdge: (cb: (data: EventArgs<'window:cursor-edge'>[0]) => void) => on('window:cursor-edge', cb),
+  onPanelDragPlacement: (cb: (placement: EventArgs<'window:panel-drag-placement'>[0]) => void) => on('window:panel-drag-placement', cb),
   onToast: (cb: (toast: { id: string; message: string; tone: 'info' | 'error' }) => void) => on('ui:toast', cb),
   onCopyFlare: (cb: () => void) => on('ui:copy-flare', cb),
   onTutorialStep: (cb: (step: number) => void) => on('tutorial:step', cb),

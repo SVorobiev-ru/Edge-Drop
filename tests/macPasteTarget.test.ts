@@ -1,5 +1,6 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { DEFAULT_SETTINGS } from '../shared/types'
+import { restorePlatform, setPlatform } from './helpers/platform'
 
 const mocks = vi.hoisted(() => ({
   frontmostPid: vi.fn(),
@@ -15,43 +16,19 @@ vi.mock('../electron/main/macNative', () => ({
   weAreFrontmost: () => mocks.weAreFrontmost()
 }))
 
-vi.mock('koffi', () => ({
-  default: { load: () => ({ func: () => () => null }) }
-}))
+vi.mock('koffi', () => import('./helpers/koffiMock'))
 
-vi.mock('electron', () => {
-  class FakeBrowserWindow {
-    setFocusable = vi.fn((focusable: boolean) => {
-      mocks.calls.push(`setFocusable(${focusable})`)
-    })
-    focus = vi.fn()
-    isDestroyed = vi.fn(() => false)
-    isVisible = vi.fn(() => true)
-    getBounds = vi.fn(() => ({ x: 0, y: 0, width: 384, height: 900 }))
-    setVisibleOnAllWorkspaces = vi.fn()
-    setIgnoreMouseEvents = vi.fn()
-    setAlwaysOnTop = vi.fn()
-    loadFile = vi.fn()
-    loadURL = vi.fn()
-    on = vi.fn()
-    once = vi.fn()
-    webContents = { setWindowOpenHandler: vi.fn(), on: vi.fn() }
-    constructor() {
-      mocks.windows.push(this as unknown as Record<string, any>)
-    }
-  }
+vi.mock('electron', async () => {
+  const { electronMock, fakeBrowserWindowClass } = await import('./helpers/electronMock')
   const display = { id: 1, workArea: { x: 0, y: 0, width: 1440, height: 900 }, scaleFactor: 2 }
-  return {
-    BrowserWindow: FakeBrowserWindow,
-    app: { focus: vi.fn(), getAppPath: () => '/mock/app', getPath: () => '/mock/userData' },
-    screen: {
-      on: vi.fn(),
-      getPrimaryDisplay: () => display,
-      getAllDisplays: () => [display]
-    },
-    shell: { openExternal: vi.fn() },
-    powerMonitor: { on: vi.fn() }
-  }
+  return electronMock({
+    BrowserWindow: fakeBrowserWindowClass({
+      windows: mocks.windows,
+      bounds: { x: 0, y: 0, width: 384, height: 900 },
+      init: (w) => w.setFocusable.mockImplementation((focusable: boolean) => mocks.calls.push(`setFocusable(${focusable})`))
+    }),
+    screen: { getPrimaryDisplay: () => display, getAllDisplays: () => [display] }
+  })
 })
 
 vi.mock('../electron/main/config', () => ({
@@ -59,9 +36,7 @@ vi.mock('../electron/main/config', () => ({
   runtime: { quitting: false }
 }))
 
-vi.mock('../electron/store/paths', () => ({
-  PATHS: { icon: () => '/mock/icon.png' }
-}))
+vi.mock('../electron/store/paths', async () => (await import('./helpers/pathsMock')).pathsModuleMock({ PATHS: { icon: () => '/mock/icon.png' } }))
 
 vi.mock('../electron/store/settings', () => ({
   loadSettings: () => ({ ...DEFAULT_SETTINGS }),
@@ -75,12 +50,7 @@ vi.mock('../electron/main/fullscreen', () => ({
 
 type WindowModule = typeof import('../electron/main/window')
 
-const realPlatform = process.platform
 const EXTERNAL_PID = 4242
-
-function setPlatform(value: string): void {
-  Object.defineProperty(process, 'platform', { value, configurable: true })
-}
 
 let win: WindowModule
 
@@ -114,11 +84,11 @@ describe('macOS paste target (window.ts)', () => {
   afterEach(() => {
     win.stopHeartbeat()
     vi.useRealTimers()
-    setPlatform(realPlatform)
+    restorePlatform()
   })
 
   afterAll(() => {
-    setPlatform(realPlatform)
+    restorePlatform()
   })
 
   function openWindowWithExternalApp(pid = EXTERNAL_PID): Record<string, any> {
@@ -189,7 +159,7 @@ describe('macOS paste target (window.ts)', () => {
       expect(mocks.activatePid).not.toHaveBeenCalled()
     })
 
-    it('drops focusability, activates the captured app and returns 80 after the 150ms settle', async () => {
+    it('drops focusability, activates the captured app and returns 80 on the first poll that sees it in front', async () => {
       const win0 = openWindowWithExternalApp()
       weFront = true
 
@@ -198,7 +168,7 @@ describe('macOS paste target (window.ts)', () => {
         settled = v
       })
 
-      await vi.advanceTimersByTimeAsync(149)
+      await vi.advanceTimersByTimeAsync(24)
       expect(settled).toBeNull()
       await vi.advanceTimersByTimeAsync(1)
       await pending
@@ -210,7 +180,31 @@ describe('macOS paste target (window.ts)', () => {
       expect(mocks.calls).toEqual(['setFocusable(false)', `activatePid(${EXTERNAL_PID})`])
     })
 
-    it('returns -1 when we are still frontmost after the handoff', async () => {
+    it('keeps polling for a target that comes back late', async () => {
+      openWindowWithExternalApp()
+      weFront = true
+      mocks.activatePid.mockImplementation((pid: number) => {
+        mocks.calls.push(`activatePid(${pid})`)
+        setTimeout(() => {
+          weFront = false
+        }, 300)
+        return true
+      })
+
+      let settled: number | null = null
+      const pending = win.resolvePasteTarget(40).then((v) => {
+        settled = v
+      })
+
+      await vi.advanceTimersByTimeAsync(299)
+      expect(settled).toBeNull()
+      await vi.advanceTimersByTimeAsync(26)
+      await pending
+
+      expect(settled).toBe(80)
+    })
+
+    it('returns -1 when we are still frontmost about 500ms after the handoff', async () => {
       openWindowWithExternalApp()
       weFront = true
       mocks.activatePid.mockImplementation((pid: number) => {
@@ -218,10 +212,16 @@ describe('macOS paste target (window.ts)', () => {
         return false
       })
 
-      const pending = win.resolvePasteTarget(40)
-      await vi.advanceTimersByTimeAsync(150)
+      let settled: number | null = null
+      const pending = win.resolvePasteTarget(40).then((v) => {
+        settled = v
+      })
+      await vi.advanceTimersByTimeAsync(450)
+      expect(settled).toBeNull()
+      await vi.advanceTimersByTimeAsync(100)
+      await pending
 
-      await expect(pending).resolves.toBe(-1)
+      expect(settled).toBe(-1)
       expect(mocks.activatePid).toHaveBeenCalledWith(EXTERNAL_PID)
     })
 
@@ -230,7 +230,7 @@ describe('macOS paste target (window.ts)', () => {
       weFront = true
 
       const pending = win.resolvePasteTarget(40)
-      await vi.advanceTimersByTimeAsync(150)
+      await vi.advanceTimersByTimeAsync(550)
 
       await expect(pending).resolves.toBe(-1)
       expect(win0.setFocusable).toHaveBeenCalledWith(false)

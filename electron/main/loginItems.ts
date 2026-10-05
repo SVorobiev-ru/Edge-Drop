@@ -10,6 +10,7 @@
  * electron-winstore-auto-launch. Electron setLoginItemSettings is not used.
  */
 import { execFileSync } from 'node:child_process'
+import { release } from 'node:os'
 import { app } from 'electron'
 import { isStoreBuild } from './config'
 import { loadSettings, saveSettings } from '../store/settings'
@@ -228,9 +229,19 @@ function collectGithubLoginNames(exePath: string): Set<string> {
   return names
 }
 
+const DARWIN_MAJOR_WITH_SM_APP_SERVICE = 22
+
+export function macSupportsMainAppService(osRelease: string = release()): boolean {
+  const major = Number.parseInt(osRelease.split('.')[0] ?? '', 10)
+  return Number.isFinite(major) && major >= DARWIN_MAJOR_WITH_SM_APP_SERVICE
+}
+
 /** macOS: Login Items via SMAppService (macOS 13+) with legacy fallback. */
 function readMacLaunchAtLogin(): LaunchAtLoginResult {
   try {
+    if (!macSupportsMainAppService()) {
+      return { enabled: !!app.getLoginItemSettings().openAtLogin, blockedByUser: false, ok: true }
+    }
     const s = app.getLoginItemSettings({ type: 'mainAppService' } as Electron.LoginItemSettingsOptions) as Electron.LoginItemSettings & { status?: string }
     if (s.status) {
       return { enabled: s.status === 'enabled', blockedByUser: s.status === 'requires-approval', ok: true }
@@ -243,7 +254,11 @@ function readMacLaunchAtLogin(): LaunchAtLoginResult {
 
 function applyMacLaunchAtLogin(wantLaunch: boolean): LaunchAtLoginResult {
   try {
-    app.setLoginItemSettings({ openAtLogin: wantLaunch, type: 'mainAppService' } as Electron.Settings)
+    if (macSupportsMainAppService()) {
+      app.setLoginItemSettings({ openAtLogin: wantLaunch, type: 'mainAppService' } as Electron.Settings)
+    } else {
+      app.setLoginItemSettings({ openAtLogin: wantLaunch })
+    }
   } catch (err) {
     console.error('[LoginItems] macOS setLoginItemSettings failed:', err)
   }

@@ -1,4 +1,5 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { restorePlatform, setPlatform } from './helpers/platform'
 
 const mocks = vi.hoisted(() => ({
   version: '0.3.2',
@@ -9,6 +10,16 @@ const mocks = vi.hoisted(() => ({
   updateAvailable: vi.fn(),
   updateProgress: vi.fn(),
   updateDownloaded: vi.fn(),
+  toast: vi.fn(),
+  quit: vi.fn(),
+  prepare: vi.fn(),
+  launch: vi.fn(),
+  discard: vi.fn(),
+  removeUnfinished: vi.fn(),
+  cancelInstaller: vi.fn(),
+  powerOn: vi.fn(),
+  powerOff: vi.fn(),
+  appListeners: new Map<string, (...args: unknown[]) => void>(),
   settings: { updateMode: 'auto' } as Record<string, unknown>
 }))
 
@@ -19,13 +30,24 @@ vi.mock('electron', () => ({
       return mocks.isPackaged
     },
     getAppPath: () => mocks.appPath,
-    getPath: () => '/Applications/Edge-Drop.app/Contents/MacOS/Edge-Drop'
+    getPath: () => '/Applications/Edge-Drop.app/Contents/MacOS/Edge-Drop',
+    quit: (...args: unknown[]) => mocks.quit(...args),
+    once: (event: string, cb: (...args: unknown[]) => void) => {
+      mocks.appListeners.set(event, cb)
+    },
+    removeListener: (event: string, cb: (...args: unknown[]) => void) => {
+      if (mocks.appListeners.get(event) === cb) mocks.appListeners.delete(event)
+    }
   },
   net: {
     request: (...args: unknown[]) => mocks.netRequest(...args)
   },
   shell: {
     openExternal: (...args: unknown[]) => mocks.openExternal(...args)
+  },
+  powerMonitor: {
+    on: (...args: unknown[]) => mocks.powerOn(...args),
+    removeListener: (...args: unknown[]) => mocks.powerOff(...args)
   }
 }))
 
@@ -33,23 +55,24 @@ vi.mock('../electron/main/state', () => ({
   pushState: {
     updateAvailable: (...args: unknown[]) => mocks.updateAvailable(...args),
     updateDownloaded: (...args: unknown[]) => mocks.updateDownloaded(...args),
-    updateProgress: (...args: unknown[]) => mocks.updateProgress(...args)
+    updateProgress: (...args: unknown[]) => mocks.updateProgress(...args),
+    toast: (...args: unknown[]) => mocks.toast(...args)
   }
 }))
 
-vi.mock('../electron/store/settings', () => ({
-  getSettings: () => mocks.settings
+vi.mock('../electron/main/macUpdateInstall', () => ({
+  prepareMacUpdate: (...args: unknown[]) => mocks.prepare(...args),
+  launchMacInstaller: (...args: unknown[]) => mocks.launch(...args),
+  discardPreparedMacUpdate: (...args: unknown[]) => mocks.discard(...args),
+  removeUnfinishedMacUpdateDirs: (...args: unknown[]) => mocks.removeUnfinished(...args)
 }))
+
+vi.mock('../electron/store/settings', async () => (await import('./helpers/settingsMock')).settingsModuleMock(mocks))
 
 type Updater = typeof import('../electron/main/updater')
 
-const realPlatform = process.platform
 const API_URL = 'https://api.github.com/repos/SVorobiev-ru/Edge-Drop/releases?per_page=30'
 const LATEST_PAGE = 'https://github.com/SVorobiev-ru/Edge-Drop/releases/latest'
-
-function setPlatform(value: string): void {
-  Object.defineProperty(process, 'platform', { value, configurable: true })
-}
 
 function mockRelease(release: Array<Record<string, unknown>> | Record<string, unknown> | string, statusCode = 200): void {
   mocks.netRequest.mockImplementation(() => {
@@ -95,7 +118,7 @@ async function loadUpdater(): Promise<Updater> {
   return import('../electron/main/updater')
 }
 
-describe('macOS updates: check, notify, open the release page', () => {
+describe('macOS updates: check, notify, download and install', () => {
   beforeEach(() => {
     setPlatform('darwin')
     delete process.env.APP_BUILD_TARGET
@@ -103,8 +126,11 @@ describe('macOS updates: check, notify, open the release page', () => {
     mocks.isPackaged = true
     mocks.appPath = '/Applications/Edge-Drop.app/Contents/Resources/app.asar'
     mocks.settings = { updateMode: 'auto' }
-    for (const fn of [mocks.netRequest, mocks.openExternal, mocks.updateAvailable, mocks.updateProgress, mocks.updateDownloaded]) fn.mockReset()
+    for (const fn of [mocks.netRequest, mocks.openExternal, mocks.updateAvailable, mocks.updateProgress, mocks.updateDownloaded, mocks.toast, mocks.quit, mocks.prepare, mocks.launch, mocks.discard, mocks.removeUnfinished, mocks.cancelInstaller, mocks.powerOn, mocks.powerOff]) fn.mockReset()
+    mocks.appListeners.clear()
+    mocks.launch.mockReturnValue(mocks.cancelInstaller)
     mocks.openExternal.mockResolvedValue(undefined)
+    mocks.prepare.mockRejectedValue(new Error('not prepared in this test'))
     vi.spyOn(console, 'log').mockImplementation(() => {})
     vi.spyOn(console, 'warn').mockImplementation(() => {})
     vi.spyOn(console, 'error').mockImplementation(() => {})
@@ -113,11 +139,11 @@ describe('macOS updates: check, notify, open the release page', () => {
   afterEach(() => {
     vi.useRealTimers()
     vi.restoreAllMocks()
-    setPlatform(realPlatform)
+    restorePlatform()
   })
 
   afterAll(() => {
-    setPlatform(realPlatform)
+    restorePlatform()
   })
 
   it('exposes the fork repository as a constant', async () => {
@@ -394,66 +420,319 @@ describe('macOS updates: check, notify, open the release page', () => {
     })
   })
 
-  it('opens the release page instead of downloading', async () => {
-    const updater = await loadUpdater()
+  describe('in-app download and install', () => {
     const page = 'https://github.com/SVorobiev-ru/Edge-Drop/releases/tag/v0.4.0-mac.1'
-    mockRelease([{ tag_name: 'v0.4.0-mac.1', html_url: page }])
-    await updater.checkForUpdatesManual()
-    await updater.startUpdateDownload()
-    expect(mocks.openExternal).toHaveBeenCalledTimes(1)
-    expect(mocks.openExternal).toHaveBeenCalledWith(page)
-    expect(mocks.updateProgress).not.toHaveBeenCalled()
-    expect(mocks.updateDownloaded).not.toHaveBeenCalled()
+    const assets = [{ name: 'Edge-Drop-0.4.0-mac.1-mac-arm64.zip', browser_download_url: 'x', size: 10 }]
+    const prepared = { version: '0.4.0-mac.1', target: '/Applications/Edge-Drop.app', appPath: '/tmp/u/app/Edge-Drop.app', workDir: '/tmp/u' }
+
+    async function checked(): Promise<Updater> {
+      const updater = await loadUpdater()
+      mockRelease([{ tag_name: 'v0.4.0-mac.1', html_url: page, assets }])
+      await updater.checkForUpdatesManual()
+      return updater
+    }
+
+    it('downloads and verifies the release of the running architecture, then reports it downloaded', async () => {
+      const updater = await checked()
+      mocks.prepare.mockImplementation(async (input: { onProgress: (p: unknown) => void }) => {
+        input.onProgress({ percent: 40, bytesPerSecond: 1, transferred: 4, total: 10 })
+        return prepared
+      })
+      await expect(updater.startUpdateDownload()).resolves.toBeUndefined()
+      expect(mocks.prepare).toHaveBeenCalledWith(expect.objectContaining({ version: '0.4.0-mac.1', assets, repo: 'SVorobiev-ru/Edge-Drop', arch: process.arch }))
+      expect(mocks.updateProgress).toHaveBeenCalledWith({ percent: 40, bytesPerSecond: 1, transferred: 4, total: 10 })
+      expect(mocks.updateDownloaded).toHaveBeenCalledWith({ version: '0.4.0-mac.1' })
+      expect(updater.getCachedUpdateState()).toEqual({ hasUpdate: true, latestVersion: '0.4.0-mac.1', downloaded: true })
+      expect(mocks.openExternal).not.toHaveBeenCalled()
+    })
+
+    it('runs one download for concurrent requests', async () => {
+      const updater = await checked()
+      mocks.prepare.mockResolvedValue(prepared)
+      await Promise.all([updater.startUpdateDownload(), updater.startUpdateDownload()])
+      expect(mocks.prepare).toHaveBeenCalledTimes(1)
+      await updater.startUpdateDownload()
+      expect(mocks.prepare).toHaveBeenCalledTimes(1)
+      expect(mocks.updateDownloaded).toHaveBeenCalledTimes(2)
+    })
+
+    it('falls back to the release page, resets the renderer and rejects when the download fails', async () => {
+      const updater = await checked()
+      mocks.updateAvailable.mockReset()
+      mocks.prepare.mockRejectedValue(new Error('checksum mismatch'))
+      await expect(updater.startUpdateDownload()).rejects.toThrow('checksum mismatch')
+      expect(mocks.openExternal).toHaveBeenCalledWith(page)
+      expect(mocks.toast).toHaveBeenCalledWith('toast.updateInstallFailed', 'error')
+      expect(mocks.updateAvailable).toHaveBeenCalledWith({ version: '0.4.0-mac.1' })
+      expect(updater.getCachedUpdateState()).toEqual({ hasUpdate: true, latestVersion: '0.4.0-mac.1', downloaded: false })
+      expect(mocks.updateDownloaded).not.toHaveBeenCalled()
+    })
+
+    it.each([
+      'http://github.com/SVorobiev-ru/Edge-Drop/releases/tag/v0.4.0-mac.1',
+      'https://github.com.evil.example/SVorobiev-ru/Edge-Drop',
+      'https://evil.example/github.com/release',
+      'https://user@github.com/SVorobiev-ru/Edge-Drop/releases/tag/v0.4.0-mac.1',
+      'https://user:secret@github.com/SVorobiev-ru/Edge-Drop/releases/tag/v0.4.0-mac.1',
+      'https://github.com:8443/SVorobiev-ru/Edge-Drop/releases/tag/v0.4.0-mac.1',
+      'https://github.com/evil/Edge-Drop/releases/tag/v0.4.0-mac.1',
+      'https://github.com/SVorobiev-ru/Edge-Drop',
+      'https://github.com/SVorobiev-ru/Edge-Drop/releases-evil/tag/v0.4.0-mac.1',
+      'https://github.com/SVorobiev-ru/Edge-Drop/releases/../../../evil/payload',
+      'file:///Applications/Calculator.app',
+      'not a url',
+      undefined
+    ])('falls back to the fork releases page for an untrusted html_url: %s', async (htmlUrl) => {
+      const updater = await loadUpdater()
+      mockRelease([{ tag_name: 'v0.4.0-mac.1', html_url: htmlUrl }])
+      await updater.checkForUpdatesManual()
+      await expect(updater.startUpdateDownload()).rejects.toThrow()
+      expect(mocks.openExternal).toHaveBeenCalledWith(LATEST_PAGE)
+    })
+
+    it('passes the normalized URL to the browser', async () => {
+      const updater = await loadUpdater()
+      mockRelease([{ tag_name: 'v0.4.0-mac.1', html_url: 'HTTPS://GitHub.com:443/SVorobiev-ru/Edge-Drop/releases/x/../tag/v0.4.0-mac.1' }])
+      await updater.checkForUpdatesManual()
+      await expect(updater.startUpdateDownload()).rejects.toThrow()
+      expect(mocks.openExternal).toHaveBeenCalledWith('https://github.com/SVorobiev-ru/Edge-Drop/releases/tag/v0.4.0-mac.1')
+    })
+
+    it('opens the fork releases page when nothing was checked yet', async () => {
+      const updater = await loadUpdater()
+      await expect(updater.startUpdateDownload()).rejects.toThrow()
+      expect(mocks.openExternal).toHaveBeenCalledWith(LATEST_PAGE)
+      expect(mocks.netRequest).not.toHaveBeenCalled()
+      expect(mocks.prepare).not.toHaveBeenCalled()
+    })
+
+    it('reports the download failure even when the browser cannot be opened', async () => {
+      const updater = await checked()
+      mocks.openExternal.mockRejectedValue(new Error('no handler'))
+      mocks.prepare.mockRejectedValue(new Error('offline'))
+      await expect(updater.startUpdateDownload()).rejects.toThrow('offline')
+    })
+
+    it('installs a verified update and quits', async () => {
+      const updater = await checked()
+      mocks.prepare.mockResolvedValue(prepared)
+      await updater.startUpdateDownload()
+      updater.quitAndInstallUpdate()
+      await vi.waitFor(() => expect(mocks.quit).toHaveBeenCalledTimes(1))
+      expect(mocks.launch).toHaveBeenCalledWith(prepared)
+      updater.discardMacUpdate()
+      expect(mocks.discard).not.toHaveBeenCalled()
+    })
+
+    it('stops the installer, opens the release page and allows another install when the quit is cancelled', async () => {
+      const updater = await checked()
+      mocks.prepare.mockResolvedValue(prepared)
+      await updater.startUpdateDownload()
+      vi.useFakeTimers()
+      updater.quitAndInstallUpdate()
+      await vi.waitFor(() => expect(mocks.quit).toHaveBeenCalledTimes(1))
+      await vi.advanceTimersByTimeAsync(10_000)
+      expect(mocks.cancelInstaller).toHaveBeenCalledTimes(1)
+      expect(mocks.openExternal).toHaveBeenCalledWith(page)
+      expect(mocks.toast).toHaveBeenCalledWith('toast.updateInstallFailed', 'error')
+      expect(mocks.appListeners.has('will-quit')).toBe(false)
+      updater.quitAndInstallUpdate()
+      await vi.waitFor(() => expect(mocks.launch).toHaveBeenCalledTimes(2))
+    })
+
+    it('leaves the installer running when the quit goes ahead', async () => {
+      const updater = await checked()
+      mocks.prepare.mockResolvedValue(prepared)
+      await updater.startUpdateDownload()
+      vi.useFakeTimers()
+      updater.quitAndInstallUpdate()
+      await vi.waitFor(() => expect(mocks.quit).toHaveBeenCalledTimes(1))
+      mocks.appListeners.get('will-quit')?.()
+      await vi.advanceTimersByTimeAsync(10_000)
+      expect(mocks.cancelInstaller).not.toHaveBeenCalled()
+      expect(mocks.openExternal).not.toHaveBeenCalled()
+      updater.shutdownMacUpdates()
+      expect(mocks.discard).not.toHaveBeenCalled()
+      expect(mocks.removeUnfinished).not.toHaveBeenCalled()
+    })
+
+    it('stops the schedule and removes downloaded and unfinished updates on quit', async () => {
+      const updater = await checked()
+      vi.useFakeTimers()
+      updater.initAutoUpdater()
+      const resume = mocks.powerOn.mock.calls.find((call) => call[0] === 'resume')?.[1]
+      expect(resume).toBeTypeOf('function')
+      mocks.prepare.mockResolvedValue(prepared)
+      await updater.startUpdateDownload()
+      updater.shutdownMacUpdates()
+      expect(mocks.powerOff).toHaveBeenCalledWith('resume', resume)
+      expect(mocks.discard).toHaveBeenCalledWith(prepared)
+      expect(mocks.removeUnfinished).toHaveBeenCalledTimes(1)
+      expect(vi.getTimerCount()).toBe(1)
+      await vi.advanceTimersByTimeAsync(3000)
+      expect(vi.getTimerCount()).toBe(0)
+    })
+
+    it('opens the release page and stays running when the installer cannot start', async () => {
+      const updater = await checked()
+      mocks.prepare.mockResolvedValue(prepared)
+      await updater.startUpdateDownload()
+      mocks.launch.mockImplementation(() => {
+        throw new Error('EACCES')
+      })
+      updater.quitAndInstallUpdate()
+      await vi.waitFor(() => expect(mocks.openExternal).toHaveBeenCalledWith(page))
+      expect(mocks.quit).not.toHaveBeenCalled()
+      expect(mocks.toast).toHaveBeenCalledWith('toast.updateInstallFailed', 'error')
+    })
+
+    it('opens the release page when install is requested without a verified update', async () => {
+      const updater = await loadUpdater()
+      expect(() => updater.quitAndInstallUpdate()).not.toThrow()
+      await vi.waitFor(() => expect(mocks.openExternal).toHaveBeenCalledWith(LATEST_PAGE))
+      expect(mocks.quit).not.toHaveBeenCalled()
+      expect(mocks.launch).not.toHaveBeenCalled()
+      expect(mocks.netRequest).not.toHaveBeenCalled()
+    })
+
+    it('removes a downloaded but not installed update on quit', async () => {
+      const updater = await checked()
+      mocks.prepare.mockResolvedValue(prepared)
+      await updater.startUpdateDownload()
+      updater.discardMacUpdate()
+      expect(mocks.discard).toHaveBeenCalledWith(prepared)
+    })
+
+    it('keeps syncAutoUpdaterState a no-op', async () => {
+      const updater = await loadUpdater()
+      expect(() => updater.syncAutoUpdaterState()).not.toThrow()
+      expect(mocks.netRequest).not.toHaveBeenCalled()
+    })
   })
 
-  it.each([
-    'http://github.com/SVorobiev-ru/Edge-Drop/releases/tag/v0.4.0-mac.1',
-    'https://github.com.evil.example/SVorobiev-ru/Edge-Drop',
-    'https://evil.example/github.com/release',
-    'https://user@github.com/SVorobiev-ru/Edge-Drop/releases/tag/v0.4.0-mac.1',
-    'https://user:secret@github.com/SVorobiev-ru/Edge-Drop/releases/tag/v0.4.0-mac.1',
-    'https://github.com:8443/SVorobiev-ru/Edge-Drop/releases/tag/v0.4.0-mac.1',
-    'https://github.com/evil/Edge-Drop/releases/tag/v0.4.0-mac.1',
-    'https://github.com/SVorobiev-ru/Edge-Drop',
-    'https://github.com/SVorobiev-ru/Edge-Drop/releases-evil/tag/v0.4.0-mac.1',
-    'https://github.com/SVorobiev-ru/Edge-Drop/releases/../../../evil/payload',
-    'file:///Applications/Calculator.app',
-    'not a url',
-    undefined
-  ])('falls back to the fork releases page for an untrusted html_url: %s', async (htmlUrl) => {
-    const updater = await loadUpdater()
-    mockRelease([{ tag_name: 'v0.4.0-mac.1', html_url: htmlUrl }])
-    await updater.checkForUpdatesManual()
-    await updater.startUpdateDownload()
-    expect(mocks.openExternal).toHaveBeenCalledWith(LATEST_PAGE)
-  })
+  describe('scheduled checks', () => {
+    const HOUR = 60 * 60 * 1000
+    const TICK = 10 * 60 * 1000
+    const resumeHandlers = () => mocks.powerOn.mock.calls.filter((call) => call[0] === 'resume').map((call) => call[1] as () => void)
 
-  it('passes the normalized URL to the browser', async () => {
-    const updater = await loadUpdater()
-    mockRelease([{ tag_name: 'v0.4.0-mac.1', html_url: 'HTTPS://GitHub.com:443/SVorobiev-ru/Edge-Drop/releases/x/../tag/v0.4.0-mac.1' }])
-    await updater.checkForUpdatesManual()
-    await updater.startUpdateDownload()
-    expect(mocks.openExternal).toHaveBeenCalledWith('https://github.com/SVorobiev-ru/Edge-Drop/releases/tag/v0.4.0-mac.1')
-  })
+    beforeEach(() => {
+      vi.useFakeTimers()
+      vi.setSystemTime(new Date('2026-10-05T08:00:00Z'))
+      mocks.settings = { updateMode: 'notify' }
+      mockRelease([])
+      vi.spyOn(console, 'warn').mockImplementation(() => {})
+    })
 
-  it('opens the fork releases page when nothing was checked yet', async () => {
-    const updater = await loadUpdater()
-    await updater.startUpdateDownload()
-    expect(mocks.openExternal).toHaveBeenCalledWith(LATEST_PAGE)
-    expect(mocks.netRequest).not.toHaveBeenCalled()
-  })
+    describe('isMacScheduledCheckDue', () => {
+      it('is never due in the off mode', async () => {
+        const { isMacScheduledCheckDue } = await loadUpdater()
+        expect(isMacScheduledCheckDue({ mode: 'off', now: 100 * HOUR, lastCheckAt: 0, minGapMs: 6 * HOUR })).toBe(false)
+        expect(isMacScheduledCheckDue({ mode: 'off', now: 100 * HOUR, lastCheckAt: HOUR, minGapMs: 6 * HOUR })).toBe(false)
+      })
 
-  it('does not throw when the browser cannot be opened', async () => {
-    const updater = await loadUpdater()
-    mocks.openExternal.mockRejectedValue(new Error('no handler'))
-    await expect(updater.startUpdateDownload()).resolves.toBeUndefined()
-  })
+      it('is due when no check ran yet', async () => {
+        const { isMacScheduledCheckDue } = await loadUpdater()
+        expect(isMacScheduledCheckDue({ mode: 'notify', now: HOUR, lastCheckAt: 0, minGapMs: 24 * HOUR })).toBe(true)
+      })
 
-  it('quitAndInstallUpdate and syncAutoUpdaterState stay no-ops', async () => {
-    const updater = await loadUpdater()
-    expect(() => updater.quitAndInstallUpdate()).not.toThrow()
-    expect(() => updater.syncAutoUpdaterState()).not.toThrow()
-    expect(mocks.netRequest).not.toHaveBeenCalled()
+      it('waits for the whole gap', async () => {
+        const { isMacScheduledCheckDue, MAC_UPDATE_CHECK_INTERVAL_MS, MAC_UPDATE_RESUME_MIN_GAP_MS } = await loadUpdater()
+        expect(MAC_UPDATE_CHECK_INTERVAL_MS).toBe(24 * HOUR)
+        expect(MAC_UPDATE_RESUME_MIN_GAP_MS).toBe(6 * HOUR)
+        const last = 10 * HOUR
+        expect(isMacScheduledCheckDue({ mode: 'auto', now: last + 6 * HOUR - 1, lastCheckAt: last, minGapMs: 6 * HOUR })).toBe(false)
+        expect(isMacScheduledCheckDue({ mode: 'auto', now: last + 6 * HOUR, lastCheckAt: last, minGapMs: 6 * HOUR })).toBe(true)
+        expect(isMacScheduledCheckDue({ mode: 'auto', now: last + 23 * HOUR, lastCheckAt: last, minGapMs: 24 * HOUR })).toBe(false)
+        expect(isMacScheduledCheckDue({ mode: 'auto', now: last + 24 * HOUR, lastCheckAt: last, minGapMs: 24 * HOUR })).toBe(true)
+      })
+
+      it('is due after the clock moved backwards', async () => {
+        const { isMacScheduledCheckDue } = await loadUpdater()
+        expect(isMacScheduledCheckDue({ mode: 'notify', now: 5 * HOUR, lastCheckAt: 9 * HOUR, minGapMs: 24 * HOUR })).toBe(true)
+      })
+    })
+
+    it('checks after launch and then once every 24 hours', async () => {
+      const updater = await loadUpdater()
+      updater.initAutoUpdater()
+      await vi.advanceTimersByTimeAsync(3000)
+      expect(mocks.netRequest).toHaveBeenCalledTimes(1)
+
+      await vi.advanceTimersByTimeAsync(23 * HOUR)
+      expect(mocks.netRequest).toHaveBeenCalledTimes(1)
+
+      await vi.advanceTimersByTimeAsync(HOUR + TICK)
+      expect(mocks.netRequest).toHaveBeenCalledTimes(2)
+
+      await vi.advanceTimersByTimeAsync(24 * HOUR + TICK)
+      expect(mocks.netRequest).toHaveBeenCalledTimes(3)
+    })
+
+    it('checks on resume only when the last check is at least 6 hours old', async () => {
+      const updater = await loadUpdater()
+      updater.initAutoUpdater()
+      await vi.advanceTimersByTimeAsync(3000)
+      expect(mocks.netRequest).toHaveBeenCalledTimes(1)
+      expect(resumeHandlers()).toHaveLength(1)
+      const [resume] = resumeHandlers()
+
+      await vi.advanceTimersByTimeAsync(2 * HOUR)
+      resume()
+      await vi.advanceTimersByTimeAsync(10)
+      expect(mocks.netRequest).toHaveBeenCalledTimes(1)
+
+      await vi.advanceTimersByTimeAsync(4 * HOUR)
+      resume()
+      await vi.advanceTimersByTimeAsync(10)
+      expect(mocks.netRequest).toHaveBeenCalledTimes(2)
+
+      resume()
+      await vi.advanceTimersByTimeAsync(10)
+      expect(mocks.netRequest).toHaveBeenCalledTimes(2)
+    })
+
+    it('stays network-silent in the off mode, on the timer and on resume', async () => {
+      mocks.settings = { updateMode: 'off' }
+      const updater = await loadUpdater()
+      updater.initAutoUpdater()
+      await vi.advanceTimersByTimeAsync(49 * HOUR)
+      resumeHandlers()[0]?.()
+      await vi.advanceTimersByTimeAsync(HOUR)
+      expect(mocks.netRequest).not.toHaveBeenCalled()
+    })
+
+    it('starts checking again once the mode leaves off', async () => {
+      mocks.settings = { updateMode: 'off' }
+      const updater = await loadUpdater()
+      updater.initAutoUpdater()
+      await vi.advanceTimersByTimeAsync(5 * HOUR)
+      expect(mocks.netRequest).not.toHaveBeenCalled()
+
+      mocks.settings = { updateMode: 'notify' }
+      await vi.advanceTimersByTimeAsync(TICK + 1000)
+      expect(mocks.netRequest).toHaveBeenCalledTimes(1)
+    })
+
+    it('registers the schedule only once', async () => {
+      const updater = await loadUpdater()
+      updater.initAutoUpdater()
+      updater.initAutoUpdater()
+      expect(resumeHandlers()).toHaveLength(1)
+    })
+
+    it('a manual check resets the 24 hour window', async () => {
+      const updater = await loadUpdater()
+      updater.initAutoUpdater()
+      await vi.advanceTimersByTimeAsync(3000)
+      await vi.advanceTimersByTimeAsync(20 * HOUR)
+      await updater.checkForUpdatesManual()
+      expect(mocks.netRequest).toHaveBeenCalledTimes(2)
+
+      await vi.advanceTimersByTimeAsync(10 * HOUR)
+      expect(mocks.netRequest).toHaveBeenCalledTimes(2)
+      await vi.advanceTimersByTimeAsync(14 * HOUR + TICK)
+      expect(mocks.netRequest).toHaveBeenCalledTimes(3)
+    })
   })
 
   describe('background checks follow updateMode', () => {
@@ -470,16 +749,6 @@ describe('macOS updates: check, notify, open the release page', () => {
       expect(mocks.netRequest).toHaveBeenCalledTimes(1)
       expect(mocks.updateAvailable).toHaveBeenCalledWith({ version: '0.4.0-mac.1' })
       expect(mocks.openExternal).not.toHaveBeenCalled()
-    })
-
-    it('stays network-silent in off mode', async () => {
-      vi.useFakeTimers()
-      mocks.settings = { updateMode: 'off' }
-      const updater = await loadUpdater()
-      mockRelease([{ tag_name: 'v0.4.0-mac.1' }])
-      updater.initAutoUpdater()
-      await vi.advanceTimersByTimeAsync(10_000)
-      expect(mocks.netRequest).not.toHaveBeenCalled()
     })
 
     it('checks after switching into a checking mode and cancels when switched off', async () => {
@@ -511,12 +780,32 @@ describe('macOS updates: check, notify, open the release page', () => {
     })
   })
 
-  it('never loads electron-updater', async () => {
+  it('does not import electron-updater statically', async () => {
     const { readFileSync } = await import('node:fs')
     const { join } = await import('node:path')
     const src = readFileSync(join(process.cwd(), 'electron/main/updater.ts'), 'utf8')
-    const macCheck = src.slice(src.indexOf('async function checkMacRelease'), src.indexOf('export async function checkForUpdatesManual'))
-    expect(macCheck).not.toContain('autoUpdater')
-    expect(macCheck).not.toContain('electron-updater')
+    expect(src).not.toMatch(/^import\b[^\n]*['"]electron-updater['"]/m)
+  })
+
+  it('never loads electron-updater on macOS', async () => {
+    const loader = (await import('node:module')).default as unknown as { _load: (request: string, ...rest: unknown[]) => unknown }
+    const originalLoad = loader._load
+    const load = vi.spyOn(loader, '_load').mockImplementation(function (this: unknown, request: string, ...rest: unknown[]) {
+      return request === 'electron-updater' ? { autoUpdater: {} } : originalLoad.call(this, request, ...rest)
+    })
+    const loadedUpdater = () => load.mock.calls.filter((call) => call[0] === 'electron-updater')
+    vi.useFakeTimers()
+    const updater = await loadUpdater()
+    mockRelease([{ tag_name: 'v0.4.0-mac.1' }])
+    updater.initAutoUpdater()
+    await vi.advanceTimersByTimeAsync(3000)
+    await updater.checkForUpdatesManual()
+    await updater.startUpdateDownload().catch(() => {})
+    updater.syncAutoUpdaterState()
+    expect(loadedUpdater()).toEqual([])
+
+    setPlatform('win32')
+    await updater.checkForUpdatesManual().catch(() => {})
+    expect(loadedUpdater()).toHaveLength(1)
   })
 })

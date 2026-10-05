@@ -6,10 +6,21 @@ function read(relPath: string): string {
   return readFileSync(resolve(__dirname, '..', relPath), 'utf8')
 }
 
+function cardSource(src: string, name: string): string {
+  const start = src.indexOf(`const ${name} = `)
+  expect(start).toBeGreaterThan(-1)
+  const end = src.indexOf('\n  const ', start + 1)
+  return src.slice(start, end === -1 ? undefined : end)
+}
+
+function horizontalComposition(src: string): string {
+  return src.slice(src.indexOf('const handleShelfWheel'), src.indexOf('const maxTabLen ='))
+}
+
 describe('Horizontal Card Shelf Settings Layout', () => {
   it('Panel.tsx retains fixed 210px dock height in horizontal mode without expanding and with 60px gutter', () => {
     const panelSrc = read('src/components/Panel.tsx')
-    expect(panelSrc).toContain("style={isHorizontal ? { width: 'min(calc(100vw - 60px), 1080px)', height: 210 } : { height: panelHeightStr }}")
+    expect(panelSrc).toContain("style={IS_DARWIN ? MAC_BLADE_STYLE : isHorizontal ? { width: 'min(calc(100vw - 60px), 1080px)', height: 210 } : { height: panelHeightStr }}")
     expect(panelSrc).not.toContain('height: settingsOpen ? 460 : 210')
   })
 
@@ -30,7 +41,7 @@ describe('Horizontal Card Shelf Settings Layout', () => {
   it('Settings accepts isHorizontal prop and detects horizontal dock positions', () => {
     const src = read('src/components/Settings.tsx')
     expect(src).toContain('isHorizontal: propIsHorizontal')
-    expect(src).toContain("settings.stickPosition === 'top'")
+    expect(src).toContain('isHorizontalEdge(settings.stickPosition)')
   })
 
   it('Settings renders horizontal card shelf with smooth scrolling track and shelf cards', () => {
@@ -83,18 +94,21 @@ describe('Horizontal Card Shelf Settings Layout', () => {
   it('Appearance shelf renders Show Copy Indicator toggle card first, followed by Indicator Style card matching Left/Right', () => {
     const src = read('src/components/Settings.tsx')
     const appearanceSection = src.slice(src.indexOf("horizontalTab === 'appearance'"), src.indexOf("horizontalTab === 'appearance'") + 4000)
-    const toggleCardIdx = appearanceSection.indexOf('beacon-toggle-card')
-    const styleCardIdx = appearanceSection.indexOf('copy-card')
+    const toggleCardIdx = appearanceSection.indexOf('renderCopyIndicatorCard()')
+    const styleCardIdx = appearanceSection.indexOf('renderIndicatorStyleCard()')
 
     expect(toggleCardIdx).toBeGreaterThan(-1)
     expect(styleCardIdx).toBeGreaterThan(-1)
     // Card 1 (beacon-toggle-card) must appear BEFORE Card 2 (copy-card)
     expect(toggleCardIdx).toBeLessThan(styleCardIdx)
+    expect(cardSource(src, 'renderCopyIndicatorCard')).toContain('beacon-toggle-card')
+    expect(cardSource(src, 'renderIndicatorStyleCard')).toContain('copy-card')
     // Indicator style card is only shown when showCopyIndicator is enabled
-    expect(appearanceSection).toContain('{(settings.showCopyIndicator ?? true) && (')
+    expect(appearanceSection).toContain('{(settings.showCopyIndicator ?? true) && renderIndicatorStyleCard()}')
     // Indicator style card uses standard style-preview-toggle-btn with Close/Chevron icons, matching Left/Right
-    expect(appearanceSection).toContain('className={`icon-btn style-preview-toggle-btn ${isFlyoutActive ? \'active\' : \'\'}`}')
-    expect(appearanceSection).toContain('{isFlyoutActive ? <CloseIcon /> : <ChevronRightIcon />}')
+    const styleCard = cardSource(src, 'renderIndicatorStyleCard')
+    expect(styleCard).toContain('className={`icon-btn style-preview-toggle-btn ${isFlyoutActive ? \'active\' : \'\'}`}')
+    expect(styleCard).toContain('{isFlyoutActive ? <CloseIcon /> : <ChevronRightIcon />}')
   })
 
   it('Panel.tsx passes isHorizontal to Settings component', () => {
@@ -167,23 +181,28 @@ describe('Horizontal Card Shelf Settings Layout', () => {
   it('Horizontal shelf includes trigger thickness and auto-updates, without panel height, horizontal position, or edge trigger position', () => {
     const src = read('src/components/Settings.tsx')
     // Find the isHorizontal branch
-    const horizontalBlock = src.slice(src.indexOf('if (isHorizontal) {'), src.indexOf('const maxTabLen ='))
+    const horizontalBlock = horizontalComposition(src)
     // Should NOT contain horizontal position offset slider or panel height pills
-    expect(horizontalBlock).not.toContain('horizontalPositionTitle')
-    expect(horizontalBlock).not.toContain('panelHeightTitle')
+    expect(horizontalBlock).not.toContain('renderPositionSliderCard')
+    expect(horizontalBlock).not.toContain('renderPanelHeightCard')
     // Should NOT contain trigger alignment pills in horizontal shelf
-    expect(horizontalBlock).not.toContain('edgeTriggerPositionTitle')
-    expect(horizontalBlock).not.toContain('triggerAlignment: opt.val')
+    expect(horizontalBlock).not.toContain('renderTriggerAlignmentCard')
+    expect(cardSource(src, 'renderPositionSliderCard')).toContain('horizontalPositionTitle')
+    expect(cardSource(src, 'renderPanelHeightCard')).toContain('panelHeightTitle')
+    expect(cardSource(src, 'renderTriggerAlignmentCard')).toContain('triggerAlignment: opt.val')
     // Should contain trigger thickness
-    expect(horizontalBlock).toContain('trigger-thickness-card')
-    expect(horizontalBlock).toContain('handleThicknessRelease')
+    expect(horizontalBlock).toContain('renderThicknessCard()')
+    expect(cardSource(src, 'renderThicknessCard')).toContain('trigger-thickness-card')
+    expect(cardSource(src, 'renderThicknessCard')).toContain('handleThicknessRelease')
     // Should contain 3-mode updates selector (Automatic / Notify me / Off)
-    expect(horizontalBlock).toContain('autoUpdatesTitle')
-    expect(horizontalBlock).toContain('updateMode')
-    expect(horizontalBlock).toContain("patch({ updateMode: opt.id })")
+    expect(horizontalBlock).toContain('renderUpdateModeCard()')
+    expect(cardSource(src, 'renderUpdateModeCard')).toContain('autoUpdatesTitle')
+    expect(cardSource(src, 'renderUpdateModeCard')).toContain("patch({ updateMode: id })")
     // Should contain clearUnpinnedOnRestart
-    expect(horizontalBlock).toContain('clearUnpinnedTitle')
-    expect(horizontalBlock).toContain('clearUnpinnedOnRestart')
+    expect(horizontalBlock).toContain('renderBehaviourCards()')
+    expect(cardSource(src, 'renderBehaviourCards')).toContain('renderClearUnpinnedCard()')
+    expect(cardSource(src, 'renderClearUnpinnedCard')).toContain('clearUnpinnedTitle')
+    expect(cardSource(src, 'renderClearUnpinnedCard')).toContain('clearUnpinnedOnRestart')
     // Should contain support links
     expect(horizontalBlock).toContain('supportOnKofi')
     expect(horizontalBlock).toContain('starOnGithub')
@@ -192,15 +211,19 @@ describe('Horizontal Card Shelf Settings Layout', () => {
   it('Vertical left/right settings remain untouched with position slider and vertical controls intact', () => {
     const src = read('src/components/Settings.tsx')
     const verticalBlock = src.slice(src.indexOf('const maxTabLen ='))
-    expect(verticalBlock).toContain('verticalPositionTitle')
-    expect(verticalBlock).toContain('edgeTriggerPositionTitle')
-    expect(verticalBlock).toContain('panelHeightTitle')
+    expect(verticalBlock).toContain('renderPositionSliderCard()')
+    expect(verticalBlock).toContain('renderTriggerAlignmentCard()')
+    expect(verticalBlock).toContain('renderPanelHeightCard()')
+    expect(cardSource(src, 'renderPositionSliderCard')).toContain('verticalPositionTitle')
+    expect(cardSource(src, 'renderTriggerAlignmentCard')).toContain('edgeTriggerPositionTitle')
+    expect(cardSource(src, 'renderPanelHeightCard')).toContain('panelHeightTitle')
   })
 
   it('Vertical settings arranges edge placement buttons in 3-way layout (left, top, right)', () => {
     const src = read('src/components/Settings.tsx')
     const verticalBlock = src.slice(src.indexOf('const maxTabLen ='))
-    expect(verticalBlock).toContain('placement-3way-wrap')
+    expect(verticalBlock).toContain('renderPlacementCard()')
+    expect(cardSource(src, 'renderPlacementCard')).toContain('placement-3way-wrap')
 
     const css = read('src/styles/settings.css')
     expect(css).toContain('.placement-3way-wrap')
@@ -269,8 +292,8 @@ it('Appearance shelf renders Card 1 Copy Indicator toggle first, then Card 2 Ind
     expect(appearanceIndex).toBeGreaterThan(-1)
     const appearanceBlock = src.slice(appearanceIndex)
 
-    const toggleCardIndex = appearanceBlock.indexOf('beacon-toggle-card')
-    const styleCardIndex = appearanceBlock.indexOf('copy-card')
+    const toggleCardIndex = appearanceBlock.indexOf('renderCopyIndicatorCard()')
+    const styleCardIndex = appearanceBlock.indexOf('renderIndicatorStyleCard()')
 
     expect(toggleCardIndex).toBeGreaterThan(-1)
     expect(styleCardIndex).toBeGreaterThan(-1)
@@ -278,8 +301,9 @@ it('Appearance shelf renders Card 1 Copy Indicator toggle first, then Card 2 Ind
     expect(toggleCardIndex).toBeLessThan(styleCardIndex)
 
     // Indicator style button uses style-preview-toggle-btn with Chevron/Close
-    expect(appearanceBlock).toContain('style-preview-toggle-btn')
-    expect(appearanceBlock).toContain('handleToggleFlyout(e.currentTarget)')
+    const styleCard = cardSource(src, 'renderIndicatorStyleCard')
+    expect(styleCard).toContain('style-preview-toggle-btn')
+    expect(styleCard).toContain('handleToggleFlyout(e.currentTarget)')
   })
 
   it('IndicatorStyleFlyout anchors horizontally relative to styleFlyoutAnchorRect', () => {

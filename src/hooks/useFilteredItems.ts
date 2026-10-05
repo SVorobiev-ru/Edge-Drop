@@ -7,23 +7,39 @@
 import { useMemo } from 'react'
 import { useStore } from '../store/appStore'
 import type { ClipboardItemDto, TypeFilter } from '../../shared/types'
-import { basename, isImagePath } from '../lib/format'
+import { basename, formatImageDisplayName, imageItemDisplayName, isImagePath } from '../lib/format'
 import { parseColor } from '../lib/colorUtils'
+import { IS_DARWIN } from '../lib/edge'
 
-function matches(it: ClipboardItemDto, q: string): boolean {
+export function itemMatchesQuery(it: ClipboardItemDto, q: string, rich = true): boolean {
   if (!q) return true
   const needle = q.toLowerCase()
-  switch (it.data.kind) {
+  if (!rich) {
+    switch (it.data.kind) {
+      case 'text':
+        return it.data.text.toLowerCase().includes(needle)
+      case 'files':
+        return it.data.paths.some((p) => basename(p).toLowerCase().includes(needle))
+      case 'image':
+      case 'image-collection':
+        return false
+    }
+  }
+  const hit = (value: string | undefined): boolean => !!value && value.toLowerCase().includes(needle)
+  if (hit(it.title) || hit(it.ocrText) || hit(it.sourceApp?.name)) return true
+  const data = it.data
+  switch (data.kind) {
     case 'text':
-      return it.data.text.toLowerCase().includes(needle)
+      return data.text.toLowerCase().includes(needle)
     case 'files':
-      return it.data.paths.some((p) => basename(p).toLowerCase().includes(needle))
+      return data.paths.some((p, i) => {
+        if (hit(basename(p)) || hit(data.entries?.[i]?.name)) return true
+        return isImagePath(p) && hit(formatImageDisplayName(p, it.capturedAt))
+      })
     case 'image':
-      // images have no searchable text; hidden by query
-      return false
+      return hit(data.fileName) || hit(imageItemDisplayName(data, it.capturedAt))
     case 'image-collection':
-      // image collections have no searchable text; hidden by query
-      return false
+      return data.images.some((img) => hit(img.fileName) || hit(imageItemDisplayName(img, it.capturedAt)))
   }
 }
 
@@ -59,6 +75,33 @@ export function itemMatchesTypeFilter(it: ClipboardItemDto, filter: TypeFilter):
 export interface GroupedItems {
   pinned: ClipboardItemDto[]
   recent: ClipboardItemDto[]
+  /** Search hits outside the active tab, ranked after the tab's own hits. */
+  others: ClipboardItemDto[]
+}
+
+/** Every listed item, including the hits from other tabs. */
+export function groupedCount(groups: GroupedItems): number {
+  return groups.pinned.length + groups.recent.length + groups.others.length
+}
+
+export function groupItems(
+  items: readonly ClipboardItemDto[],
+  query: string,
+  typeFilter: TypeFilter,
+  opts: { rich: boolean; acrossTabs: boolean }
+): GroupedItems {
+  const pinned: ClipboardItemDto[] = []
+  const recent: ClipboardItemDto[] = []
+  const otherPinned: ClipboardItemDto[] = []
+  const otherRecent: ClipboardItemDto[] = []
+  const q = query.trim()
+  const acrossTabs = opts.acrossTabs && q.length > 0
+  for (const it of items) {
+    if (!itemMatchesQuery(it, q, opts.rich)) continue
+    if (itemMatchesTypeFilter(it, typeFilter)) (it.pinned ? pinned : recent).push(it)
+    else if (acrossTabs) (it.pinned ? otherPinned : otherRecent).push(it)
+  }
+  return { pinned, recent, others: [...otherPinned, ...otherRecent] }
 }
 
 export function useFilteredItems(): GroupedItems {
@@ -68,9 +111,6 @@ export function useFilteredItems(): GroupedItems {
   const tutorialStep = useStore((s) => s.tutorialStep)
 
   return useMemo(() => {
-    const pinned: ClipboardItemDto[] = []
-    const recent: ClipboardItemDto[] = []
-
     const filteredByTutorial = items.filter((it) => {
       if (tutorialStep <= 0) return true
       switch (tutorialStep) {
@@ -89,11 +129,6 @@ export function useFilteredItems(): GroupedItems {
       }
     })
 
-    for (const it of filteredByTutorial) {
-      if (!matches(it, query.trim())) continue
-      if (!itemMatchesTypeFilter(it, typeFilter)) continue
-      ;(it.pinned ? pinned : recent).push(it)
-    }
-    return { pinned, recent }
+    return groupItems(filteredByTutorial, query, typeFilter, { rich: IS_DARWIN, acrossTabs: IS_DARWIN })
   }, [items, query, typeFilter, tutorialStep])
 }

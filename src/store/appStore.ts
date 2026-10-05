@@ -11,11 +11,34 @@ import { edge } from '../lib/edge'
 import { takeSearchEngaged } from '../lib/searchFocus'
 import { t } from '../i18n'
 import { loadRecents } from '../lib/emoji/prefs'
-import type { ClipboardItemDto, Settings, DragRequest } from '../../shared/types'
+import type { ClipboardItemDto, Settings, DragRequest, ItemMenuRequest, PasteOptions, StickPosition } from '../../shared/types'
 import { DEFAULT_SETTINGS } from '../../shared/types'
 import { playEdgeRetractSound, playEdgeBeaconAppearSound, playEdgeExpandSound, playButtonClickSound } from '../lib/soundEffects'
+import { EMPTY_SELECTION, SELECTION_LIMIT, allTextLike, extendSelection, orderSelection, pruneSelection, selectAll, selectRange, toggleSelection, type Selection } from '../../shared/selection'
+import { getNavOrder } from '../lib/keyboardNav'
+import { isHorizontalEdge } from '../../shared/panelPlacement'
 
 let flareTimer: ReturnType<typeof setTimeout> | null = null
+
+const HYDRATE_RETRY_DELAYS_MS = [200, 500, 1200, 2500]
+const HYDRATE_BACKGROUND_RETRY_MS = 10_000
+const KEYBOARD_REFOCUS_DELAY_MS = 250
+let hydrateRetryTimer: ReturnType<typeof setTimeout> | null = null
+
+const appIconRequests = new Set<string>()
+
+function sameItemMeta(a: ClipboardItemDto, b: ClipboardItemDto | undefined): boolean {
+  return (
+    !!b &&
+    a.title === b.title &&
+    a.ocrText === b.ocrText &&
+    a.sourceApp?.bundleId === b.sourceApp?.bundleId &&
+    a.sourceApp?.name === b.sourceApp?.name
+  )
+}
+
+export const selectReduceMotion = (s: { settings: Settings; systemReduceMotion: boolean }): boolean =>
+  !!s.settings.reduceMotion || s.systemReduceMotion
 
 /**
  * Version dismissed this run. Session-only (never persisted): quitting and
@@ -54,15 +77,51 @@ export interface UpdateProgress {
 
 interface AppState {
   items: ClipboardItemDto[]
+  /** The last item push only reordered or updated known items for usage (paste, drag-out). */
+  itemsUsageOnly: boolean
   settings: Settings
   /** True until the first `state:load` resolves. */
   hydrated: boolean
+  systemReduceMotion: boolean
+  setSystemReduceMotion: (reduce: boolean) => void
   /** Free-text search filter (UI-only state). */
   query: string
   typeFilter: import('../../shared/types').TypeFilter
   setTypeFilter: (filter: import('../../shared/types').TypeFilter) => void
   /** Whether the panel blade is expanded. */
   open: boolean
+  keyboardMode: boolean
+  activeItemId: string | null
+  enterKeyboardMode: () => void
+  setActiveItemId: (id: string | null) => void
+  queueIds: string[]
+  queueIndex: Record<string, number>
+  setQueueIds: (ids: string[]) => void
+  selection: Selection
+  selectedMap: Record<string, true>
+  selectionTexts: Record<string, string>
+  selectionDragActive: boolean
+  toggleSelected: (id: string) => void
+  selectRangeTo: (id: string, order: readonly string[]) => void
+  extendSelectionTo: (from: string, to: string, order: readonly string[]) => void
+  selectAllVisible: (order: readonly string[]) => void
+  keepSelectionWithin: (order: readonly string[]) => void
+  clearSelection: () => void
+  selectedIdsInOrder: () => string[]
+  pasteSelection: (plain?: boolean, fromKeyboard?: boolean) => Promise<void>
+  copySelection: (plain?: boolean) => Promise<void>
+  stackSelection: () => Promise<void>
+  pinSelection: (pinned: boolean) => Promise<void>
+  deleteSelection: () => Promise<void>
+  appIcons: Record<string, string | null>
+  requestAppIcon: (bundleId: string) => void
+  itemMenuOpen: boolean
+  showItemMenu: (id: string, sub?: ItemMenuRequest) => void
+  textDragActive: boolean
+  setTextDragActive: (active: boolean) => void
+  renamingId: string | null
+  setRenamingId: (id: string | null) => void
+  renameItem: (id: string, title: string) => Promise<void>
   /** Settings sheet visibility. */
   settingsOpen: boolean
   /** Emoji library view (replaces the clipboard list). */
@@ -127,6 +186,10 @@ interface AppState {
   installUpdate: () => Promise<void>
   setItems: (items: ClipboardItemDto[], meta?: { reason?: 'usage' | 'capture' }) => void
   setSettings: (next: Settings) => void
+  /** Edge the panel is dragged to; it replaces settings.stickPosition until the drag ends. */
+  liveEdge: StickPosition | null
+  liveBaseEdge: StickPosition
+  setLiveEdge: (edge: StickPosition | null) => void
 
   /* UI */
   setQuery: (q: string) => void
@@ -160,11 +223,12 @@ interface AppState {
   clear: (ids?: string[]) => Promise<void>
   copy: (id: string) => Promise<void>
   copySubitem: (req: DragRequest) => Promise<void>
-  paste: (id: string) => Promise<void>
+  paste: (id: string, opts?: PasteOptions, fromKeyboard?: boolean) => Promise<void>
   pasteSubitem: (req: DragRequest) => Promise<void>
   pasteEmoji: (text: string) => Promise<void>
   patchSettings: (patch: Partial<Settings>) => Promise<void>
   refreshLaunchAtLogin: () => Promise<void>
+  setLaunchAtLogin: (value: boolean) => void
   setTutorialStep: (step: number) => void
   edgeTransition: EdgeTransitionState | null
   startEdgeTransition: (to: 'left' | 'right' | 'top') => Promise<void>
@@ -172,8 +236,13 @@ interface AppState {
 
 export const useStore = create<AppState>((set, get) => ({
   items: [],
+  itemsUsageOnly: false,
   settings: { ...DEFAULT_SETTINGS },
   hydrated: false,
+  systemReduceMotion: false,
+  setSystemReduceMotion: (systemReduceMotion) => {
+    if (get().systemReduceMotion !== systemReduceMotion) set({ systemReduceMotion })
+  },
   query: '',
   typeFilter: 'all',
   setTypeFilter: (typeFilter) => {
@@ -184,6 +253,152 @@ export const useStore = create<AppState>((set, get) => ({
     if (get().previewItemId) get().setPreviewItemId(null)
   },
   open: false,
+  keyboardMode: false,
+  activeItemId: null,
+  enterKeyboardMode: () => {
+    if (get().keyboardMode) return
+    set({ keyboardMode: true })
+    try {
+      void edge.focusWindow(true)?.catch?.(() => {})
+    } catch { /* ignore */ }
+  },
+  setActiveItemId: (activeItemId) => {
+    if (get().activeItemId !== activeItemId) set({ activeItemId })
+  },
+  queueIds: [],
+  queueIndex: {},
+  setQueueIds: (ids) => {
+    const prev = get().queueIds
+    if (prev.length === ids.length && prev.every((id, i) => id === ids[i])) return
+    const queueIndex: Record<string, number> = {}
+    ids.forEach((id, i) => {
+      if (!(id in queueIndex)) queueIndex[id] = i
+    })
+    set({ queueIds: ids, queueIndex })
+  },
+  selection: EMPTY_SELECTION,
+  selectedMap: {},
+  selectionTexts: {},
+  selectionDragActive: false,
+  toggleSelected: (id) => set(withSelection(toggleSelection(get().selection, id))),
+  selectRangeTo: (id, order) => set(withSelection(selectRange(get().selection, order, id))),
+  extendSelectionTo: (from, to, order) => set(withSelection(extendSelection(get().selection, order, from, to))),
+  selectAllVisible: (order) => {
+    if (order.length > SELECTION_LIMIT) {
+      set(withSelection(selectAll(order.slice(0, SELECTION_LIMIT))))
+      get().pushToast({ id: `selection-limit-${Date.now()}`, message: 'toast.selectionTooLarge', tone: 'error', params: { max: SELECTION_LIMIT } })
+      return
+    }
+    set(withSelection(selectAll(order)))
+  },
+  keepSelectionWithin: (order) => {
+    const current = get().selection
+    if (current.ids.length === 0) return
+    const next = pruneSelection(current, new Set(order))
+    if (next !== current) set(withSelection(next))
+  },
+  clearSelection: () => {
+    if (get().selection.ids.length > 0 || get().selection.anchor) set(withSelection(EMPTY_SELECTION))
+  },
+  selectedIdsInOrder: () => {
+    const visible = new Set(getNavOrder())
+    return orderSelection(get().items, get().selection.ids.filter((id) => visible.has(id))).map((it) => it.id)
+  },
+  async pasteSelection(plain, fromKeyboard) {
+    const ids = selectionWithinLimit(get)
+    if (!ids) return
+    if (!fromKeyboard) handOffKeyboardForPaste(get, set)
+    set({ isInternalCopying: true })
+    try {
+      const ok = await edge.pasteMulti({ ids, plain: !!plain })
+      if (ok) get().clearSelection()
+    } finally {
+      setTimeout(() => set({ isInternalCopying: false }), 600)
+    }
+    if (fromKeyboard) resumeKeyboardAfterPaste(get)
+  },
+  async copySelection(plain) {
+    const ids = selectionWithinLimit(get)
+    if (!ids) return
+    set({ isInternalCopying: true })
+    try {
+      await edge.copyMulti({ ids, plain: !!plain })
+    } finally {
+      setTimeout(() => set({ isInternalCopying: false }), 400)
+    }
+  },
+  async stackSelection() {
+    const ids = selectionWithinLimit(get)
+    if (!ids || ids.length < 2) return
+    const result = await edge.stackMulti(ids)
+    if (result?.ok) set(withSelection(EMPTY_SELECTION))
+  },
+  async pinSelection(pinned) {
+    const ids = selectionWithinLimit(get)
+    if (!ids) return
+    const idSet = new Set(ids)
+    const previousPinned = new Map(get().items.filter((it) => idSet.has(it.id)).map((it) => [it.id, it.pinned]))
+    set({ items: get().items.map((it) => (idSet.has(it.id) ? { ...it, pinned } : it)) })
+    try {
+      const items = await edge.pinMulti(ids, pinned)
+      if (Array.isArray(items)) get().setItems(items)
+    } catch {
+      set({
+        items: get().items.map((it) => {
+          const was = previousPinned.get(it.id)
+          return was === undefined || it.pinned !== pinned ? it : { ...it, pinned: was }
+        })
+      })
+    }
+  },
+  async deleteSelection() {
+    const ids = selectionWithinLimit(get)
+    if (!ids) return
+    set(withSelection(EMPTY_SELECTION))
+    await get().clear(ids)
+  },
+  appIcons: {},
+  requestAppIcon: (bundleId) => {
+    if (!bundleId || bundleId in get().appIcons || appIconRequests.has(bundleId)) return
+    appIconRequests.add(bundleId)
+    let request: Promise<string | null>
+    try {
+      request = Promise.resolve(edge.getAppIcon(bundleId))
+    } catch {
+      request = Promise.resolve(null)
+    }
+    void request
+      .then((icon) => (typeof icon === 'string' && icon ? icon : null))
+      .catch(() => null)
+      .then((icon) => {
+        appIconRequests.delete(bundleId)
+        set({ appIcons: { ...get().appIcons, [bundleId]: icon } })
+      })
+  },
+  itemMenuOpen: false,
+  showItemMenu: (id, sub) => {
+    set({ itemMenuOpen: true })
+    let request: Promise<void>
+    try {
+      request = Promise.resolve(sub ? edge.showItemMenu(id, sub) : edge.showItemMenu(id))
+    } catch {
+      request = Promise.resolve()
+    }
+    void request.catch(() => {}).then(() => set({ itemMenuOpen: false }))
+  },
+  textDragActive: false,
+  setTextDragActive: (textDragActive) => {
+    if (get().textDragActive !== textDragActive) set({ textDragActive })
+  },
+  renamingId: null,
+  setRenamingId: (renamingId) => set({ renamingId }),
+  async renameItem(id, title) {
+    set({ renamingId: null })
+    try {
+      const items = await edge.setItemTitle(id, title.trim())
+      if (Array.isArray(items)) get().setItems(items)
+    } catch { /* ignore */ }
+  },
   settingsOpen: false,
   settingsTab: 'behaviour',
   setSettingsTab: (settingsTab) => set({ settingsTab }),
@@ -234,13 +449,17 @@ export const useStore = create<AppState>((set, get) => ({
     sliderReleasedTime: active ? 0 : Date.now()
   }),
   notifyPositionChanged: () => set({ sliderReleasedTime: Date.now() }),
-  resetPositionChangedTime: () => set({ sliderReleasedTime: 0 }),
+  resetPositionChangedTime: () => {
+    if (get().sliderReleasedTime !== 0) set({ sliderReleasedTime: 0 })
+  },
   edgeHintActive: false,
-  setEdgeHintActive: (active) => set({ edgeHintActive: active }),
+  setEdgeHintActive: (active) => {
+    if (get().edgeHintActive !== active) set({ edgeHintActive: active })
+  },
   styleFlyoutOpen: false,
   styleFlyoutAnchorRect: null,
   setStyleFlyoutOpen: (open, rect) => {
-    const isHorizontal = get().settings.stickPosition === 'top'
+    const isHorizontal = isHorizontalEdge(get().settings.stickPosition)
     if (open && get().languageFlyoutOpen) {
       set({ languageFlyoutOpen: false, languageFlyoutAnchorRect: null })
     }
@@ -264,7 +483,7 @@ export const useStore = create<AppState>((set, get) => ({
   languageFlyoutOpen: false,
   languageFlyoutAnchorRect: null,
   setLanguageFlyoutOpen: (open, rect) => {
-    const isHorizontal = get().settings.stickPosition === 'top'
+    const isHorizontal = isHorizontalEdge(get().settings.stickPosition)
     if (open && get().styleFlyoutOpen) {
       set({ styleFlyoutOpen: false, styleFlyoutAnchorRect: null })
     }
@@ -282,17 +501,49 @@ export const useStore = create<AppState>((set, get) => ({
   flareKey: 0,
 
   async hydrate() {
-    const { items, settings, version, isStoreBuild, updateInfo } = await edge.loadState()
-    const skipped = settings?.skippedUpdateVersion
-    const validUpdateInfo = (updateInfo && (!skipped || updateInfo.latestVersion !== skipped)) ? updateInfo : null
-    set({ 
-      items, 
-      settings, 
-      currentVersion: version,
-      isStoreBuild: isStoreBuild ?? false,
-      updateInfo: validUpdateInfo ?? get().updateInfo,
-      hydrated: true
-    })
+    let lastError: unknown = null
+    const load = async (): Promise<boolean> => {
+      try {
+        const { items, settings, version, isStoreBuild, updateInfo } = await edge.loadState()
+        if (!Array.isArray(items) || !settings) throw new Error('state:load returned no state')
+        const skipped = settings?.skippedUpdateVersion
+        const validUpdateInfo = (updateInfo && (!skipped || updateInfo.latestVersion !== skipped)) ? updateInfo : null
+        set({ 
+          items, 
+          settings, 
+          currentVersion: version,
+          isStoreBuild: isStoreBuild ?? false,
+          updateInfo: validUpdateInfo ?? get().updateInfo,
+          hydrated: true
+        })
+        return true
+      } catch (err) {
+        lastError = err
+        return false
+      }
+    }
+    if (hydrateRetryTimer) {
+      clearTimeout(hydrateRetryTimer)
+      hydrateRetryTimer = null
+    }
+    for (let attempt = 0; ; attempt++) {
+      if (await load()) return
+      const delay = HYDRATE_RETRY_DELAYS_MS[attempt]
+      if (delay === undefined) break
+      await new Promise((resolve) => setTimeout(resolve, delay))
+    }
+    console.error('[hydrate] state:load keeps failing, retrying in the background', lastError)
+    set({ hydrated: true })
+    get().pushToast({ id: `load-failed-${Date.now()}`, message: 'toast.loadFailed', tone: 'error' })
+    const retry = (): void => {
+      hydrateRetryTimer = setTimeout(() => {
+        hydrateRetryTimer = null
+        void load().then((ok) => {
+          if (!ok) retry()
+        })
+      }, HYDRATE_BACKGROUND_RETRY_MS)
+    }
+    retry()
   },
 
   manualCheckState: { status: 'idle' },
@@ -416,41 +667,41 @@ export const useStore = create<AppState>((set, get) => ({
     await edge.installUpdate()
   },
 
-  setItems: (items, _meta) => {
+  setItems: (items, meta) => {
     const prevItems = get().items
     if (
       prevItems.length === items.length &&
-      prevItems.every((it, i) => it.id === items[i]?.id && it.pinned === items[i]?.pinned && it.hitCount === items[i]?.hitCount && it.capturedAt === items[i]?.capturedAt)
+      prevItems.every((it, i) => it.id === items[i]?.id && it.pinned === items[i]?.pinned && it.hitCount === items[i]?.hitCount && it.capturedAt === items[i]?.capturedAt && sameItemMeta(it, items[i]))
     ) {
       return
     }
     // Copy confirmation is owned by `ui:copy-flare` (App.tsx). Firing it again
     // here replayed the indicator after a slow capture (large spreadsheet)
     // finished — the hint already showed it ~780ms earlier.
-    set({ items })
+    set({ items, itemsUsageOnly: isUsageOnlyUpdate(prevItems, items, meta?.reason) })
   },
-  setSettings: (next) => set({ settings: next }),
+  setSettings: (next) => set((s) => s.liveEdge
+    ? { liveBaseEdge: next.stickPosition, settings: { ...next, stickPosition: s.liveEdge } }
+    : { settings: next }),
+  liveEdge: null,
+  liveBaseEdge: DEFAULT_SETTINGS.stickPosition,
+  setLiveEdge: (liveEdge) => set((s) => {
+    if (liveEdge === s.liveEdge) return {}
+    const base = s.liveEdge ? s.liveBaseEdge : s.settings.stickPosition
+    const stickPosition = liveEdge ?? base
+    return {
+      liveEdge,
+      liveBaseEdge: base,
+      settings: s.settings.stickPosition === stickPosition ? s.settings : { ...s.settings, stickPosition }
+    }
+  }),
 
   setQuery: (query) => set({ query }),
   setOpen: (open) => {
-    set({ open })
+    const wasKeyboard = !open && get().keyboardMode
+    set(open ? { open } : { open, keyboardMode: false, activeItemId: null, renamingId: null, ...withSelection(EMPTY_SELECTION) })
     if (!open) {
-      // Release any focused control inside the blade. Without this, a button
-      // left focused from a click keeps matching the card's :focus-within
-      // rule and its action bar stays lit after the next open.
-      // (Accessed via globalThis with structural typing so this module keeps
-      // compiling under the DOM-less node tsconfig.)
-      const active = (globalThis as { document?: { activeElement?: { blur?: () => void } } }).document?.activeElement
-      try { active?.blur?.() } catch { /* ignore */ }
-      // If search held temporary OS focusability + paused hotkey through a
-      // close path that skipped the input's blur (tray toggle, cursor
-      // leave), restore both exactly once. No-op when search was never used.
-      try {
-        if (takeSearchEngaged()) {
-          void edge.focusWindow(false)?.catch?.(() => {})
-          void edge.pauseHotkey(false)?.catch?.(() => {})
-        }
-      } catch { /* ignore */ }
+      releaseFocusHold(wasKeyboard)
       // NOTE: Do NOT reset styleFlyoutOpen here — closePanel() handles the
       // sequencing so the flyout exit animation completes before the panel closes.
       // Only reset previewItemId so the normal preview flyout clears correctly.
@@ -473,10 +724,12 @@ export const useStore = create<AppState>((set, get) => ({
       emojiOpen: settingsOpen ? false : get().emojiOpen
     })
   },
-  setDragActive: (dragActive) => set({ dragActive }),
+  setDragActive: (dragActive) => {
+    if (get().dragActive !== dragActive) set({ dragActive })
+  },
   setInternalDragReq: (internalDragReq) => {
     if (internalDragReq === null) {
-      set({ internalDragReq: null, dragActive: false })
+      set({ internalDragReq: null, dragActive: false, selectionDragActive: false })
     } else {
       set({ internalDragReq })
     }
@@ -601,13 +854,19 @@ export const useStore = create<AppState>((set, get) => ({
     }
   },
 
-  async paste(id) {
+  async paste(id, opts, fromKeyboard) {
+    if (!fromKeyboard) handOffKeyboardForPaste(get, set)
     set({ isInternalCopying: true })
-    await edge.pasteItem(id)
-    setTimeout(() => set({ isInternalCopying: false }), 600)
+    try {
+      await (opts ? edge.pasteItem(id, opts) : edge.pasteItem(id))
+    } finally {
+      setTimeout(() => set({ isInternalCopying: false }), 600)
+    }
+    if (fromKeyboard) resumeKeyboardAfterPaste(get)
   },
 
   async pasteSubitem(req) {
+    handOffKeyboardForPaste(get, set)
     set({ isInternalCopying: true })
     try {
       await edge.pasteSubitem(req)
@@ -617,6 +876,7 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   async pasteEmoji(text) {
+    handOffKeyboardForPaste(get, set)
     set({ isInternalCopying: true })
     try {
       await edge.pasteEmoji(text)
@@ -639,6 +899,13 @@ export const useStore = create<AppState>((set, get) => ({
     }
   },
 
+  setLaunchAtLogin(value) {
+    set((s) => ({
+      settings: { ...s.settings, launchAtLogin: value }
+    }))
+    void get().patchSettings({ launchAtLogin: value })
+  },
+
   setTutorialStep: (step) => {
     set({ tutorialStep: step })
     edge.broadcastTutorialStep(step)
@@ -650,7 +917,7 @@ export const useStore = create<AppState>((set, get) => ({
     const current = (get().settings.stickPosition || 'left') as 'left' | 'right' | 'top'
     if (current === to) return
 
-    const reduceMotion = get().settings.reduceMotion
+    const reduceMotion = selectReduceMotion(get())
 
     if (reduceMotion) {
       playButtonClickSound()
@@ -718,3 +985,120 @@ export const useStore = create<AppState>((set, get) => ({
     get().notifyPositionChanged()
   }
 }))
+
+function withSelection(selection: Selection): { selection: Selection; selectedMap: Record<string, true> } {
+  const selectedMap: Record<string, true> = {}
+  for (const id of selection.ids) selectedMap[id] = true
+  return { selection, selectedMap }
+}
+
+export function isUsageOnlyUpdate(prev: readonly ClipboardItemDto[], next: readonly ClipboardItemDto[], reason: 'usage' | 'capture' | undefined): boolean {
+  if (reason !== 'usage') return false
+  const known = new Set(prev.map((it) => it.id))
+  return next.every((it) => known.has(it.id))
+}
+
+function releaseFocusHold(wasKeyboard: boolean): void {
+  // Release any focused control inside the blade. Without this, a button
+  // left focused from a click keeps matching the card's :focus-within
+  // rule and its action bar stays lit after the next open.
+  // (Accessed via globalThis with structural typing so this module keeps
+  // compiling under the DOM-less node tsconfig.)
+  const active = (globalThis as { document?: { activeElement?: { blur?: () => void } } }).document?.activeElement
+  try { active?.blur?.() } catch { /* ignore */ }
+  // If search held temporary OS focusability + paused hotkey through a
+  // close path that skipped the input's blur (tray toggle, cursor
+  // leave), restore both exactly once. No-op when search was never used.
+  try {
+    const searchEngaged = takeSearchEngaged()
+    if (searchEngaged || wasKeyboard) {
+      void edge.focusWindow(false)?.catch?.(() => {})
+    }
+    if (searchEngaged) {
+      void edge.pauseHotkey(false)?.catch?.(() => {})
+    }
+  } catch { /* ignore */ }
+}
+
+function handOffKeyboardForPaste(get: () => AppState, set: (patch: Partial<AppState>) => void): void {
+  if (edge.platform !== 'darwin') return
+  const wasKeyboard = get().keyboardMode
+  if (wasKeyboard) set({ keyboardMode: false })
+  releaseFocusHold(wasKeyboard)
+}
+
+/**
+ * The main process hands focus to the target app for ⌘V; once the keys have
+ * landed, a keyboard paste takes it back so navigation goes on in the open panel.
+ */
+function resumeKeyboardAfterPaste(get: () => AppState): void {
+  if (edge.platform !== 'darwin') return
+  setTimeout(() => {
+    const state = get()
+    if (!state.open || !state.keyboardMode) return
+    try {
+      void edge.focusWindow(true)?.catch?.(() => {})
+    } catch { /* ignore */ }
+  }, KEYBOARD_REFOCUS_DELAY_MS)
+}
+
+function selectionWithinLimit(get: () => AppState): string[] | null {
+  const state = get()
+  const ids = state.selectedIdsInOrder()
+  if (ids.length === 0) return null
+  if (ids.length > SELECTION_LIMIT) {
+    state.pushToast({ id: `selection-limit-${Date.now()}`, message: 'toast.selectionTooLarge', tone: 'error', params: { max: SELECTION_LIMIT } })
+    return null
+  }
+  return ids
+}
+
+const SELECTION_TEXT_DELAY_MS = 300
+const textRequests = new Set<string>()
+let selectionTextTimer: ReturnType<typeof setTimeout> | null = null
+
+function loadSelectionTexts(): void {
+  const state = useStore.getState()
+  const ids = state.selection.ids
+  if (ids.length < 2 || ids.length > SELECTION_LIMIT) return
+  const selected = orderSelection(state.items, ids)
+  if (!allTextLike(selected)) return
+  for (const item of selected) {
+    if (item.data.kind !== 'text' || !item.data.hasFullPayload) continue
+    if (item.id in state.selectionTexts || textRequests.has(item.id)) continue
+    textRequests.add(item.id)
+    let request: Promise<string>
+    try {
+      request = Promise.resolve(edge.getFullText(item.id))
+    } catch {
+      request = Promise.resolve('')
+    }
+    void request
+      .catch(() => '')
+      .then((full) => {
+        textRequests.delete(item.id)
+        if (typeof full !== 'string' || !full || !useStore.getState().selectedMap[item.id]) return
+        useStore.setState({ selectionTexts: { ...useStore.getState().selectionTexts, [item.id]: full } })
+      })
+  }
+}
+
+useStore.subscribe((state, prev) => {
+  if (state.items !== prev.items && state.selection.ids.length > 0) {
+    const next = pruneSelection(state.selection, new Set(state.items.map((it) => it.id)))
+    if (next !== state.selection) {
+      useStore.setState(withSelection(next))
+      return
+    }
+  }
+  if (state.selection === prev.selection) return
+  if (edge.platform !== 'darwin') return
+  const kept: Record<string, string> = {}
+  for (const id of Object.keys(state.selectionTexts)) if (state.selectedMap[id]) kept[id] = state.selectionTexts[id]
+  if (Object.keys(kept).length !== Object.keys(state.selectionTexts).length) useStore.setState({ selectionTexts: kept })
+  if (selectionTextTimer) clearTimeout(selectionTextTimer)
+  selectionTextTimer = setTimeout(() => {
+    selectionTextTimer = null
+    loadSelectionTexts()
+  }, SELECTION_TEXT_DELAY_MS)
+})

@@ -1,10 +1,11 @@
-import { app, net, shell } from 'electron'
+import { app, net, shell, powerMonitor } from 'electron'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { isStoreBuild } from './config'
 import { pushState } from './state'
 import { getSettings } from '../store/settings'
 import { resolveUpdateMode } from '../../shared/types'
+import { discardPreparedMacUpdate, launchMacInstaller, prepareMacUpdate, removeUnfinishedMacUpdateDirs, type PreparedMacUpdate } from './macUpdateInstall'
 
 export const MAC_UPDATE_REPO = 'SVorobiev-ru/Edge-Drop'
 const MAC_RELEASES_API_URL = `https://api.github.com/repos/${MAC_UPDATE_REPO}/releases?per_page=30`
@@ -23,6 +24,10 @@ export interface CachedUpdateInfo {
 let _autoUpdater: any = null
 let _cachedUpdateInfo: CachedUpdateInfo | null = null
 let _macReleaseUrl: string | null = null
+let _macRelease: { version: string; assets: unknown } | null = null
+let _macDownload: Promise<void> | null = null
+let _macPrepared: PreparedMacUpdate | null = null
+let _macInstalling = false
 
 export function getCachedUpdateState(): CachedUpdateInfo | null {
   return _cachedUpdateInfo
@@ -36,7 +41,11 @@ export function clearCachedUpdateState(): void {
  * Called from ipc.ts when the renderer clicks "Restart to Update".
  */
 export function quitAndInstallUpdate(): void {
-  if (isStoreBuild() || process.platform === 'darwin') return
+  if (isStoreBuild()) return
+  if (process.platform === 'darwin') {
+    void installMacUpdate()
+    return
+  }
   if (!_autoUpdater) {
     console.error('[AutoUpdater] quitAndInstall requested but autoUpdater is not initialized.')
     return
@@ -194,6 +203,7 @@ interface MacVersion {
 interface MacRelease {
   tag_name?: unknown
   html_url?: unknown
+  assets?: unknown
   draft?: unknown
   prerelease?: unknown
 }
@@ -218,16 +228,16 @@ export function compareMacVersions(v1: string, v2: string): number {
   return 0
 }
 
-export function pickLatestMacRelease(releases: unknown): { version: string; htmlUrl: unknown } | null {
+export function pickLatestMacRelease(releases: unknown): { version: string; htmlUrl: unknown; assets?: unknown } | null {
   if (!Array.isArray(releases)) return null
-  let latest: { version: string; htmlUrl: unknown } | null = null
+  let latest: { version: string; htmlUrl: unknown; assets?: unknown } | null = null
   for (const release of releases as Array<MacRelease | null>) {
     if (!release || typeof release.tag_name !== 'string') continue
     if (release.draft === true || release.prerelease === true) continue
     const version = release.tag_name.trim().replace(/^v/i, '')
     if (!/-mac\.\d+$/i.test(version) || !parseMacVersion(version)) continue
     if (!latest || compareMacVersions(version, latest.version) > 0) {
-      latest = { version, htmlUrl: release.html_url }
+      latest = { version, htmlUrl: release.html_url, assets: release.assets }
     }
   }
   return latest
@@ -247,7 +257,54 @@ function macCurrentVersion(): string | null {
   }
 }
 
+export const MAC_UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000
+export const MAC_UPDATE_RESUME_MIN_GAP_MS = 6 * 60 * 60 * 1000
+const MAC_UPDATE_SCHEDULE_TICK_MS = 10 * 60 * 1000
+const MAC_INSTALL_QUIT_TIMEOUT_MS = 10_000
+
+let _macLastCheckAt = 0
+let _macScheduleTimer: ReturnType<typeof setInterval> | null = null
+
+export function isMacScheduledCheckDue(input: {
+  mode: ReturnType<typeof resolveUpdateMode>
+  now: number
+  lastCheckAt: number
+  minGapMs: number
+}): boolean {
+  if (input.mode === 'off') return false
+  if (input.lastCheckAt <= 0) return true
+  const elapsed = input.now - input.lastCheckAt
+  return elapsed < 0 || elapsed >= input.minGapMs
+}
+
+function runMacScheduledCheck(minGapMs: number): void {
+  let mode: ReturnType<typeof resolveUpdateMode>
+  try {
+    mode = resolveUpdateMode(getSettings())
+  } catch {
+    return
+  }
+  if (!isMacScheduledCheckDue({ mode, now: Date.now(), lastCheckAt: _macLastCheckAt, minGapMs })) return
+  triggerBackgroundCheck(0)
+}
+
+const onMacResume = (): void => runMacScheduledCheck(MAC_UPDATE_RESUME_MIN_GAP_MS)
+
+function startMacUpdateSchedule(): void {
+  if (_macScheduleTimer !== null) return
+  _macScheduleTimer = setInterval(() => runMacScheduledCheck(MAC_UPDATE_CHECK_INTERVAL_MS), MAC_UPDATE_SCHEDULE_TICK_MS)
+  powerMonitor.on('resume', onMacResume)
+}
+
+function stopMacUpdateSchedule(): void {
+  if (_macScheduleTimer === null) return
+  clearInterval(_macScheduleTimer)
+  _macScheduleTimer = null
+  powerMonitor.removeListener('resume', onMacResume)
+}
+
 async function checkMacRelease(): Promise<{ status: string; version?: string; error?: string }> {
+  _macLastCheckAt = Date.now()
   const releases = await checkGitHubReleaseFast<unknown>(MAC_RELEASES_API_URL)
   if (!Array.isArray(releases)) {
     return { status: 'error', error: 'Failed to check for updates' }
@@ -262,6 +319,15 @@ async function checkMacRelease(): Promise<{ status: string; version?: string; er
   if (release && compareMacVersions(latestVersion, currentVersion) > 0) {
     console.log(`[AutoUpdater] macOS check found new version: v${latestVersion} (current: v${currentVersion})`)
     _macReleaseUrl = normalizeMacReleaseUrl(release.htmlUrl) ?? MAC_RELEASES_PAGE_URL
+    if (_macPrepared && _macPrepared.version !== latestVersion) {
+      discardMacUpdate()
+    }
+    _macRelease = { version: latestVersion, assets: release.assets }
+    if (_macPrepared) {
+      _cachedUpdateInfo = { hasUpdate: true, latestVersion, downloaded: true }
+      pushState.updateDownloaded({ version: latestVersion })
+      return { status: 'available', version: latestVersion }
+    }
     _cachedUpdateInfo = { hasUpdate: true, latestVersion, downloaded: false }
     pushState.updateAvailable({ version: latestVersion })
     return { status: 'available', version: latestVersion }
@@ -277,6 +343,99 @@ async function openMacReleasePage(): Promise<void> {
   } catch (err) {
     console.error('[AutoUpdater] Failed to open release page:', err)
   }
+}
+
+async function fallBackToMacReleasePage(reason: unknown): Promise<void> {
+  console.error('[AutoUpdater] macOS in-app update failed, opening the release page:', reason)
+  if (_cachedUpdateInfo) {
+    _cachedUpdateInfo = { hasUpdate: true, latestVersion: _cachedUpdateInfo.latestVersion, downloaded: false }
+    pushState.updateAvailable({ version: _cachedUpdateInfo.latestVersion })
+  }
+  pushState.toast('toast.updateInstallFailed', 'error')
+  await openMacReleasePage()
+}
+
+function downloadMacUpdate(): Promise<void> {
+  if (_macDownload) return _macDownload
+  if (_macPrepared) {
+    _cachedUpdateInfo = { hasUpdate: true, latestVersion: _macPrepared.version, downloaded: true }
+    pushState.updateDownloaded({ version: _macPrepared.version })
+    return Promise.resolve()
+  }
+  const release = _macRelease
+  _macDownload = (async () => {
+    try {
+      if (!release) throw new Error('no release has been checked')
+      const prepared = await prepareMacUpdate({
+        version: release.version,
+        assets: release.assets,
+        repo: MAC_UPDATE_REPO,
+        arch: process.arch,
+        onProgress: (progress) => {
+          if (_cachedUpdateInfo) _cachedUpdateInfo.downloadProgress = progress
+          pushState.updateProgress(progress)
+        }
+      })
+      _macPrepared = prepared
+      _cachedUpdateInfo = { hasUpdate: true, latestVersion: prepared.version, downloaded: true }
+      console.log(`[AutoUpdater] macOS update ${prepared.version} downloaded and verified`)
+      pushState.updateDownloaded({ version: prepared.version })
+    } catch (err) {
+      await fallBackToMacReleasePage(err)
+      throw err instanceof Error ? err : new Error(String(err))
+    } finally {
+      _macDownload = null
+    }
+  })()
+  return _macDownload
+}
+
+async function installMacUpdate(): Promise<void> {
+  const prepared = _macPrepared
+  if (!prepared || _macInstalling) {
+    if (!_macInstalling) await fallBackToMacReleasePage('no verified update to install')
+    return
+  }
+  let cancelInstaller: () => void
+  try {
+    cancelInstaller = launchMacInstaller(prepared)
+  } catch (err) {
+    await fallBackToMacReleasePage(err)
+    return
+  }
+  _macInstalling = true
+  console.log(`[AutoUpdater] macOS installer started for ${prepared.version}, quitting`)
+  let quitting = false
+  const onWillQuit = (): void => {
+    quitting = true
+  }
+  app.once('will-quit', onWillQuit)
+  setTimeout(() => {
+    app.removeListener('will-quit', onWillQuit)
+    if (quitting) return
+    cancelInstaller()
+    _macInstalling = false
+    void fallBackToMacReleasePage('the quit before the update was cancelled')
+  }, MAC_INSTALL_QUIT_TIMEOUT_MS)
+  app.quit()
+}
+
+export function discardMacUpdate(): void {
+  const prepared = _macPrepared
+  if (!prepared || _macInstalling) return
+  _macPrepared = null
+  try {
+    discardPreparedMacUpdate(prepared)
+  } catch (err) {
+    console.warn('[AutoUpdater] could not remove the downloaded update:', err)
+  }
+}
+
+export function shutdownMacUpdates(): void {
+  stopMacUpdateSchedule()
+  if (_macInstalling) return
+  discardMacUpdate()
+  removeUnfinishedMacUpdateDirs()
 }
 
 /**
@@ -351,7 +510,7 @@ export async function checkForUpdatesManual(): Promise<{ status: string; version
 export async function startUpdateDownload(): Promise<void> {
   if (isStoreBuild()) return
   if (process.platform === 'darwin') {
-    await openMacReleasePage()
+    await downloadMacUpdate()
     return
   }
   if (!_autoUpdater) {
@@ -393,6 +552,7 @@ export function initAutoUpdater(): void {
   }
   if (process.platform === 'darwin') {
     triggerBackgroundCheck(3000)
+    startMacUpdateSchedule()
     return
   }
 

@@ -7,16 +7,22 @@
  */
 import { ItemStore } from '../store/ItemStore'
 import { ClipboardWatcher, stampCapturedImage } from '../clipboard/ClipboardWatcher'
-import { clipboardSequenceAvailable } from '../clipboard/formats'
+import { clipboardSequenceAvailable, takeCapturedOriginalImage, takeCapturedRtf, MAC_PNG_TYPE, MAC_TIFF_TYPE } from '../clipboard/formats'
 import { loadSettings, saveSettings } from '../store/settings'
-import type { ClipboardItemDto, ItemData, Settings } from '../../shared/types'
+import type { ClipboardItemDto, ItemData, Settings, SourceApp, ToggleSource } from '../../shared/types'
 import { MAX_STACK } from '../../shared/types'
 import { BrowserWindow, nativeImage, powerMonitor } from 'electron'
 import { isStagedTempPath } from '../store/paths'
 import { prefetchFileIcons } from './drag'
 import { forgetStagedItems, reconcileTempOnStartup } from './stagedTemp'
+import { persistStoredThumbnail } from './thumbnailCache'
 import { runtime } from './config'
 import { getMainWindow, registerClipboardUpdateListener, requestPollBoost } from './window'
+import { toast } from './toast'
+import { scheduleTrayMenuRebuild } from './tray'
+import { installMacAppMenu } from './macAppMenu'
+import { frontmostApp, ownBundleId } from './macSourceApp'
+import { writeImageData } from './macPasteboard'
 
 const store = new ItemStore((removed) => forgetStagedItems(removed))
 const watcher = new ClipboardWatcher(process.platform === 'darwin' && clipboardSequenceAvailable() ? 250 : 600, 220)
@@ -42,23 +48,45 @@ function handleSystemWake(): void {
   }, 1500)
 }
 
-function recordCapture(data: ItemData, png?: Buffer): void {
+let imageAddedListener: (() => void) | null = null
+
+export function setImageAddedListener(listener: (() => void) | null): void {
+  imageAddedListener = listener
+}
+
+function recordCapture(data: ItemData, png?: Buffer, image?: Electron.NativeImage, sourceApp?: SourceApp): void {
+  const original = takeCapturedOriginalImage(data)
+  const rtf = takeCapturedRtf(data)
   if (loadSettings().incognito) return
   store.pruneExpired(loadSettings().autoDeleteHours)
   if (data.kind === 'image' && png && data.imageId) {
-    store.stageImageBytes(data.imageId, png)
+    if (!store.hasDuplicate(data)) {
+      if (original?.type === MAC_PNG_TYPE) data.fileBytes = original.bytes.length
+      store.stageImageBytes(data.imageId, original?.type === MAC_PNG_TYPE ? original.bytes : png)
+      if (original?.type === MAC_TIFF_TYPE) store.stageOriginalImage(data.imageId, original.bytes, 'tiff')
+      if (image) persistStoredThumbnail(data.imageId, image)
+    }
     png = undefined as any
   }
   if (data.kind === 'files' && data.paths) {
     prefetchFileIcons(data.paths)
   }
-  store.add(data, loadSettings().historyLimit)
+  store.add(data, loadSettings().historyLimit, { sourceApp, rtf })
   pushState.items()
+  if (data.kind === 'image' || data.kind === 'image-collection') imageAddedListener?.()
+}
+
+export function writeStoredImageToPasteboard(data: ItemData, namedPath?: string): boolean {
+  if (process.platform !== 'darwin' || data.kind !== 'image') return false
+  const stored = store.storedImageBytes(data.imageId, data.ext)
+  if (!stored) return false
+  return writeImageData(stored.original, { png: stored.png, fileUrlPath: namedPath })
 }
 
 export function addScreenshotToHistory(png: Buffer, fileName?: string): boolean {
   if (loadSettings().incognito) return false
-  const size = nativeImage.createFromBuffer(png).getSize()
+  const image = nativeImage.createFromBuffer(png)
+  const size = image.getSize()
   if (!size.width || !size.height) return false
   const data: ItemData = {
     kind: 'image',
@@ -70,7 +98,7 @@ export function addScreenshotToHistory(png: Buffer, fileName?: string): boolean 
     fileName
   }
   stampCapturedImage(data, png)
-  recordCapture(data, png)
+  recordCapture(data, png, image)
   return true
 }
 
@@ -104,6 +132,12 @@ export function initState(): void {
       prefetchFileIcons(item.data.paths)
     }
   }
+  watcher.setCapturePolicy({
+    frontmostApp,
+    ownBundleId,
+    ignoredApps: () => loadSettings().ignoredApps,
+    ignoreRemoteClipboard: () => loadSettings().ignoreRemoteClipboard
+  })
   watcher.start(recordCapture, () => {
     if (loadSettings().incognito) return
     const win = getMainWindow()
@@ -114,10 +148,10 @@ export function initState(): void {
   registerClipboardUpdateListener(() => watcher.nudge())
   watcher.setPaused(loadSettings().incognito)
 
-  powerMonitor.removeAllListeners('suspend')
-  powerMonitor.removeAllListeners('lock-screen')
-  powerMonitor.removeAllListeners('resume')
-  powerMonitor.removeAllListeners('unlock-screen')
+  powerMonitor.removeListener('suspend', handleSystemSleep)
+  powerMonitor.removeListener('lock-screen', handleSystemSleep)
+  powerMonitor.removeListener('resume', handleSystemWake)
+  powerMonitor.removeListener('unlock-screen', handleSystemWake)
 
   powerMonitor.on('suspend', handleSystemSleep)
   powerMonitor.on('lock-screen', handleSystemSleep)
@@ -166,6 +200,8 @@ function send(channel: string, ...args: unknown[]): void {
   }
 }
 
+let appMenuLanguage: Settings['language'] | undefined
+
 export const pushState = {
   /**
    * Push the item list. `reason` labels WHY so the renderer can react
@@ -175,13 +211,22 @@ export const pushState = {
   items(meta?: { reason?: 'usage' | 'capture' }): void {
     const dto: ClipboardItemDto[] = store.toDto()
     send('state:items', dto, meta)
+    if (process.platform === 'darwin') scheduleTrayMenuRebuild()
   },
   settings(next: Settings): void {
     send('state:settings', next)
+    if (process.platform === 'darwin' && next.language !== appMenuLanguage) {
+      appMenuLanguage = next.language
+      installMacAppMenu()
+    }
   },
-  togglePanel(open?: boolean): void {
-    console.log(`[Main] Sending window:toggle event to renderer with open=${open}`)
-    send('window:toggle', open)
+  togglePanel(open?: boolean, meta?: { source?: ToggleSource }): void {
+    console.log(`[Main] Sending window:toggle event to renderer with open=${open} source=${meta?.source ?? '-'}`)
+    if (meta && process.platform === 'darwin') send('window:toggle', open, meta)
+    else send('window:toggle', open)
+  },
+  search(query: string): void {
+    send('window:search', query)
   },
   openSettings(): void {
     console.log('[Main] Sending window:open-settings event to renderer')
@@ -197,7 +242,8 @@ export const pushState = {
   updateDownloaded(info: { version: string }): void {
     console.log('[Main] Sending app:update-downloaded event to renderer:', info)
     send('app:update-downloaded', info)
-  }
+  },
+  toast
 }
 
 /** Re-export for handlers that mutate settings then need to broadcast. */

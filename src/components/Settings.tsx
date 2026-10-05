@@ -1,7 +1,8 @@
-import { useEffect, useState, useRef, useLayoutEffect } from 'react'
+import { useEffect, useState, useRef, useLayoutEffect, useId } from 'react'
+import type { ReactNode } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { useStore } from '../store/appStore'
-import type { DisplayInfo, UpdateMode } from '../../shared/types'
+import { useStore, selectReduceMotion } from '../store/appStore'
+import type { DisplayInfo, Settings as SettingsShape, UpdateMode } from '../../shared/types'
 import { resolveUpdateMode } from '../../shared/types'
 import {
   LogoIndicatorIcon,
@@ -10,17 +11,25 @@ import {
   SparkleIndicatorIcon
 } from './CopyIndicatorCurve'
 import { ChevronRightIcon, CloseIcon, LogOutIcon, StarIcon, InfoIcon, GithubOctocatLogo, MicrosoftStoreLogo } from './icons'
-import { HotkeyRecorder } from './HotkeyRecorder'
 import { SlideCommit } from './SlideCommit'
 import { WakeSlider } from './WakeSlider'
+import { PANEL_WIDTH_MAX, PANEL_WIDTH_MIN, PANEL_WIDTH_STEP, resolvePanelWidth } from '../hooks/useEdgeHover'
+import { LanguageDropdown } from './settings/LanguageDropdown'
+import { displayedUpdateMode, visibleUpdateModes } from './settings/updateMode'
+import { Divider, Pills, SettingsLayoutContext, ToggleCard, settingsLayout, useSettingsLayout, type SettingsTab } from './settings/layout'
+import { AccessibilityCard, useAccessibilityStatus } from './settings/AccessibilityCard'
+import { IgnoredAppsCard, useIgnoredApps } from './settings/IgnoredAppsCard'
+import { PLATFORM_TOGGLE_HOTKEY, PasteQueueHotkeyCard, ToggleHotkeyCard } from './settings/HotkeyCards'
+import { BackupCard } from './settings/BackupCard'
+import { ThemeCards } from './settings/ThemeCards'
+import { CaptureScreenshotsCard, HideFromCaptureCard, IgnoreRemoteCard, PastePlainCard, RecognizeTextCard } from './settings/PrivacyCards'
 import { playDialTickSound, playToggleSound, playButtonClickSound } from '../lib/soundEffects'
 import { useTranslation } from '../i18n'
-import { REPO_URL, CHANGELOG_URL } from '../lib/links'
+import { getLangLabel } from '../i18n/languages'
+import { REPO_URL, CHANGELOG_URL, SUPPORT_URL } from '../lib/links'
+import { IS_DARWIN } from '../lib/edge'
 import '../styles/settings.css'
-
-const IS_MAC = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform || navigator.userAgent || '')
-
-type SettingsTab = 'behaviour' | 'position' | 'appearance'
+import { isHorizontalEdge } from '../../shared/panelPlacement'
 
 export function Settings({
   inlineIndicatorStyle,
@@ -29,9 +38,21 @@ export function Settings({
   inlineIndicatorStyle?: boolean
   isHorizontal?: boolean
 }) {
+  const settings = useStore((s) => s.settings)
+  const isHorizontal = propIsHorizontal ?? isHorizontalEdge(settings.stickPosition)
+  const idBase = useId()
+
+  return (
+    <SettingsLayoutContext.Provider value={settingsLayout(isHorizontal, idBase)}>
+      <SettingsContent inlineIndicatorStyle={inlineIndicatorStyle} />
+    </SettingsLayoutContext.Provider>
+  )
+}
+
+function SettingsContent({ inlineIndicatorStyle }: { inlineIndicatorStyle?: boolean }) {
   const { t, language, languages } = useTranslation()
   const settings = useStore((s) => s.settings)
-  const isHorizontal = propIsHorizontal ?? (settings.stickPosition === 'top')
+  const { isHorizontal, titleId, cardClass } = useSettingsLayout()
 
   const TABS: { id: SettingsTab; label: string }[] = [
     { id: 'behaviour',  label: t('tabs.behaviour') },
@@ -39,10 +60,10 @@ export function Settings({
     { id: 'appearance', label: t('tabs.appearance') },
   ]
   const patch = useStore((s) => s.patchSettings)
-  const pushToast = useStore((s) => s.pushToast)
   const updateInfo = useStore((s) => s.updateInfo)
   const isStoreBuild = useStore((s) => s.isStoreBuild)
   const currentVersion = useStore((s) => s.currentVersion)
+  const reduceMotion = useStore(selectReduceMotion)
   const styleFlyoutOpen = useStore((s) => s.styleFlyoutOpen)
   const setStyleFlyoutOpen = useStore((s) => s.setStyleFlyoutOpen)
   const languageFlyoutOpen = useStore((s) => s.languageFlyoutOpen)
@@ -51,8 +72,6 @@ export function Settings({
   const edgeTransition = useStore((s) => s.edgeTransition)
   const startEdgeTransition = useStore((s) => s.startEdgeTransition)
 
-  const getLangLabel = (l: { code: string; name: string; nativeName: string }) =>
-    l.code === 'system' || l.nativeName.includes('(') ? l.nativeName : `${l.nativeName} (${l.name})`
   const selectedLang = languages.find((l) => l.code === (language || 'system')) || languages[0]
 
   const lastTickVal = useRef<number>(settings.verticalOffset ?? 0.5)
@@ -132,6 +151,23 @@ export function Settings({
     patch({ hotZoneWidth: clamped })
   }
 
+  const handlePanelWidthInput = (rawVal: number) => {
+    const next = resolvePanelWidth({ panelWidth: rawVal, stickPosition: settings.stickPosition })
+    if (next !== resolvePanelWidth(settings)) {
+      playDialTickSound()
+      useStore.setState((s) => ({
+        settings: { ...s.settings, panelWidth: next }
+      }))
+    }
+  }
+
+  const handlePanelWidthRelease = (rawVal: number) => {
+    const next = resolvePanelWidth({ panelWidth: rawVal, stickPosition: settings.stickPosition })
+    setSliderActive(false)
+    playDialTickSound()
+    patch({ panelWidth: next })
+  }
+
   const [localInlineOpen, setLocalInlineOpen] = useState(false)
   const isTutorial = inlineIndicatorStyle || (typeof window !== 'undefined' && window.location.hash.includes('onboarding'))
   const isFlyoutActive = isTutorial ? localInlineOpen : styleFlyoutOpen
@@ -153,6 +189,7 @@ export function Settings({
 
   const [displays, setDisplays] = useState<DisplayInfo[]>([])
   useEffect(() => {
+    if (IS_DARWIN) return
     const timer = window.setTimeout(() => {
       window.edge.getDisplays().then(setDisplays).catch(() => {})
     }, 250)
@@ -173,21 +210,22 @@ export function Settings({
     }
   }, [])
 
+  const accessibility = useAccessibilityStatus()
+
+  const ignoredApps = useIgnoredApps()
+
   const updateDownloaded = updateInfo?.downloaded ? { version: updateInfo.latestVersion } : null
   const updateMode = resolveUpdateMode(settings)
+  const shownUpdateMode = displayedUpdateMode(updateMode, IS_DARWIN)
 
   const checkState = useStore((s) => s.manualCheckState)
   const handleManualCheck = () => useStore.getState().startManualCheck()
   const handleStartDownload = () => {
-    if (IS_MAC) {
-      void window.edge.startUpdateDownload()
-      return
-    }
     void useStore.getState().startManualDownload()
   }
 
   const isManualDownloading = checkState.status === 'downloading'
-  const isDownloading = !IS_MAC && (isManualDownloading || (!updateDownloaded && !!updateInfo?.hasUpdate && (updateMode === 'auto' || !!updateInfo?.downloadProgress)))
+  const isDownloading = isManualDownloading || (!updateDownloaded && !!updateInfo?.hasUpdate && (shownUpdateMode === 'auto' || !!updateInfo?.downloadProgress))
   // Update waiting for a user decision (Notify mode prompt or available check).
   const hasBackgroundUpdate = !updateDownloaded && !isDownloading && (!!updateInfo?.hasUpdate || checkState.status === 'available')
   const downloadPercent = updateInfo?.downloadProgress?.percent ?? 0
@@ -235,7 +273,7 @@ export function Settings({
   // When update check finds a new update, smoothly scroll to top/front to highlight the update card
   useEffect(() => {
     if (checkState.status === 'available') {
-      const behavior = settings.reduceMotion ? 'auto' : 'smooth'
+      const behavior = reduceMotion ? 'auto' : 'smooth'
       if (isHorizontal) {
         if (shelfTrackRef.current) {
           shelfTrackRef.current.scrollTo({ left: 0, behavior })
@@ -248,7 +286,7 @@ export function Settings({
         tabScrollPositions.current.behaviour = 0
       }
     }
-  }, [checkState.status, isHorizontal, settings.reduceMotion])
+  }, [checkState.status, isHorizontal, reduceMotion])
 
   // ── Promoted Active Update State ───────────────────────────────────────────
   // The top card shows all active update lifecycle stages:
@@ -279,7 +317,7 @@ export function Settings({
         <div className="shelf-card-bottom">
           <button
             className="pill display-pill"
-            style={{ width: '100%', justifyContent: 'center', padding: '7px 14px', cursor: 'pointer', whiteSpace: 'nowrap', fontSize: '12.5px' }}
+            style={{ width: '100%', justifyContent: 'center', padding: '7px 14px', cursor: 'pointer', whiteSpace: IS_DARWIN ? 'normal' : 'nowrap', fontSize: '12.5px' }}
             onClick={() => {
               playButtonClickSound()
               window.open(`${REPO_URL}/issues/new/choose`, '_blank')
@@ -302,7 +340,7 @@ export function Settings({
               className="kofi-support-btn"
               onClick={() => {
                 playButtonClickSound()
-                window.open('https://www.edgedrop.app/supportedgedrop', '_blank')
+                window.open(SUPPORT_URL, '_blank')
               }}
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="#ff4757" stroke="none" style={{ flexShrink: 0 }}>
@@ -340,7 +378,7 @@ export function Settings({
             )}
           </div>
           <div className="app-version-footer">
-            <span>{t('footer.version')} {currentVersion || '0.3.1'}</span>
+            <span>{t('footer.version')} {currentVersion}</span>
             <span className="version-separator">·</span>
             <button
               type="button"
@@ -385,29 +423,34 @@ export function Settings({
     window.open(CHANGELOG_URL, '_blank')
   }
 
-  // ── Promoted Top Update Card Renderer (Vertical Layout) ────────────────────
-  const renderPromotedTopUpdateCard = () => {
+  // ── Promoted Top Update Card Renderer ──────────────────────────────────────
+  const renderPromotedUpdateCard = () => {
     if (isStoreBuild) return null
     if (!hasPromotedTopUpdate) return null
+    const promotedClass = isHorizontal ? 'settings-shelf-card update-promoted-card behaviour-col' : 'setting-card update-promoted-card'
+
+    const infoButton = (
+      <button
+        type="button"
+        className="update-info-btn"
+        title={t('header.whatsNew') || "What's New"}
+        aria-label={t('header.whatsNew') || "What's New"}
+        onClick={handleOpenChangelog}
+      >
+        <InfoIcon width={13} height={13} />
+      </button>
+    )
 
     if (updateDownloaded) {
       return (
-        <div className="setting-card update-promoted-card">
+        <div className={promotedClass}>
           <div className="shelf-card-top">
             <div className="update-header-row">
               <div className="update-group-label">
                 <span className="update-dot" />
                 <span>{t('behaviour.updateLabelReady') || 'UPDATE READY'}</span>
               </div>
-              <button
-                type="button"
-                className="update-info-btn"
-                title={t('header.whatsNew') || "What's New"}
-                aria-label={t('header.whatsNew') || "What's New"}
-                onClick={handleOpenChangelog}
-              >
-                <InfoIcon width={13} height={13} />
-              </button>
+              {infoButton}
             </div>
             <div className="setting-title">
               {t('behaviour.updateReadyTitle', { version: updateDownloaded.version })}
@@ -435,22 +478,14 @@ export function Settings({
 
     if (isDownloading) {
       return (
-        <div className="setting-card update-promoted-card">
+        <div className={promotedClass}>
           <div className="shelf-card-top">
             <div className="update-header-row">
               <div className="update-group-label">
                 <span className="update-dot checking" />
                 <span>{t('behaviour.updateLabelDownloading') || 'DOWNLOADING UPDATE'}</span>
               </div>
-              <button
-                type="button"
-                className="update-info-btn"
-                title={t('header.whatsNew') || "What's New"}
-                aria-label={t('header.whatsNew') || "What's New"}
-                onClick={handleOpenChangelog}
-              >
-                <InfoIcon width={13} height={13} />
-              </button>
+              {infoButton}
             </div>
             <div className="setting-title">
               {updateInfo?.latestVersion
@@ -473,23 +508,28 @@ export function Settings({
 
     if (checkState.status === 'available' || hasBackgroundUpdate) {
       const versionStr = checkState.version || updateInfo?.latestVersion || ''
+      const skipButton = (
+        <button
+          type="button"
+          className="update-action-btn secondary"
+          style={{ flex: '0 0 68px' }}
+          onClick={() => {
+            playButtonClickSound()
+            useStore.getState().dismissUpdate()
+          }}
+        >
+          {t('behaviour.skip')}
+        </button>
+      )
       return (
-        <div className="setting-card update-promoted-card">
+        <div className={promotedClass}>
           <div className="shelf-card-top">
             <div className="update-header-row">
               <div className="update-group-label">
                 <span className="update-dot" />
                 <span>{t('behaviour.updateLabelAvailable') || 'NEW UPDATE AVAILABLE'}</span>
               </div>
-              <button
-                type="button"
-                className="update-info-btn"
-                title={t('header.whatsNew') || "What's New"}
-                aria-label={t('header.whatsNew') || "What's New"}
-                onClick={handleOpenChangelog}
-              >
-                <InfoIcon width={13} height={13} />
-              </button>
+              {infoButton}
             </div>
             <div className="setting-title">
               {t('behaviour.updateAvailableTitle', { version: versionStr })}
@@ -499,176 +539,47 @@ export function Settings({
             </div>
           </div>
           <div className="shelf-card-bottom">
-            <div className="update-action-row">
-              <button
-                type="button"
-                className="update-action-btn primary"
-                style={{ flex: 1 }}
-                onClick={() => {
-                  playButtonClickSound()
-                  handleStartDownload()
-                }}
-              >
-                {IS_MAC ? t('behaviour.openReleasePage') : (t('behaviour.update') || 'Update')}
-              </button>
-              <button
-                type="button"
-                className="update-action-btn secondary"
-                style={{ flex: '0 0 68px' }}
-                onClick={() => {
-                  playButtonClickSound()
-                  useStore.getState().dismissUpdate()
-                }}
-              >
-                {t('behaviour.skip')}
-              </button>
-            </div>
-          </div>
-        </div>
-      )
-    }
-
-    return null
-  }
-
-  // ── Promoted Front Update Card Renderer (Horizontal Shelf Layout) ──────────
-  const renderPromotedHorizontalUpdateCard = () => {
-    if (isStoreBuild) return null
-    if (!hasPromotedTopUpdate) return null
-
-    if (updateDownloaded) {
-      return (
-        <div className="settings-shelf-card update-promoted-card behaviour-col">
-          <div className="shelf-card-top">
-            <div className="update-header-row">
-              <div className="update-group-label">
-                <span className="update-dot" />
-                <span>{t('behaviour.updateLabelReady') || 'UPDATE READY'}</span>
+            {IS_DARWIN ? (
+              <div className="update-action-stack">
+                <button
+                  type="button"
+                  className="update-action-btn primary"
+                  style={{ width: '100%' }}
+                  onClick={() => {
+                    playButtonClickSound()
+                    handleStartDownload()
+                  }}
+                >
+                  {t('behaviour.installUpdate')}
+                </button>
+                <div className="update-action-row">
+                  <button
+                    type="button"
+                    className="update-action-btn secondary"
+                    style={{ flex: 1 }}
+                    onClick={handleOpenChangelog}
+                  >
+                    {t('behaviour.openReleasePage')}
+                  </button>
+                  {skipButton}
+                </div>
               </div>
-              <button
-                type="button"
-                className="update-info-btn"
-                title={t('header.whatsNew') || "What's New"}
-                aria-label={t('header.whatsNew') || "What's New"}
-                onClick={handleOpenChangelog}
-              >
-                <InfoIcon width={13} height={13} />
-              </button>
-            </div>
-            <div className="setting-title">
-              {t('behaviour.updateReadyTitle', { version: updateDownloaded.version })}
-            </div>
-            <div className="setting-desc">
-              {t('behaviour.updateReadyDesc')}
-            </div>
-          </div>
-          <div className="shelf-card-bottom">
-            <SlideCommit
-              label={t('behaviour.restart') || 'Restart'}
-              doneLabel={t('behaviour.restarting') || 'Restarting...'}
-              errorLabel={t('behaviour.restartFailed') || 'Restart failed'}
-              height={32}
-              radius={10}
-              onConfirm={() => {
-                playButtonClickSound()
-                void window.edge.installUpdate()
-              }}
-            />
-          </div>
-        </div>
-      )
-    }
-
-    if (isDownloading) {
-      return (
-        <div className="settings-shelf-card update-promoted-card behaviour-col">
-          <div className="shelf-card-top">
-            <div className="update-header-row">
-              <div className="update-group-label">
-                <span className="update-dot checking" />
-                <span>{t('behaviour.updateLabelDownloading') || 'DOWNLOADING UPDATE'}</span>
+            ) : (
+              <div className="update-action-row">
+                <button
+                  type="button"
+                  className="update-action-btn primary"
+                  style={{ flex: 1 }}
+                  onClick={() => {
+                    playButtonClickSound()
+                    handleStartDownload()
+                  }}
+                >
+                  {t('behaviour.update') || 'Update'}
+                </button>
+                {skipButton}
               </div>
-              <button
-                type="button"
-                className="update-info-btn"
-                title={t('header.whatsNew') || "What's New"}
-                aria-label={t('header.whatsNew') || "What's New"}
-                onClick={handleOpenChangelog}
-              >
-                <InfoIcon width={13} height={13} />
-              </button>
-            </div>
-            <div className="setting-title">
-              {updateInfo?.latestVersion
-                ? t('behaviour.updateAvailableTitle', { version: updateInfo.latestVersion })
-                : t('behaviour.downloadingUpdate')}
-            </div>
-            <div className="setting-desc">
-              {downloadPercent > 0 ? t('behaviour.downloadingWithPercent', { percent: downloadPercent }) : t('behaviour.downloadingUpdate')}
-            </div>
-          </div>
-          <div className="shelf-card-bottom">
-            <div className="shelf-update-progress-wrap">
-              <div className="shelf-progress-bar" style={{ width: `${downloadPercent}%` }} />
-              <span className="shelf-progress-text">{downloadPercent > 0 ? `${downloadPercent}%` : 'Connecting...'}</span>
-            </div>
-          </div>
-        </div>
-      )
-    }
-
-    if (checkState.status === 'available' || hasBackgroundUpdate) {
-      const versionStr = checkState.version || updateInfo?.latestVersion || ''
-      return (
-        <div className="settings-shelf-card update-promoted-card behaviour-col">
-          <div className="shelf-card-top">
-            <div className="update-header-row">
-              <div className="update-group-label">
-                <span className="update-dot" />
-                <span>{t('behaviour.updateLabelAvailable') || 'NEW UPDATE AVAILABLE'}</span>
-              </div>
-              <button
-                type="button"
-                className="update-info-btn"
-                title={t('header.whatsNew') || "What's New"}
-                aria-label={t('header.whatsNew') || "What's New"}
-                onClick={handleOpenChangelog}
-              >
-                <InfoIcon width={13} height={13} />
-              </button>
-            </div>
-            <div className="setting-title">
-              {t('behaviour.updateAvailableTitle', { version: versionStr })}
-            </div>
-            <div className="setting-desc">
-              {t('behaviour.updateAvailableDesc')}
-            </div>
-          </div>
-          <div className="shelf-card-bottom">
-            <div className="update-action-row">
-              <button
-                type="button"
-                className="update-action-btn primary"
-                style={{ flex: 1 }}
-                onClick={() => {
-                  playButtonClickSound()
-                  handleStartDownload()
-                }}
-              >
-                {IS_MAC ? t('behaviour.openReleasePage') : (t('behaviour.update') || 'Update')}
-              </button>
-              <button
-                type="button"
-                className="update-action-btn secondary"
-                style={{ flex: '0 0 68px' }}
-                onClick={() => {
-                  playButtonClickSound()
-                  useStore.getState().dismissUpdate()
-                }}
-              >
-                {t('behaviour.skip')}
-              </button>
-            </div>
+            )}
           </div>
         </div>
       )
@@ -710,7 +621,7 @@ export function Settings({
                   <span>{t('behaviour.isUpToDate')}</span>
                 </div>
                 <div className="manual-update-desc">
-                  {t('footer.version')} {currentVersion || '0.3.1'}
+                  {t('footer.version')} {currentVersion}
                 </div>
               </div>
               <button
@@ -750,7 +661,7 @@ export function Settings({
               <div className="manual-update-info">
                 <div className="manual-update-title">{t('behaviour.checkForUpdates')}</div>
                 <div className="manual-update-desc">
-                  {t('footer.version')} {currentVersion || '0.3.1'}
+                  {t('footer.version')} {currentVersion}
                 </div>
               </div>
               <button
@@ -770,9 +681,952 @@ export function Settings({
     )
   }
 
+  // Card 1: Language
+  const renderLanguageCard = () => (
+    <div className={cardClass('shortcuts-card', 'behaviour-col')}>
+      <div className="shelf-card-top">
+        <div className="setting-group-label">{t('groups.general') || 'GENERAL'}</div>
+        <div className="setting-title" id={titleId('language')}>{t('behaviour.languageTitle')}</div>
+        <div className="setting-desc">
+          {isHorizontal ? (t('groups.languageSelectDesc') || 'Select application display language') : t('behaviour.languageDesc')}
+        </div>
+      </div>
+      <div className="shelf-card-bottom">
+        {isHorizontal ? (
+          <button
+            type="button"
+            className={`language-shelf-btn language-toggle-btn ${languageFlyoutOpen ? 'flyout-open' : ''}`}
+            aria-expanded={languageFlyoutOpen}
+            onClick={(e) => {
+              playButtonClickSound()
+              const rect = e.currentTarget.getBoundingClientRect()
+              setLanguageFlyoutOpen(!languageFlyoutOpen, rect)
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 7, minWidth: 0, overflow: 'hidden' }}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.65, flexShrink: 0 }}>
+                <circle cx="12" cy="12" r="10"/>
+                <line x1="2" y1="12" x2="22" y2="12"/>
+                <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+              </svg>
+              <span style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {getLangLabel(selectedLang)}
+              </span>
+            </div>
+            <motion.span
+              animate={{ rotate: languageFlyoutOpen ? 180 : 0 }}
+              transition={{ duration: 0.2 }}
+              style={{ display: 'flex', alignItems: 'center', opacity: 0.65, flexShrink: 0, marginLeft: 6 }}
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="m6 9 6 6 6-6"/>
+              </svg>
+            </motion.span>
+          </button>
+        ) : (
+          <LanguageDropdown />
+        )}
+      </div>
+    </div>
+  )
+
+  // Card 2: Launch at Login
+  const renderLaunchAtLoginCard = () => (
+    <ToggleCard
+      id="launchAtLogin"
+      kind="system-card"
+      col="behaviour-col"
+      group={t('groups.startup') || 'STARTUP'}
+      title={t('behaviour.launchAtLoginTitle')}
+      desc={t('behaviour.launchAtLoginDesc')}
+      checked={settings.launchAtLogin}
+      onChange={(v) => useStore.getState().setLaunchAtLogin(v)}
+    />
+  )
+
+  // Card 3: Incognito Mode
+  const renderIncognitoCard = () => (
+    <ToggleCard
+      id="incognito"
+      kind="incognito-card"
+      col="behaviour-col"
+      group={t('groups.privacy') || 'PRIVACY'}
+      title={t('behaviour.incognitoTitle')}
+      desc={t('behaviour.incognitoDesc')}
+      checked={settings.incognito}
+      onChange={(v) => patch({ incognito: v })}
+    />
+  )
+
+  // Card 4: Hover Activation
+  const renderHoverActivationCard = () => (
+    <ToggleCard
+      id="hoverActivation"
+      kind="hover-card"
+      col="behaviour-col"
+      group={t('groups.hoverActivation') || 'HOVER ACTIVATION'}
+      title={t('behaviour.hoverActivationTitle')}
+      desc={(settings.hoverActivation ?? true)
+        ? t('behaviour.hoverActivationDescOn')
+        : t('behaviour.hoverActivationDescOff', { shortcut: settings.toggleHotkey || PLATFORM_TOGGLE_HOTKEY })}
+      checked={settings.hoverActivation ?? true}
+      onChange={(v) => {
+        if (!v) {
+          patch({ hoverActivation: false, suppressInFullscreen: false })
+        } else {
+          patch({ hoverActivation: true, suppressInFullscreen: true })
+        }
+      }}
+    />
+  )
+
+  // Card 6: Fullscreen Protection
+  const renderFullscreenCard = () => (
+    <ToggleCard
+      id="fullscreenProtection"
+      kind="fullscreen-card"
+      col="behaviour-col"
+      group={t('groups.fullscreenProtection') || 'FULLSCREEN PROTECTION'}
+      title={t('behaviour.fullscreenProtectionTitle')}
+      desc={(settings.hoverActivation ?? true)
+        ? t('behaviour.fullscreenProtectionDesc')
+        : t('behaviour.disabledHoverOff')}
+      checked={(settings.hoverActivation ?? true) ? settings.suppressInFullscreen : false}
+      onChange={(v) => (settings.hoverActivation ?? true) && patch({ suppressInFullscreen: v })}
+      disabled={!(settings.hoverActivation ?? true)}
+      dimmed={!(settings.hoverActivation ?? true)}
+    />
+  )
+
+  // Card 7: Move Pasted to Top
+  const renderMovePastedCard = () => (
+    <ToggleCard
+      id="movePastedToTop"
+      kind="order-card"
+      col="behaviour-col"
+      group={t('groups.clipboardBehaviour') || 'CLIPBOARD BEHAVIOUR'}
+      title={t('behaviour.movePastedToTopTitle')}
+      desc={t('behaviour.movePastedToTopDesc')}
+      checked={settings.movePastedToTop ?? true}
+      onChange={(v) => patch({ movePastedToTop: v })}
+    />
+  )
+
+  // Card 8: Clear Unpinned on Restart
+  const renderClearUnpinnedCard = () => (
+    <ToggleCard
+      id="clearUnpinnedOnRestart"
+      kind="rules-card"
+      col="behaviour-col"
+      group={t('groups.restartCleanup') || 'RESTART CLEANUP'}
+      title={t('behaviour.clearUnpinnedTitle')}
+      desc={t('behaviour.clearUnpinnedDesc')}
+      checked={settings.clearUnpinnedOnRestart}
+      onChange={(v) => patch({ clearUnpinnedOnRestart: v })}
+    />
+  )
+
+  // Card 9: History Capacity
+  const renderCapacityCard = () => (
+    <div className={cardClass('storage-card', 'behaviour-col')}>
+      <div className="shelf-card-top">
+        <div className="setting-group-label">{t('groups.storageCapacity') || 'STORAGE CAPACITY'}</div>
+        <div className="setting-title" id={titleId('historyLimit')}>{t('behaviour.capacityTitle')}</div>
+        <div className="setting-desc">{t('behaviour.capacityDesc')}</div>
+      </div>
+      <div className="shelf-card-bottom">
+        <Pills
+          labelId={titleId('historyLimit')}
+          options={[
+            { label: '100', val: 100 },
+            { label: '250', val: 250 },
+            { label: '500', val: 500 },
+            { label: '1000', val: 1000 }
+          ].map((opt) => ({
+            key: opt.val,
+            label: opt.label,
+            active: settings.historyLimit === opt.val,
+            onSelect: () => { playButtonClickSound(); patch({ historyLimit: opt.val }) }
+          }))}
+          layout={{ columns: 4, gap: 5, pill: { height: 32, fontSize: 11.5, fontWeight: 500, padding: 0 } }}
+        />
+      </div>
+    </div>
+  )
+
+  // Card 10: Auto-Delete Timer
+  const renderAutoDeleteCard = () => (
+    <div className={cardClass('autodelete-card', 'behaviour-col')}>
+      <div className="shelf-card-top">
+        <div className="setting-group-label">{t('groups.autoDelete') || 'AUTO-DELETE'}</div>
+        <div className="setting-title" id={titleId('autoDelete')}>{t('behaviour.autoDeleteTitle')}</div>
+        <div className="setting-desc">{t('behaviour.autoDeleteDesc')}</div>
+      </div>
+      <div className="shelf-card-bottom">
+        <Pills
+          labelId={titleId('autoDelete')}
+          options={[
+            { label: t('behaviour.never'), val: 0 },
+            { label: '1h', val: 1 },
+            { label: '6h', val: 6 },
+            { label: '24h', val: 24 },
+            { label: '7d', val: 168 }
+          ].map((opt) => ({
+            key: opt.val,
+            label: opt.label,
+            active: settings.autoDeleteHours === opt.val,
+            onSelect: () => { playButtonClickSound(); patch({ autoDeleteHours: opt.val }) }
+          }))}
+          layout={{ columns: 5, gap: 4, pill: { height: 32, fontSize: 11, fontWeight: 500, padding: 0 } }}
+        />
+      </div>
+    </div>
+  )
+
+  // Card 11: Application Updates (3-mode selector)
+  const renderUpdateModeCard = () => {
+    const labels: Record<UpdateMode, string> = {
+      auto: t('behaviour.updateModeAuto') || 'Automatic',
+      notify: t('behaviour.updateModeNotify') || 'Notify me',
+      off: t('behaviour.updateModeOff') || 'Off'
+    }
+    const modes = visibleUpdateModes(IS_DARWIN)
+    return (
+      <div className={cardClass('updates-card', 'behaviour-col')}>
+        <div className="shelf-card-top">
+          <div className="setting-group-label">{t('groups.updates') || 'UPDATES'}</div>
+          <div className="setting-title" id={titleId('updateMode')}>
+            {IS_DARWIN ? t('behaviour.updateCheckTitle') : t('behaviour.autoUpdatesTitle')}
+          </div>
+          <div className="setting-desc">
+            {!isStoreBuild
+              ? (shownUpdateMode === 'auto'
+                ? t('behaviour.autoUpdatesDescOn')
+                : shownUpdateMode === 'notify'
+                ? (t('behaviour.updateModeNotifyDesc') || 'Notify when updates are available without downloading')
+                : t('behaviour.autoUpdatesDescOff'))
+              : 'Managed by Microsoft Store'}
+          </div>
+        </div>
+        {!isStoreBuild && (
+          <div className="shelf-card-bottom">
+            <Pills
+              labelId={titleId('updateMode')}
+              options={modes.map((id) => ({
+                key: id,
+                label: labels[id],
+                active: shownUpdateMode === id,
+                onSelect: () => { playButtonClickSound(); patch({ updateMode: id }) }
+              }))}
+              layout={{
+                columns: modes.length,
+                gap: 5,
+                fullWidth: true,
+                verticalGrid: true,
+                pill: { height: 32, fontSize: 11, fontWeight: 500, padding: '0 4px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', justifyContent: 'center' }
+              }}
+            />
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  // Card 12: Update Status & Actions (idle/check states; hidden
+  // while the promoted front card shows an actionable state)
+  const renderHorizontalUpdateStatusCard = () => (
+    <div className="settings-shelf-card check-updates-card behaviour-col" ref={updateBannerRef}>
+      <div className="shelf-card-top">
+        <div className="setting-group-label">
+          UPDATE STATUS
+        </div>
+        <div className="setting-title" style={{ lineHeight: 1.3 }}>
+          {checkState.status === 'checking'
+            ? t('behaviour.checkingForUpdates')
+            : checkState.status === 'up-to-date'
+            ? t('behaviour.isUpToDate')
+            : checkState.status === 'error'
+            ? t('behaviour.updateCheckFailed')
+            : t('behaviour.checkForUpdates')}
+        </div>
+        <div className="setting-desc">
+          {checkState.status === 'error'
+            ? (checkState.error || t('behaviour.updateCheckFailed'))
+            : `Edge-Drop v${currentVersion}`}
+        </div>
+      </div>
+      <div className="shelf-card-bottom">
+        <button
+          type="button"
+          className="pill display-pill"
+          style={{ width: '100%', justifyContent: 'center', fontSize: 11.5, height: 32 }}
+          disabled={checkState.status === 'checking'}
+          onClick={() => {
+            playButtonClickSound()
+            handleManualCheck()
+          }}
+        >
+          {checkState.status === 'checking' ? (
+            <>
+              <span className="update-dot checking" style={{ marginRight: 6 }} />
+              <span>{t('behaviour.checkingForUpdates')}</span>
+            </>
+          ) : checkState.status === 'up-to-date' ? (
+            t('behaviour.checkAgain')
+          ) : checkState.status === 'error' ? (
+            t('behaviour.tryAgain')
+          ) : (
+            t('behaviour.checkForUpdates')
+          )}
+        </button>
+      </div>
+    </div>
+  )
+
+  // Card 1: Edge Placement
+  const renderPlacementCard = () => (
+    <div className={cardClass('placement-card', 'position-col')}>
+      <div className="shelf-card-top">
+        <div className="setting-group-label">{t('groups.placement') || 'PLACEMENT'}</div>
+        <div className="setting-title" id={titleId('placement')} style={isHorizontal ? { color: 'var(--text-primary)' } : undefined}>{t('position.edgePlacementTitle')}</div>
+        <div className="setting-desc">{t('position.edgePlacementDesc')}</div>
+      </div>
+      <div className="shelf-card-bottom">
+        <div className={isHorizontal ? 'placement-3way-wrap shelf-placement-3way' : 'placement-3way-wrap'} role="group" aria-labelledby={titleId('placement')}>
+          {([
+            { edge: 'left' as const, label: t('position.leftEdge') || 'Left Edge' },
+            { edge: 'top' as const, label: t('position.topEdge') || 'Top Edge' },
+            { edge: 'right' as const, label: t('position.rightEdge') || 'Right Edge' }
+          ]).map(({ edge, label }) => {
+            const active = edgeTransition?.active ? edgeTransition.to === edge : settings.stickPosition === edge
+            return (
+              <button
+                key={edge}
+                type="button"
+                className={`pill ${active ? 'active' : ''} ${edgeTransition?.active && edgeTransition.to === edge ? 'transitioning' : ''}`}
+                aria-pressed={active}
+                disabled={edgeTransition?.active}
+                onClick={() => {
+                  void startEdgeTransition(edge)
+                }}
+              >
+                {label}
+              </button>
+            )
+          })}
+        </div>
+      </div>
+    </div>
+  )
+
+  // Card 2: Position Range Slider
+  const renderPositionSliderCard = () => {
+    const isHorizontalDock = settings.stickPosition === 'top'
+    const offsetVal = isHorizontalDock ? (settings.horizontalOffset ?? 0.5) : (settings.verticalOffset ?? 0.5)
+    const sliderTitle = isHorizontalDock ? (t('position.horizontalPositionTitle') || 'Horizontal Position') : t('position.verticalPositionTitle')
+    const sliderDesc = isHorizontalDock ? (t('position.horizontalPositionDesc') || 'Adjust horizontal alignment along screen edge') : t('position.verticalPositionDesc')
+
+    return (
+      <div className="setting-card">
+        <div className="shelf-card-top">
+          <div className="setting-group-label">{t('groups.alignment') || 'ALIGNMENT'}</div>
+          <div className="setting-slider-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+            <div>
+              <div className="setting-title" id={titleId('offset')}>{sliderTitle}</div>
+              <div className="setting-desc">{sliderDesc}</div>
+            </div>
+            <div className="setting-slider-val">
+              {`${Math.round(offsetVal * 100)}%`}
+            </div>
+          </div>
+        </div>
+
+        <div className="shelf-card-bottom">
+          <div className="setting-slider-wrap">
+            <WakeSlider
+              ariaLabel={sliderTitle}
+              ariaLabelledBy={titleId('offset')}
+              min={0}
+              max={1}
+              step={0.002}
+              bars={28}
+              height={28}
+              restHeight={8}
+              gap={3}
+              value={offsetVal}
+              onStart={() => {
+                void window.edge.setInteractive(true)
+                setSliderActive(true)
+              }}
+              onRelease={(val) => {
+                setSliderActive(false)
+                if (isHorizontalDock) {
+                  patch({ horizontalOffset: val })
+                } else {
+                  handleSliderRelease(val)
+                }
+              }}
+              onChange={(raw) => {
+                if (isHorizontalDock) {
+                  patch({ horizontalOffset: raw })
+                } else {
+                  handleSliderInput(raw)
+                }
+              }}
+            />
+
+            <div className="setting-slider-labels">
+              {[
+                { label: isHorizontalDock ? 'Left' : '0%', val: 0 },
+                { label: 'Center', val: 0.5 },
+                { label: isHorizontalDock ? 'Right' : '100%', val: 1.0 }
+              ].map((pos) => {
+                const active = Math.abs(offsetVal - pos.val) < 0.04
+                return (
+                  <button
+                    key={pos.val}
+                    type="button"
+                    className={`slider-label-btn${active ? ' active' : ''}`}
+                    onClick={() => {
+                      if (isHorizontalDock) {
+                        patch({ horizontalOffset: pos.val })
+                      } else {
+                        handleSliderRelease(pos.val)
+                      }
+                    }}
+                  >
+                    {pos.label}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // Card 3: Target Display
+  const renderDisplayCard = () => {
+    const currentDisplay = displays.find((disp) => disp.isCurrent)
+    const activeDisplayId = currentDisplay
+      ? currentDisplay.id
+      : (settings.stickDisplayId ?? displays.find((disp) => disp.isPrimary)?.id ?? displays[0]?.id)
+    const selectDisplay = (id: DisplayInfo['id']) => {
+      playButtonClickSound()
+      patch({ stickDisplayId: id })
+      useStore.getState().notifyPositionChanged()
+    }
+    return (
+      <div className={cardClass('display-card', 'position-col')}>
+        <div className="shelf-card-top">
+          <div className="setting-group-label">{t('groups.displayMonitor') || 'DISPLAY MONITOR'}</div>
+          <div className="setting-title" id={titleId('display')}>{t('position.displayTitle')}</div>
+          <div className="setting-desc">{t('position.displayDesc')}</div>
+        </div>
+        <div className="shelf-card-bottom">
+          {isHorizontal ? (
+            displays.length === 0 ? (
+              <div className="pill disabled">{t('position.loadingDisplays')}</div>
+            ) : (
+              displays.map((d) => {
+                const isActive = activeDisplayId === d.id
+                const displayName = d.isPrimary ? t('position.primaryDisplay') : d.name
+                return (
+                  <button
+                    key={d.id}
+                    type="button"
+                    className={`pill display-pill ${isActive ? 'active' : ''}`}
+                    aria-pressed={isActive}
+                    style={{ width: '100%', justifyContent: 'space-between', padding: '6px 14px', fontSize: 11.5, height: 32, flexShrink: 0 }}
+                    onClick={() => selectDisplay(d.id)}
+                  >
+                    <span className="pill-name" style={{ fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', marginRight: 8 }}>{displayName}</span>
+                    <span className="pill-res" style={{ opacity: 0.75, fontSize: 11, flexShrink: 0 }}>{d.resolution}</span>
+                  </button>
+                )
+              })
+            )
+          ) : (
+            <div className="setting-pills" role="group" aria-labelledby={titleId('display')}>
+              {displays.length === 0 && <div className="pill disabled">{t('position.loadingDisplays')}</div>}
+              {displays.map((d) => {
+                const isActive = activeDisplayId === d.id
+                const displayName = d.isPrimary ? t('position.primaryDisplay') : d.name
+                return (
+                  <button
+                    key={d.id}
+                    type="button"
+                    className={`pill display-pill ${isActive ? 'active' : ''}`}
+                    aria-pressed={isActive}
+                    onClick={() => selectDisplay(d.id)}
+                  >
+                    <div className="pill-name">{displayName}</div>
+                    <div className="pill-res">{d.resolution}</div>
+                  </button>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  // Card 4: Location Hint
+  const renderLocationHintCard = () => (
+    <ToggleCard
+      id="edgeLocationHint"
+      kind="beacon-card"
+      col="position-col"
+      group={t('groups.locationHint') || 'LOCATION HINT'}
+      title={t('position.edgeLocationHintTitle')}
+      desc={isHorizontal
+        ? (t('groups.edgeHintPulseDesc') || 'Beacon pulse along edge to hint dock position')
+        : t('position.edgeLocationHintDesc')}
+      checked={settings.showEdgeLocationHint ?? false}
+      onChange={(v) => patch({ showEdgeLocationHint: v })}
+    />
+  )
+
+  const renderMacPositionHintCard = () => (
+    <div className={cardClass('position-hint-card', 'position-col')}>
+      <div className="shelf-card-top">
+        <div className="setting-desc">{t('position.macMoveHint')}</div>
+        <div className="setting-desc">{t('position.macResizeHint')}</div>
+      </div>
+    </div>
+  )
+
+  // Card 5: Trigger Alignment
+  const renderTriggerAlignmentCard = () => (
+    <div className="setting-card">
+      <div className="shelf-card-top">
+        <div className="setting-group-label">{t('groups.triggerPosition') || 'TRIGGER POSITION'}</div>
+        <div className="setting-title" id={titleId('triggerAlignment')}>{t('position.edgeTriggerPositionTitle')}</div>
+        <div className="setting-desc">{t('position.edgeTriggerPositionDesc')}</div>
+      </div>
+      <div className="shelf-card-bottom">
+        <Pills
+          labelId={titleId('triggerAlignment')}
+          options={[
+            { label: isHorizontalEdge(settings.stickPosition) ? (t('position.left') || 'Left') : t('position.top'), val: 'top' as const },
+            { label: t('position.center'), val: 'center' as const },
+            { label: isHorizontalEdge(settings.stickPosition) ? (t('position.right') || 'Right') : t('position.bottom'), val: 'bottom' as const }
+          ].map((opt) => ({
+            key: opt.val,
+            label: opt.label,
+            active: (settings.triggerAlignment || 'center') === opt.val,
+            onSelect: () => {
+              playButtonClickSound()
+              patch({ triggerAlignment: opt.val })
+              useStore.getState().notifyPositionChanged()
+            }
+          }))}
+          layout={{ columns: 3, gap: 5, pill: {} }}
+        />
+      </div>
+    </div>
+  )
+
+  // Card 6: Hover Area Size
+  const renderHoverAreaCard = () => (
+    <div className={cardClass('trigger-bar-card', 'position-col')}>
+      <div className="shelf-card-top">
+        <div className="setting-group-label">{t('groups.hoverZoneLength') || 'HOVER ZONE LENGTH'}</div>
+        <div className="setting-title" id={titleId('hoverArea')}>{t('position.hoverAreaSizeTitle')}</div>
+        <div className="setting-desc">{t('position.hoverAreaSizeDesc')}</div>
+      </div>
+      <div className="shelf-card-bottom">
+        <Pills
+          labelId={titleId('hoverArea')}
+          options={[
+            { label: t('appearance.small'), val: 0.25 },
+            { label: t('position.medium'), val: 0.4 },
+            { label: t('appearance.large'), val: 0.6 }
+          ].map((opt) => ({
+            key: opt.val,
+            label: opt.label,
+            active: Math.abs(settings.hotZoneHeight - opt.val) < 0.08,
+            onSelect: () => {
+              playButtonClickSound()
+              patch({ hotZoneHeight: opt.val })
+            }
+          }))}
+          layout={{ columns: 3, gap: 5, fullWidth: true, pill: { height: 32, fontSize: 11.5, fontWeight: 500, padding: 0 } }}
+        />
+      </div>
+    </div>
+  )
+
+  // Card 7: Edge Trigger Thickness
+  const renderThicknessCard = () => (
+    <div className={cardClass('trigger-thickness-card', 'position-col')}>
+      <div className="shelf-card-top">
+        <div className="setting-group-label">{t('groups.triggerThickness') || 'TRIGGER THICKNESS'}</div>
+        <div className="setting-slider-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+          <div>
+            <div className="setting-title" id={titleId('thickness')}>{t('position.edgeTriggerThicknessTitle')}</div>
+            <div className="setting-desc">{t('position.edgeTriggerThicknessDesc')}</div>
+          </div>
+          <div
+            className="setting-slider-val"
+            style={isHorizontal ? { flexShrink: 0, padding: '2px 8px', fontSize: 11, fontWeight: 600, borderRadius: 6 } : undefined}
+          >
+            {`${settings.hotZoneWidth ?? 3}px`}
+          </div>
+        </div>
+      </div>
+      <div className="shelf-card-bottom">
+        <div className="setting-slider-wrap" style={isHorizontal ? { gap: 4, padding: '2px 0' } : undefined}>
+          <WakeSlider
+            ariaLabel={t('position.edgeTriggerThicknessTitle')}
+            ariaLabelledBy={titleId('thickness')}
+            min={1}
+            max={7}
+            step={1}
+            bars={28}
+            height={28}
+            restHeight={8}
+            gap={3}
+            value={settings.hotZoneWidth ?? 3}
+            onStart={() => {
+              void window.edge.setInteractive(true)
+              setSliderActive(true)
+            }}
+            onRelease={(val) => {
+              handleThicknessRelease(val)
+            }}
+            onChange={(val) => {
+              handleThicknessInput(val)
+            }}
+          />
+          <div className="setting-slider-labels" style={isHorizontal ? { marginTop: 2 } : undefined}>
+            {[
+              { label: 'Min', val: 1 },
+              { label: 'Mid', val: 4 },
+              { label: 'Max', val: 7 }
+            ].map((preset) => {
+              const currentPx = settings.hotZoneWidth ?? 3
+              const active = currentPx === preset.val
+              return (
+                <button
+                  key={preset.val}
+                  type="button"
+                  className={`slider-label-btn${active ? ' active' : ''}`}
+                  style={isHorizontal ? { fontSize: 10, padding: '2px 8px' } : undefined}
+                  onClick={() => {
+                    if (currentPx !== preset.val) {
+                      handleThicknessRelease(preset.val)
+                    }
+                  }}
+                >
+                  {preset.label}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+
+  // Card 8: Panel Height
+  const renderPanelHeightCard = () => (
+    <div className="setting-card">
+      <div className="shelf-card-top">
+        <div className="setting-group-label">{t('groups.panelHeight') || 'PANEL HEIGHT'}</div>
+        <div className="setting-title" id={titleId('panelHeight')}>{t('position.panelHeightTitle')}</div>
+        <div className="setting-desc">{t('position.panelHeightDesc')}</div>
+      </div>
+      <div className="shelf-card-bottom">
+        <Pills
+          labelId={titleId('panelHeight')}
+          options={[
+            { label: t('appearance.small'), val: 0.5 },
+            { label: t('position.medium'), val: 0.65 },
+            { label: t('appearance.large'), val: 0.8 }
+          ].map((opt) => ({
+            key: opt.val,
+            label: opt.label,
+            active: Math.abs((settings.panelHeight || 0.6) - opt.val) < 0.08,
+            onSelect: () => {
+              playButtonClickSound()
+              patch({ panelHeight: opt.val })
+            }
+          }))}
+          layout={{ columns: 3, gap: 5, pill: {} }}
+        />
+      </div>
+    </div>
+  )
+
+  const renderPanelWidthCard = () => {
+    const width = resolvePanelWidth(settings)
+    return (
+      <div className="setting-card">
+        <div className="shelf-card-top">
+          <div className="setting-slider-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+            <div>
+              <div className="setting-title" id={titleId('panelWidth')}>{t('behaviour.panelWidthTitle')}</div>
+              <div className="setting-desc">{t('behaviour.panelWidthDesc')}</div>
+            </div>
+            <div className="setting-slider-val">
+              {`${width}px`}
+            </div>
+          </div>
+        </div>
+        <div className="shelf-card-bottom">
+          <div className="setting-slider-wrap">
+            <WakeSlider
+              ariaLabel={t('behaviour.panelWidthTitle')}
+              ariaLabelledBy={titleId('panelWidth')}
+              min={PANEL_WIDTH_MIN}
+              max={PANEL_WIDTH_MAX}
+              step={PANEL_WIDTH_STEP}
+              bars={28}
+              height={28}
+              restHeight={8}
+              gap={3}
+              value={width}
+              onStart={() => {
+                void window.edge.setInteractive(true)
+                setSliderActive(true)
+              }}
+              onRelease={(val) => {
+                handlePanelWidthRelease(val)
+              }}
+              onChange={(val) => {
+                handlePanelWidthInput(val)
+              }}
+            />
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // Card 1: Copy Indicator Toggle
+  const renderCopyIndicatorCard = () => (
+    <ToggleCard
+      id="copyIndicator"
+      kind="beacon-toggle-card"
+      col="appearance-col"
+      group={t('groups.copyBeacon') || 'COPY BEACON'}
+      title={t('appearance.copyIndicatorTitle')}
+      desc={t('appearance.copyIndicatorDesc')}
+      checked={settings.showCopyIndicator ?? true}
+      onChange={(v) => patch({ showCopyIndicator: v })}
+    />
+  )
+
+  const renderInlineIndicatorOption = (
+    style: NonNullable<SettingsShape['copyIndicatorStyle']>,
+    active: boolean,
+    icon: ReactNode,
+    label: string
+  ) => (
+    <div
+      onClick={() => {
+        playButtonClickSound()
+        patch({ copyIndicatorStyle: style })
+      }}
+      style={{
+        background: active ? 'rgba(255, 255, 255, 0.12)' : 'rgba(255, 255, 255, 0.04)',
+        border: active ? '1px solid rgba(255, 255, 255, 0.3)' : '1px solid rgba(255, 255, 255, 0.06)',
+        borderRadius: 10,
+        padding: '12px 8px',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        cursor: 'pointer',
+        gap: 8,
+        transition: 'all 0.2s ease'
+      }}
+    >
+      <div style={{ height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        {icon}
+      </div>
+      <div style={{ fontSize: 12, fontWeight: 600, color: '#ffffff' }}>{label}</div>
+    </div>
+  )
+
+  // Card 2: Visual Copy Beacon Style
+  const renderIndicatorStyleCard = () => (
+    <div className={cardClass('copy-card', 'appearance-col')}>
+      <div className="shelf-card-top">
+        <div className="setting-group-label">{t('groups.beaconStyle') || 'BEACON STYLE'}</div>
+      </div>
+      <div className="shelf-card-inline">
+        <div className="shelf-card-inline-text">
+          <div className="setting-title">{t('appearance.indicatorStyleTitle')}</div>
+          <div className="setting-desc">{t('appearance.indicatorStyleDesc')}</div>
+        </div>
+        <div className="shelf-card-inline-action">
+          <button
+            ref={indicatorBtnRef}
+            type="button"
+            className={`icon-btn style-preview-toggle-btn ${isFlyoutActive ? 'active' : ''}`}
+            title={isFlyoutActive ? t('appearance.closeStyleSelector') : t('appearance.openStyleSelector')}
+            aria-expanded={isFlyoutActive}
+            onClick={(e) => {
+              playButtonClickSound()
+              handleToggleFlyout(e.currentTarget)
+            }}
+          >
+            {isFlyoutActive ? <CloseIcon /> : <ChevronRightIcon />}
+          </button>
+        </div>
+      </div>
+
+      {!isHorizontal && isTutorial && localInlineOpen && (
+        <motion.div
+          initial={{ opacity: 0, height: 0 }}
+          animate={{ opacity: 1, height: 'auto' }}
+          exit={{ opacity: 0, height: 0 }}
+          transition={{ duration: 0.22, ease: 'easeOut' }}
+          style={{ overflow: 'hidden', marginTop: 12, marginBottom: 8 }}
+        >
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(2, 1fr)',
+            gap: 10,
+            padding: 12,
+            background: '#09090b',
+            borderRadius: 12,
+            border: '1px solid rgba(255, 255, 255, 0.08)'
+          }}>
+            {/* Logo Card */}
+            {renderInlineIndicatorOption('logo', (settings.copyIndicatorStyle || 'logo') === 'logo', <LogoIndicatorIcon fillColor="#ffffff" size={30} />, t('appearance.logoStyle'))}
+
+            {/* Tick Card */}
+            {renderInlineIndicatorOption('check', settings.copyIndicatorStyle === 'check', <TickIndicatorIcon fillColor="#ffffff" size={30} />, t('appearance.tickStyle'))}
+
+            {/* Copy Card */}
+            {renderInlineIndicatorOption('copy', settings.copyIndicatorStyle === 'copy', <CopyIndicatorIcon fillColor="#ffffff" size={30} />, t('appearance.copyStyle'))}
+
+            {/* Sparkle Card */}
+            {renderInlineIndicatorOption('sparkle', settings.copyIndicatorStyle === 'sparkle', <SparkleIndicatorIcon fillColor="#ffffff" size={30} />, t('appearance.sparkleStyle'))}
+          </div>
+        </motion.div>
+      )}
+    </div>
+  )
+
+  // Card 3: Text Size
+  const renderTextSizeCard = () => (
+    <div className="setting-card">
+      <div className="shelf-card-top">
+        <div className="setting-group-label">{t('groups.textSize') || 'TEXT SIZE'}</div>
+        <div className="setting-title" id={titleId('textSize')}>{t('appearance.textSizeTitle')}</div>
+        <div className="setting-desc">{t('appearance.textSizeDesc')}</div>
+      </div>
+      <div className="shelf-card-bottom">
+        <Pills
+          labelId={titleId('textSize')}
+          options={[
+            { label: t('appearance.small'), val: 0.85 },
+            { label: t('appearance.normal'), val: 1.0 },
+            { label: t('appearance.large'), val: 1.15 }
+          ].map((opt) => ({
+            key: opt.val,
+            label: opt.label,
+            active: Math.abs((settings.fontSizeScale ?? 1.0) - opt.val) < 0.05,
+            onSelect: () => {
+              playButtonClickSound()
+              patch({ fontSizeScale: opt.val })
+            }
+          }))}
+          layout={{ columns: 3, gap: 5, pill: {} }}
+        />
+      </div>
+    </div>
+  )
+
+  // Card 4: Audio & Feedback
+  const renderSoundCard = () => (
+    <ToggleCard
+      id="soundEffects"
+      kind="audio-card"
+      col="appearance-col"
+      group={t('groups.audioFeedback') || 'AUDIO FEEDBACK'}
+      title={t('behaviour.soundEffectsTitle')}
+      desc={t('behaviour.soundEffectsDesc')}
+      checked={settings.soundEffects ?? true}
+      onChange={(v) => {
+        if (v) playToggleSound(true)
+        patch({ soundEffects: v })
+      }}
+    />
+  )
+
+  const renderReduceMotionCard = () => (
+    <ToggleCard
+      id="reduceMotion"
+      kind="motion-card"
+      col="appearance-col"
+      group={t('onboarding.accessibilityTitle')}
+      title={t('behaviour.reduceMotionTitle')}
+      desc={IS_DARWIN ? (
+        <>
+          {t('behaviour.reduceMotionDesc')}
+          <span className="setting-desc-note">{t('behaviour.reduceMotionSystemNote')}</span>
+        </>
+      ) : (
+        t('behaviour.reduceMotionDesc')
+      )}
+      checked={!!settings.reduceMotion}
+      onChange={(v) => patch({ reduceMotion: v })}
+    />
+  )
+
+  const renderBehaviourCards = () => (
+    <>
+      {/* ── SUB-GROUP 1: General & Startup ───────────────── */}
+      <Divider label={t('tabs.generalStartup') || 'GENERAL & STARTUP'} />
+      {renderLanguageCard()}
+      {renderLaunchAtLoginCard()}
+      {IS_DARWIN && <AccessibilityCard {...accessibility} />}
+      {renderIncognitoCard()}
+      {IS_DARWIN && <CaptureScreenshotsCard />}
+      {IS_DARWIN && <HideFromCaptureCard />}
+      {IS_DARWIN && <IgnoreRemoteCard />}
+      {IS_DARWIN && <IgnoredAppsCard {...ignoredApps} />}
+
+      {/* ── SUB-GROUP 2: Shortcuts & Hover ──────────────── */}
+      <Divider label={t('tabs.activationShortcuts') || 'SHORTCUTS & HOVER'} />
+      {renderHoverActivationCard()}
+      <ToggleHotkeyCard />
+      {IS_DARWIN && <PasteQueueHotkeyCard />}
+      {renderFullscreenCard()}
+
+      {/* ── SUB-GROUP 3: Clipboard Rules ─────────────────── */}
+      <Divider label={t('tabs.clipboardRules') || 'CLIPBOARD RULES'} />
+      {renderMovePastedCard()}
+      {renderClearUnpinnedCard()}
+      {IS_DARWIN && <PastePlainCard />}
+      {IS_DARWIN && <RecognizeTextCard />}
+
+      {/* ── SUB-GROUP 4: Storage & Retention ─────────────── */}
+      <Divider label={t('tabs.storageRetention') || 'STORAGE & RETENTION'} />
+      {renderCapacityCard()}
+      {renderAutoDeleteCard()}
+      {IS_DARWIN && <BackupCard />}
+    </>
+  )
+
+  const renderMotionCards = () => (
+    <>
+      <Divider label={t('onboarding.accessibilityTitle')} />
+      {renderReduceMotionCard()}
+    </>
+  )
+
   // ── Horizontal Layout (Top / Bottom Dock Position) ────────────────────────
   if (isHorizontal) {
     const handleShelfWheel = (e: React.WheelEvent<HTMLDivElement>) => {
+      if (IS_DARWIN && e.deltaX !== 0) return
       if (e.deltaY !== 0) {
         e.currentTarget.scrollLeft += e.deltaY
       }
@@ -802,7 +1656,7 @@ export function Settings({
             className="shelf-kofi-btn"
             onClick={() => {
               playButtonClickSound()
-              window.open('https://www.edgedrop.app/supportedgedrop', '_blank')
+              window.open(SUPPORT_URL, '_blank')
             }}
           >
             <svg width="13" height="13" viewBox="0 0 24 24" fill="#ff4757" stroke="none" style={{ flexShrink: 0 }}>
@@ -844,7 +1698,7 @@ export function Settings({
       <div className="settings-shelf-card about-card">
         <div className="shelf-card-top">
           <div className="setting-group-label">{t('groups.aboutEdgeDrop') || 'ABOUT EDGE-DROP'}</div>
-          <div className="setting-title">Edge-Drop v{currentVersion || '0.3.2'}</div>
+          <div className="setting-title">{currentVersion ? `Edge-Drop v${currentVersion}` : 'Edge-Drop'}</div>
           <div className="setting-desc">{t('footer.feedbackDesc')}</div>
         </div>
         <div className="shelf-card-bottom">
@@ -889,6 +1743,19 @@ export function Settings({
       </div>
     )
 
+    const renderHorizontalFooter = () => (
+      <>
+        {/* ── SUB-GROUP 6 DIVIDER: Community & Support ── */}
+        <Divider label={t('footer.communityAndSupport') || 'COMMUNITY & SUPPORT'} />
+
+        {/* Card 13: Community & Feedback */}
+        {renderHorizontalCommunityCard()}
+
+        {/* Card 14: About & Quit */}
+        {renderHorizontalAboutCard()}
+      </>
+    )
+
     return (
       <div className="settings-horizontal-shelf">
         <div
@@ -900,409 +1767,15 @@ export function Settings({
           {/* ── TAB 1: BEHAVIOUR ── */}
           {horizontalTab === 'behaviour' && (
             <>
-              {renderPromotedHorizontalUpdateCard()}
-
-              {/* ── SUB-GROUP 1 DIVIDER: General & Startup ── */}
-              <div className="shelf-section-divider">
-                <span className="shelf-section-divider-text">{t('tabs.generalStartup') || 'GENERAL & STARTUP'}</span>
-              </div>
-
-              {/* Card 1: Language */}
-              <div className="settings-shelf-card shortcuts-card behaviour-col">
-                <div className="shelf-card-top">
-                  <div className="setting-group-label">{t('groups.general') || 'GENERAL'}</div>
-                  <div className="setting-title">{t('behaviour.languageTitle')}</div>
-                  <div className="setting-desc">{t('groups.languageSelectDesc') || 'Select application display language'}</div>
-                </div>
-                <div className="shelf-card-bottom">
-                  <button
-                    type="button"
-                    className={`language-shelf-btn language-toggle-btn ${languageFlyoutOpen ? 'flyout-open' : ''}`}
-                    onClick={(e) => {
-                      playButtonClickSound()
-                      const rect = e.currentTarget.getBoundingClientRect()
-                      setLanguageFlyoutOpen(!languageFlyoutOpen, rect)
-                    }}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 7, minWidth: 0, overflow: 'hidden' }}>
-                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.65, flexShrink: 0 }}>
-                        <circle cx="12" cy="12" r="10"/>
-                        <line x1="2" y1="12" x2="22" y2="12"/>
-                        <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
-                      </svg>
-                      <span style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {getLangLabel(selectedLang)}
-                      </span>
-                    </div>
-                    <motion.span
-                      animate={{ rotate: languageFlyoutOpen ? 180 : 0 }}
-                      transition={{ duration: 0.2 }}
-                      style={{ display: 'flex', alignItems: 'center', opacity: 0.65, flexShrink: 0, marginLeft: 6 }}
-                    >
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="m6 9 6 6 6-6"/>
-                      </svg>
-                    </motion.span>
-                  </button>
-                </div>
-              </div>
-
-              {/* Card 2: Launch at Login */}
-              <div className="settings-shelf-card system-card behaviour-col">
-                <div className="shelf-card-top">
-                  <div className="setting-group-label">{t('groups.startup') || 'STARTUP'}</div>
-                </div>
-                <div className="shelf-card-inline">
-                  <div className="shelf-card-inline-text">
-                    <div className="setting-title">{t('behaviour.launchAtLoginTitle')}</div>
-                    <div className="setting-desc">{t('behaviour.launchAtLoginDesc')}</div>
-                  </div>
-                  <div className="shelf-card-inline-action">
-                    <Toggle
-                      checked={settings.launchAtLogin}
-                      onChange={(v) => {
-                        useStore.setState((s) => ({
-                          settings: { ...s.settings, launchAtLogin: v }
-                        }))
-                        void patch({ launchAtLogin: v })
-                      }}
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Card 3: Incognito Mode */}
-              <div className="settings-shelf-card incognito-card behaviour-col">
-                <div className="shelf-card-top">
-                  <div className="setting-group-label">{t('groups.privacy') || 'PRIVACY'}</div>
-                </div>
-                <div className="shelf-card-inline">
-                  <div className="shelf-card-inline-text">
-                    <div className="setting-title">{t('behaviour.incognitoTitle')}</div>
-                    <div className="setting-desc">{t('behaviour.incognitoDesc')}</div>
-                  </div>
-                  <div className="shelf-card-inline-action">
-                    <Toggle
-                      checked={settings.incognito}
-                      onChange={(v) => patch({ incognito: v })}
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {IS_MAC && (
-                <div className="settings-shelf-card incognito-card behaviour-col">
-                  <div className="shelf-card-top">
-                    <div className="setting-group-label">{t('groups.privacy') || 'PRIVACY'}</div>
-                  </div>
-                  <div className="shelf-card-inline">
-                    <div className="shelf-card-inline-text">
-                      <div className="setting-title">{t('behaviour.captureScreenshotsTitle')}</div>
-                      <div className="setting-desc">{t('behaviour.captureScreenshotsDesc')}</div>
-                    </div>
-                    <div className="shelf-card-inline-action">
-                      <Toggle
-                        checked={settings.captureScreenshots !== false}
-                        onChange={(v) => patch({ captureScreenshots: v })}
-                      />
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* ── SUB-GROUP 2 DIVIDER: Shortcuts & Hover ── */}
-              <div className="shelf-section-divider">
-                <span className="shelf-section-divider-text">{t('tabs.activationShortcuts') || 'SHORTCUTS & HOVER'}</span>
-              </div>
-
-              {/* Card 4: Hover Activation */}
-              <div className="settings-shelf-card hover-card behaviour-col">
-                <div className="shelf-card-top">
-                  <div className="setting-group-label">{t('groups.hoverActivation') || 'HOVER ACTIVATION'}</div>
-                </div>
-                <div className="shelf-card-inline">
-                  <div className="shelf-card-inline-text">
-                    <div className="setting-title">{t('behaviour.hoverActivationTitle')}</div>
-                    <div className="setting-desc">
-                      {(settings.hoverActivation ?? true)
-                        ? t('behaviour.hoverActivationDescOn')
-                        : t('behaviour.hoverActivationDescOff', { shortcut: settings.toggleHotkey || 'Alt+C' })}
-                    </div>
-                  </div>
-                  <div className="shelf-card-inline-action">
-                    <Toggle
-                      checked={settings.hoverActivation ?? true}
-                      onChange={(v) => {
-                        if (!v) {
-                          patch({ hoverActivation: false, suppressInFullscreen: false })
-                        } else {
-                          patch({ hoverActivation: true, suppressInFullscreen: true })
-                        }
-                      }}
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Card 5: Global Toggle Shortcut */}
-              <div className="settings-shelf-card hotkey-card behaviour-col">
-                <div className="shelf-card-top">
-                  <div className="setting-group-label">{t('groups.keyboardShortcut') || 'KEYBOARD SHORTCUT'}</div>
-                  <div className="setting-title">{t('behaviour.toggleHotkeyTitle')}</div>
-                  <div className="setting-desc">{t('groups.toggleHotkeyPressDesc') || 'Press anywhere to toggle Edge-Drop'}</div>
-                </div>
-                <div className="shelf-card-bottom">
-                  <HotkeyRecorder
-                    hotkey={settings.toggleHotkey || 'Alt+C'}
-                    onChange={(nextHotkey) => {
-                      patch({ toggleHotkey: nextHotkey })
-                      pushToast({
-                        id: Date.now().toString(),
-                        message: t('toast.shortcutUpdated', { shortcut: nextHotkey }),
-                        tone: 'info'
-                      })
-                    }}
-                  />
-                </div>
-              </div>
-
-              {/* Card 6: Fullscreen Protection */}
-              <div className="settings-shelf-card fullscreen-card behaviour-col">
-                <div className="shelf-card-top">
-                  <div className="setting-group-label">{t('groups.fullscreenProtection') || 'FULLSCREEN PROTECTION'}</div>
-                </div>
-                <div className="shelf-card-inline" style={{ opacity: (settings.hoverActivation ?? true) ? 1 : 0.45 }}>
-                  <div className="shelf-card-inline-text">
-                    <div className="setting-title">{t('behaviour.fullscreenProtectionTitle')}</div>
-                    <div className="setting-desc">
-                      {(settings.hoverActivation ?? true)
-                        ? t('behaviour.fullscreenProtectionDesc')
-                        : t('behaviour.disabledHoverOff')}
-                    </div>
-                  </div>
-                  <div className="shelf-card-inline-action">
-                    <Toggle
-                      checked={(settings.hoverActivation ?? true) ? settings.suppressInFullscreen : false}
-                      onChange={(v) => (settings.hoverActivation ?? true) && patch({ suppressInFullscreen: v })}
-                      disabled={!(settings.hoverActivation ?? true)}
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* ── SUB-GROUP 3 DIVIDER: Clipboard Rules ── */}
-              <div className="shelf-section-divider">
-                <span className="shelf-section-divider-text">{t('tabs.clipboardRules') || 'CLIPBOARD RULES'}</span>
-              </div>
-
-              {/* Card 7: Move Pasted to Top */}
-              <div className="settings-shelf-card order-card behaviour-col">
-                <div className="shelf-card-top">
-                  <div className="setting-group-label">{t('groups.clipboardBehaviour') || 'CLIPBOARD BEHAVIOUR'}</div>
-                </div>
-                <div className="shelf-card-inline">
-                  <div className="shelf-card-inline-text">
-                    <div className="setting-title">{t('behaviour.movePastedToTopTitle')}</div>
-                    <div className="setting-desc">{t('behaviour.movePastedToTopDesc')}</div>
-                  </div>
-                  <div className="shelf-card-inline-action">
-                    <Toggle
-                      checked={settings.movePastedToTop ?? true}
-                      onChange={(v) => patch({ movePastedToTop: v })}
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Card 8: Clear Unpinned on Restart */}
-              <div className="settings-shelf-card rules-card behaviour-col">
-                <div className="shelf-card-top">
-                  <div className="setting-group-label">{t('groups.restartCleanup') || 'RESTART CLEANUP'}</div>
-                </div>
-                <div className="shelf-card-inline">
-                  <div className="shelf-card-inline-text">
-                    <div className="setting-title">{t('behaviour.clearUnpinnedTitle')}</div>
-                    <div className="setting-desc">{t('behaviour.clearUnpinnedDesc')}</div>
-                  </div>
-                  <div className="shelf-card-inline-action">
-                    <Toggle
-                      checked={settings.clearUnpinnedOnRestart}
-                      onChange={(v) => patch({ clearUnpinnedOnRestart: v })}
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* ── SUB-GROUP 4 DIVIDER: Storage & Retention ── */}
-              <div className="shelf-section-divider">
-                <span className="shelf-section-divider-text">{t('tabs.storageRetention') || 'STORAGE & RETENTION'}</span>
-              </div>
-
-              {/* Card 9: History Capacity */}
-              <div className="settings-shelf-card storage-card behaviour-col">
-                <div className="shelf-card-top">
-                  <div className="setting-group-label">{t('groups.storageCapacity') || 'STORAGE CAPACITY'}</div>
-                  <div className="setting-title">{t('behaviour.capacityTitle')}</div>
-                  <div className="setting-desc">{t('behaviour.capacityDesc')}</div>
-                </div>
-                <div className="shelf-card-bottom">
-                  <div className="setting-pills" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 5 }}>
-                    {[
-                      { label: '100', val: 100 },
-                      { label: '250', val: 250 },
-                      { label: '500', val: 500 },
-                      { label: '1000', val: 1000 }
-                    ].map((opt) => (
-                      <button
-                        key={opt.val}
-                        type="button"
-                        className={`pill ${settings.historyLimit === opt.val ? 'active' : ''}`}
-                        style={{ height: 32, fontSize: 11.5, fontWeight: 500, padding: 0 }}
-                        onClick={() => { playButtonClickSound(); patch({ historyLimit: opt.val }) }}
-                      >
-                        {opt.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-
-              {/* Card 10: Auto-Delete Timer */}
-              <div className="settings-shelf-card autodelete-card behaviour-col">
-                <div className="shelf-card-top">
-                  <div className="setting-group-label">{t('groups.autoDelete') || 'AUTO-DELETE'}</div>
-                  <div className="setting-title">{t('behaviour.autoDeleteTitle')}</div>
-                  <div className="setting-desc">{t('behaviour.autoDeleteDesc')}</div>
-                </div>
-                <div className="shelf-card-bottom">
-                  <div className="setting-pills" style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 4 }}>
-                    {[
-                      { label: t('behaviour.never'), val: 0 },
-                      { label: '1h', val: 1 },
-                      { label: '6h', val: 6 },
-                      { label: '24h', val: 24 },
-                      { label: '7d', val: 168 }
-                    ].map((opt) => (
-                      <button
-                        key={opt.val}
-                        type="button"
-                        className={`pill ${settings.autoDeleteHours === opt.val ? 'active' : ''}`}
-                        style={{ height: 32, fontSize: 11, fontWeight: 500, padding: 0 }}
-                        onClick={() => { playButtonClickSound(); patch({ autoDeleteHours: opt.val }) }}
-                      >
-                        {opt.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
+              {renderPromotedUpdateCard()}
+              {renderBehaviourCards()}
 
               {/* ── SUB-GROUP 5 DIVIDER: Updates ── */}
-              {!isStoreBuild && (
-                <div className="shelf-section-divider">
-                  <span className="shelf-section-divider-text">{t('tabs.updates') || 'UPDATES'}</span>
-                </div>
-              )}
+              {!isStoreBuild && <Divider label={t('tabs.updates') || 'UPDATES'} />}
+              {renderUpdateModeCard()}
+              {!isStoreBuild && !hasPromotedTopUpdate && renderHorizontalUpdateStatusCard()}
 
-              {/* Card 11: Application Updates (3-mode selector) */}
-              <div className="settings-shelf-card updates-card behaviour-col">
-                <div className="shelf-card-top">
-                  <div className="setting-group-label">{t('groups.updates') || 'UPDATES'}</div>
-                  <div className="setting-title">{t('behaviour.autoUpdatesTitle')}</div>
-                  <div className="setting-desc">
-                    {!isStoreBuild
-                      ? (updateMode === 'auto'
-                        ? t('behaviour.autoUpdatesDescOn')
-                        : updateMode === 'notify'
-                        ? (t('behaviour.updateModeNotifyDesc') || 'Notify when updates are available without downloading')
-                        : t('behaviour.autoUpdatesDescOff'))
-                      : 'Managed by Microsoft Store'}
-                  </div>
-                </div>
-                {!isStoreBuild && (
-                  <div className="shelf-card-bottom">
-                    <div className="setting-pills" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 5, width: '100%' }}>
-                      {([
-                        { id: 'auto' as UpdateMode, label: t('behaviour.updateModeAuto') || 'Automatic' },
-                        { id: 'notify' as UpdateMode, label: t('behaviour.updateModeNotify') || 'Notify me' },
-                        { id: 'off' as UpdateMode, label: t('behaviour.updateModeOff') || 'Off' }
-                      ]).map((opt) => (
-                        <button
-                          key={opt.id}
-                          type="button"
-                          className={`pill ${updateMode === opt.id ? 'active' : ''}`}
-                          style={{ height: 32, fontSize: 11, fontWeight: 500, padding: '0 4px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', justifyContent: 'center' }}
-                          onClick={() => { playButtonClickSound(); patch({ updateMode: opt.id }) }}
-                        >
-                          {opt.label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Card 12: Update Status & Actions (idle/check states; hidden
-                  while the promoted front card shows an actionable state) */}
-              {!isStoreBuild && !hasPromotedTopUpdate && (
-                <div className="settings-shelf-card check-updates-card behaviour-col" ref={updateBannerRef}>
-                  <div className="shelf-card-top">
-                    <div className="setting-group-label">
-                      UPDATE STATUS
-                    </div>
-                    <div className="setting-title" style={{ lineHeight: 1.3 }}>
-                      {checkState.status === 'checking'
-                        ? t('behaviour.checkingForUpdates')
-                        : checkState.status === 'up-to-date'
-                        ? t('behaviour.isUpToDate')
-                        : checkState.status === 'error'
-                        ? t('behaviour.updateCheckFailed')
-                        : t('behaviour.checkForUpdates')}
-                    </div>
-                    <div className="setting-desc">
-                      {checkState.status === 'error'
-                        ? (checkState.error || t('behaviour.updateCheckFailed'))
-                        : `Edge-Drop v${currentVersion || '0.3.1'}`}
-                    </div>
-                  </div>
-                  <div className="shelf-card-bottom">
-                    <button
-                      type="button"
-                      className="pill display-pill"
-                      style={{ width: '100%', justifyContent: 'center', fontSize: 11.5, height: 32 }}
-                      disabled={checkState.status === 'checking'}
-                      onClick={() => {
-                        playButtonClickSound()
-                        handleManualCheck()
-                      }}
-                    >
-                      {checkState.status === 'checking' ? (
-                        <>
-                          <span className="update-dot checking" style={{ marginRight: 6 }} />
-                          <span>{t('behaviour.checkingForUpdates')}</span>
-                        </>
-                      ) : checkState.status === 'up-to-date' ? (
-                        t('behaviour.checkAgain')
-                      ) : checkState.status === 'error' ? (
-                        t('behaviour.tryAgain')
-                      ) : (
-                        t('behaviour.checkForUpdates')
-                      )}
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* ── SUB-GROUP 6 DIVIDER: Community & Support ── */}
-              <div className="shelf-section-divider">
-                <span className="shelf-section-divider-text">{t('footer.communityAndSupport') || 'COMMUNITY & SUPPORT'}</span>
-              </div>
-
-              {/* Card 13: Community & Feedback */}
-              {renderHorizontalCommunityCard()}
-
-              {/* Card 14: About & Quit */}
-              {renderHorizontalAboutCard()}
+              {renderHorizontalFooter()}
             </>
           )}
 
@@ -1310,319 +1783,36 @@ export function Settings({
           {horizontalTab === 'position' && (
             <>
               {/* ── SUB-GROUP 1 DIVIDER: Position ── */}
-              <div className="shelf-section-divider">
-                <span className="shelf-section-divider-text">{t('tabs.position') || 'POSITION'}</span>
-              </div>
-
-              {/* Card 1: Edge Placement */}
-              <div className="settings-shelf-card placement-card position-col">
-                <div className="shelf-card-top">
-                  <div className="setting-group-label">{t('groups.placement') || 'PLACEMENT'}</div>
-                  <div className="setting-title" style={{ color: '#ffffff' }}>{t('position.edgePlacementTitle')}</div>
-                  <div className="setting-desc">{t('position.edgePlacementDesc')}</div>
-                </div>
-                <div className="shelf-card-bottom">
-                  <div className="placement-3way-wrap shelf-placement-3way">
-                    <button
-                      type="button"
-                      className={`pill ${(edgeTransition?.active ? edgeTransition.to === 'left' : settings.stickPosition === 'left') ? 'active' : ''} ${edgeTransition?.active && edgeTransition.to === 'left' ? 'transitioning' : ''}`}
-                      disabled={edgeTransition?.active}
-                      onClick={() => {
-                        void startEdgeTransition('left')
-                      }}
-                    >
-                      {t('position.leftEdge') || 'Left Edge'}
-                    </button>
-                    <button
-                      type="button"
-                      className={`pill ${(edgeTransition?.active ? edgeTransition.to === 'top' : settings.stickPosition === 'top') ? 'active' : ''} ${edgeTransition?.active && edgeTransition.to === 'top' ? 'transitioning' : ''}`}
-                      disabled={edgeTransition?.active}
-                      onClick={() => {
-                        void startEdgeTransition('top')
-                      }}
-                    >
-                      {t('position.topEdge') || 'Top Edge'}
-                    </button>
-                    <button
-                      type="button"
-                      className={`pill ${(edgeTransition?.active ? edgeTransition.to === 'right' : settings.stickPosition === 'right') ? 'active' : ''} ${edgeTransition?.active && edgeTransition.to === 'right' ? 'transitioning' : ''}`}
-                      disabled={edgeTransition?.active}
-                      onClick={() => {
-                        void startEdgeTransition('right')
-                      }}
-                    >
-                      {t('position.rightEdge') || 'Right Edge'}
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              {/* Card 2: Target Display */}
-              <div className="settings-shelf-card display-card position-col">
-                <div className="shelf-card-top">
-                  <div className="setting-group-label">{t('groups.displayMonitor') || 'DISPLAY MONITOR'}</div>
-                  <div className="setting-title">{t('position.displayTitle')}</div>
-                  <div className="setting-desc">{t('position.displayDesc')}</div>
-                </div>
-                <div className="shelf-card-bottom">
-                  {displays.length === 0 ? (
-                    <div className="pill disabled">{t('position.loadingDisplays')}</div>
-                  ) : (
-                    displays.map((d) => {
-                      const currentDisplay = displays.find((disp) => disp.isCurrent)
-                      const activeDisplayId = currentDisplay
-                        ? currentDisplay.id
-                        : (settings.stickDisplayId ?? displays.find((disp) => disp.isPrimary)?.id ?? displays[0]?.id)
-                      const isActive = activeDisplayId === d.id
-                      const displayName = d.isPrimary ? t('position.primaryDisplay') : d.name
-                      return (
-                        <button
-                          key={d.id}
-                          type="button"
-                          className={`pill display-pill ${isActive ? 'active' : ''}`}
-                          style={{ width: '100%', justifyContent: 'space-between', padding: '6px 14px', fontSize: 11.5, height: 32, flexShrink: 0 }}
-                          onClick={() => {
-                            playButtonClickSound()
-                            patch({ stickDisplayId: d.id })
-                            useStore.getState().notifyPositionChanged()
-                          }}
-                        >
-                          <span className="pill-name" style={{ fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', marginRight: 8 }}>{displayName}</span>
-                          <span className="pill-res" style={{ opacity: 0.75, fontSize: 11, flexShrink: 0 }}>{d.resolution}</span>
-                        </button>
-                      )
-                    })
-                  )}
-                </div>
-              </div>
-
-              {/* Card 3: Edge Location Hint */}
-              <div className="settings-shelf-card beacon-card position-col">
-                <div className="shelf-card-top">
-                  <div className="setting-group-label">{t('groups.locationHint') || 'LOCATION HINT'}</div>
-                </div>
-                <div className="shelf-card-inline">
-                  <div className="shelf-card-inline-text">
-                    <div className="setting-title">{t('position.edgeLocationHintTitle')}</div>
-                    <div className="setting-desc">{t('groups.edgeHintPulseDesc') || 'Beacon pulse along edge to hint dock position'}</div>
-                  </div>
-                  <div className="shelf-card-inline-action">
-                    <Toggle
-                      checked={settings.showEdgeLocationHint ?? false}
-                      onChange={(v) => patch({ showEdgeLocationHint: v })}
-                    />
-                  </div>
-                </div>
-              </div>
+              <Divider label={t('tabs.position') || 'POSITION'} />
+              {IS_DARWIN ? renderMacPositionHintCard() : renderPlacementCard()}
+              {!IS_DARWIN && renderDisplayCard()}
+              {renderLocationHintCard()}
 
               {/* ── SUB-GROUP 2 DIVIDER: Trigger Zone ── */}
-              <div className="shelf-section-divider">
-                <span className="shelf-section-divider-text">{t('position.triggerZone') || 'TRIGGER ZONE'}</span>
-              </div>
+              <Divider label={t('position.triggerZone') || 'TRIGGER ZONE'} />
+              {renderHoverAreaCard()}
+              {renderThicknessCard()}
 
-              {/* Card 5: Hover Area Size */}
-              <div className="settings-shelf-card trigger-bar-card position-col">
-                <div className="shelf-card-top">
-                  <div className="setting-group-label">{t('groups.hoverZoneLength') || 'HOVER ZONE LENGTH'}</div>
-                  <div className="setting-title">{t('position.hoverAreaSizeTitle')}</div>
-                  <div className="setting-desc">{t('position.hoverAreaSizeDesc')}</div>
-                </div>
-                <div className="shelf-card-bottom">
-                  <div className="setting-pills" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 5, width: '100%' }}>
-                    {[
-                      { label: t('appearance.small'), val: 0.25 },
-                      { label: t('position.medium'), val: 0.4 },
-                      { label: t('appearance.large'), val: 0.6 }
-                    ].map((opt) => (
-                      <button
-                        key={opt.val}
-                        type="button"
-                        className={`pill ${Math.abs(settings.hotZoneHeight - opt.val) < 0.08 ? 'active' : ''}`}
-                        style={{ height: 32, fontSize: 11.5, fontWeight: 500, padding: 0 }}
-                        onClick={() => {
-                          playButtonClickSound()
-                          patch({ hotZoneHeight: opt.val })
-                        }}
-                      >
-                        {opt.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-
-              {/* Card 6: Edge Trigger Thickness */}
-              <div className="settings-shelf-card trigger-thickness-card position-col">
-                <div className="shelf-card-top">
-                  <div className="setting-group-label">{t('groups.triggerThickness') || 'TRIGGER THICKNESS'}</div>
-                  <div className="setting-slider-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
-                    <div>
-                      <div className="setting-title">{t('position.edgeTriggerThicknessTitle')}</div>
-                      <div className="setting-desc">{t('position.edgeTriggerThicknessDesc')}</div>
-                    </div>
-                    <div className="setting-slider-val" style={{ flexShrink: 0, padding: '2px 8px', fontSize: 11, fontWeight: 600, borderRadius: 6 }}>
-                      {`${settings.hotZoneWidth ?? 3}px`}
-                    </div>
-                  </div>
-                </div>
-                <div className="shelf-card-bottom">
-                  <div className="setting-slider-wrap" style={{ gap: 4, padding: '2px 0' }}>
-                    <WakeSlider
-                      ariaLabel={t('position.edgeTriggerThicknessTitle')}
-                      min={1}
-                      max={7}
-                      step={1}
-                      bars={28}
-                      height={28}
-                      restHeight={8}
-                      gap={3}
-                      value={settings.hotZoneWidth ?? 3}
-                      onStart={() => {
-                        void window.edge.setInteractive(true)
-                        setSliderActive(true)
-                      }}
-                      onRelease={(val) => {
-                        handleThicknessRelease(val)
-                      }}
-                      onChange={(val) => {
-                        handleThicknessInput(val)
-                      }}
-                    />
-                    <div className="setting-slider-labels" style={{ marginTop: 2 }}>
-                      {[
-                        { label: 'Min', val: 1 },
-                        { label: 'Mid', val: 4 },
-                        { label: 'Max', val: 7 }
-                      ].map((preset) => {
-                        const currentPx = settings.hotZoneWidth ?? 3
-                        const active = currentPx === preset.val
-                        return (
-                          <button
-                            key={preset.val}
-                            type="button"
-                            className={`slider-label-btn${active ? ' active' : ''}`}
-                            style={{ fontSize: 10, padding: '2px 8px' }}
-                            onClick={() => {
-                              if (currentPx !== preset.val) {
-                                handleThicknessRelease(preset.val)
-                              }
-                            }}
-                          >
-                            {preset.label}
-                          </button>
-                        )
-                      })}
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* ── SUB-GROUP 3 DIVIDER: Community & Support ── */}
-              <div className="shelf-section-divider">
-                <span className="shelf-section-divider-text">{t('footer.communityAndSupport') || 'COMMUNITY & SUPPORT'}</span>
-              </div>
-
-              {/* Card 9: Community & Feedback */}
-              {renderHorizontalCommunityCard()}
-
-              {/* Card 10: About & Quit */}
-              {renderHorizontalAboutCard()}
+              {renderHorizontalFooter()}
             </>
           )}
 
           {/* ── TAB 3: APPEARANCE ── */}
           {horizontalTab === 'appearance' && (
             <>
+              {IS_DARWIN && <ThemeCards />}
+
               {/* ── SUB-GROUP 1 DIVIDER: Copy Indicator ── */}
-              <div className="shelf-section-divider">
-                <span className="shelf-section-divider-text">{t('appearance.copyIndicatorTitle') || 'COPY INDICATOR'}</span>
-              </div>
-
-              {/* Card 1: Copy Indicator Toggle */}
-              <div className="settings-shelf-card beacon-toggle-card appearance-col">
-                <div className="shelf-card-top">
-                  <div className="setting-group-label">{t('groups.copyBeacon') || 'COPY BEACON'}</div>
-                </div>
-                <div className="shelf-card-inline">
-                  <div className="shelf-card-inline-text">
-                    <div className="setting-title">{t('appearance.copyIndicatorTitle')}</div>
-                    <div className="setting-desc">{t('appearance.copyIndicatorDesc')}</div>
-                  </div>
-                  <div className="shelf-card-inline-action">
-                    <Toggle
-                      checked={settings.showCopyIndicator ?? true}
-                      onChange={(v) => patch({ showCopyIndicator: v })}
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Card 2: Visual Copy Beacon Style */}
-              {(settings.showCopyIndicator ?? true) && (
-                <div className="settings-shelf-card copy-card appearance-col">
-                  <div className="shelf-card-top">
-                    <div className="setting-group-label">{t('groups.beaconStyle') || 'BEACON STYLE'}</div>
-                  </div>
-                  <div className="shelf-card-inline">
-                    <div className="shelf-card-inline-text">
-                      <div className="setting-title">{t('appearance.indicatorStyleTitle')}</div>
-                      <div className="setting-desc">{t('appearance.indicatorStyleDesc')}</div>
-                    </div>
-                    <div className="shelf-card-inline-action">
-                      <button
-                        ref={indicatorBtnRef}
-                        type="button"
-                        className={`icon-btn style-preview-toggle-btn ${isFlyoutActive ? 'active' : ''}`}
-                        title={isFlyoutActive ? t('appearance.closeStyleSelector') : t('appearance.openStyleSelector')}
-                        onClick={(e) => {
-                          playButtonClickSound()
-                          handleToggleFlyout(e.currentTarget)
-                        }}
-                      >
-                        {isFlyoutActive ? <CloseIcon /> : <ChevronRightIcon />}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
+              <Divider label={t('appearance.copyIndicatorTitle') || 'COPY INDICATOR'} />
+              {renderCopyIndicatorCard()}
+              {(settings.showCopyIndicator ?? true) && renderIndicatorStyleCard()}
 
               {/* ── SUB-GROUP 2 DIVIDER: Audio & Feedback ── */}
-              <div className="shelf-section-divider">
-                <span className="shelf-section-divider-text">{t('appearance.audioAndFeedback') || 'AUDIO FEEDBACK'}</span>
-              </div>
+              <Divider label={t('appearance.audioAndFeedback') || 'AUDIO FEEDBACK'} />
+              {renderSoundCard()}
+              {renderMotionCards()}
 
-              {/* Card 4: Audio & Feedback */}
-              <div className="settings-shelf-card audio-card appearance-col">
-                <div className="shelf-card-top">
-                  <div className="setting-group-label">{t('groups.audioFeedback') || 'AUDIO FEEDBACK'}</div>
-                </div>
-                <div className="shelf-card-inline">
-                  <div className="shelf-card-inline-text">
-                    <div className="setting-title">{t('behaviour.soundEffectsTitle')}</div>
-                    <div className="setting-desc">{t('behaviour.soundEffectsDesc')}</div>
-                  </div>
-                  <div className="shelf-card-inline-action">
-                    <Toggle
-                      checked={settings.soundEffects ?? true}
-                      onChange={(v) => {
-                        if (v) playToggleSound(true)
-                        patch({ soundEffects: v })
-                      }}
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* ── SUB-GROUP 3 DIVIDER: Community & Support ── */}
-              <div className="shelf-section-divider">
-                <span className="shelf-section-divider-text">{t('footer.communityAndSupport') || 'COMMUNITY & SUPPORT'}</span>
-              </div>
-
-              {/* Card 5: Community & Feedback */}
-              {renderHorizontalCommunityCard()}
-
-              {/* Card 6: About & Quit */}
-              {renderHorizontalAboutCard()}
+              {renderHorizontalFooter()}
             </>
           )}
         </div>
@@ -1666,7 +1856,7 @@ export function Settings({
           <div className="settings-scroll-list" ref={scrollListRef}>
 
             {/* ── Tab 1: Behaviour (First) ──────────────────────────────── */}
-            <AnimatePresence mode="wait">
+            <AnimatePresence mode="wait" initial={!IS_DARWIN}>
               {activeTab === 'behaviour' && (
                 <motion.div
                   key="tab-behaviour"
@@ -1675,310 +1865,14 @@ export function Settings({
                   exit={{ opacity: 0, scale: 0.98, y: -4 }}
                   transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
                 >
-                  {renderPromotedTopUpdateCard()}
-
-                  {/* ── SUB-GROUP 1: General & Startup ───────────────── */}
-                  <div className="setting-section-divider">
-                    <span className="setting-section-divider-text">{t('tabs.generalStartup') || 'GENERAL & STARTUP'}</span>
-                  </div>
-
-                  {/* Card 1: Language */}
-                  <div className="setting-card">
-                    <div className="shelf-card-top">
-                      <div className="setting-group-label">{t('groups.general') || 'GENERAL'}</div>
-                      <div className="setting-title">{t('behaviour.languageTitle')}</div>
-                      <div className="setting-desc">{t('behaviour.languageDesc')}</div>
-                    </div>
-                    <div className="shelf-card-bottom">
-                      <LanguageDropdown />
-                    </div>
-                  </div>
-
-                  {/* Card 2: Launch at Login */}
-                  <div className="setting-card">
-                    <div className="shelf-card-top">
-                      <div className="setting-group-label">{t('groups.startup') || 'STARTUP'}</div>
-                    </div>
-                    <div className="shelf-card-inline">
-                      <div className="shelf-card-inline-text">
-                        <div className="setting-title">{t('behaviour.launchAtLoginTitle')}</div>
-                        <div className="setting-desc">{t('behaviour.launchAtLoginDesc')}</div>
-                      </div>
-                      <div className="shelf-card-inline-action">
-                        <Toggle
-                          checked={settings.launchAtLogin}
-                          onChange={(v) => {
-                            useStore.setState((s) => ({
-                              settings: { ...s.settings, launchAtLogin: v }
-                            }))
-                            void patch({ launchAtLogin: v })
-                          }}
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Card 3: Incognito Mode */}
-                  <div className="setting-card">
-                    <div className="shelf-card-top">
-                      <div className="setting-group-label">{t('groups.privacy') || 'PRIVACY'}</div>
-                    </div>
-                    <div className="shelf-card-inline">
-                      <div className="shelf-card-inline-text">
-                        <div className="setting-title">{t('behaviour.incognitoTitle')}</div>
-                        <div className="setting-desc">{t('behaviour.incognitoDesc')}</div>
-                      </div>
-                      <div className="shelf-card-inline-action">
-                        <Toggle
-                          checked={settings.incognito}
-                          onChange={(v) => patch({ incognito: v })}
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  {IS_MAC && (
-                    <div className="setting-card">
-                      <div className="shelf-card-top">
-                        <div className="setting-group-label">{t('groups.privacy') || 'PRIVACY'}</div>
-                      </div>
-                      <div className="shelf-card-inline">
-                        <div className="shelf-card-inline-text">
-                          <div className="setting-title">{t('behaviour.captureScreenshotsTitle')}</div>
-                          <div className="setting-desc">{t('behaviour.captureScreenshotsDesc')}</div>
-                        </div>
-                        <div className="shelf-card-inline-action">
-                          <Toggle
-                            checked={settings.captureScreenshots !== false}
-                            onChange={(v) => patch({ captureScreenshots: v })}
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* ── SUB-GROUP 2: Shortcuts & Hover ──────────────── */}
-                  <div className="setting-section-divider">
-                    <span className="setting-section-divider-text">{t('tabs.activationShortcuts') || 'SHORTCUTS & HOVER'}</span>
-                  </div>
-
-                  {/* Card 4: Hover Activation */}
-                  <div className="setting-card">
-                    <div className="shelf-card-top">
-                      <div className="setting-group-label">{t('groups.hoverActivation') || 'HOVER ACTIVATION'}</div>
-                    </div>
-                    <div className="shelf-card-inline">
-                      <div className="shelf-card-inline-text">
-                        <div className="setting-title">{t('behaviour.hoverActivationTitle')}</div>
-                        <div className="setting-desc">
-                          {(settings.hoverActivation ?? true)
-                            ? t('behaviour.hoverActivationDescOn')
-                            : t('behaviour.hoverActivationDescOff', { shortcut: settings.toggleHotkey || 'Alt+C' })}
-                        </div>
-                      </div>
-                      <div className="shelf-card-inline-action">
-                        <Toggle
-                          checked={settings.hoverActivation ?? true}
-                          onChange={(v) => {
-                            if (!v) {
-                              patch({ hoverActivation: false, suppressInFullscreen: false })
-                            } else {
-                              patch({ hoverActivation: true, suppressInFullscreen: true })
-                            }
-                          }}
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Card 5: Global Toggle Shortcut */}
-                  <div className="setting-card">
-                    <div className="shelf-card-top">
-                      <div className="setting-group-label">{t('groups.keyboardShortcut') || 'KEYBOARD SHORTCUT'}</div>
-                      <div className="setting-title">{t('behaviour.toggleHotkeyTitle')}</div>
-                      <div className="setting-desc">{t('behaviour.toggleHotkeyDesc')}</div>
-                    </div>
-                    <div className="shelf-card-bottom">
-                      <HotkeyRecorder
-                        hotkey={settings.toggleHotkey || 'Alt+C'}
-                        onChange={(nextHotkey) => {
-                          patch({ toggleHotkey: nextHotkey })
-                          pushToast({
-                            id: Date.now().toString(),
-                            message: t('toast.shortcutUpdated', { shortcut: nextHotkey }),
-                            tone: 'info'
-                          })
-                        }}
-                      />
-                    </div>
-                  </div>
-
-                  {/* Card 6: Fullscreen Protection */}
-                  <div className="setting-card" style={{ opacity: (settings.hoverActivation ?? true) ? 1 : 0.45, transition: 'opacity 0.2s ease' }}>
-                    <div className="shelf-card-top">
-                      <div className="setting-group-label">{t('groups.fullscreenProtection') || 'FULLSCREEN PROTECTION'}</div>
-                    </div>
-                    <div className="shelf-card-inline">
-                      <div className="shelf-card-inline-text">
-                        <div className="setting-title">{t('behaviour.fullscreenProtectionTitle')}</div>
-                        <div className="setting-desc">
-                          {(settings.hoverActivation ?? true)
-                            ? t('behaviour.fullscreenProtectionDesc')
-                            : t('behaviour.disabledHoverOff')}
-                        </div>
-                      </div>
-                      <div className="shelf-card-inline-action">
-                        <Toggle
-                          checked={(settings.hoverActivation ?? true) ? settings.suppressInFullscreen : false}
-                          onChange={(v) => (settings.hoverActivation ?? true) && patch({ suppressInFullscreen: v })}
-                          disabled={!(settings.hoverActivation ?? true)}
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* ── SUB-GROUP 3: Clipboard Rules ─────────────────── */}
-                  <div className="setting-section-divider">
-                    <span className="setting-section-divider-text">{t('tabs.clipboardRules') || 'CLIPBOARD RULES'}</span>
-                  </div>
-
-                  {/* Card 7: Move Pasted to Top */}
-                  <div className="setting-card">
-                    <div className="shelf-card-top">
-                      <div className="setting-group-label">{t('groups.clipboardBehaviour') || 'CLIPBOARD BEHAVIOUR'}</div>
-                    </div>
-                    <div className="shelf-card-inline">
-                      <div className="shelf-card-inline-text">
-                        <div className="setting-title">{t('behaviour.movePastedToTopTitle')}</div>
-                        <div className="setting-desc">{t('behaviour.movePastedToTopDesc')}</div>
-                      </div>
-                      <div className="shelf-card-inline-action">
-                        <Toggle
-                          checked={settings.movePastedToTop ?? true}
-                          onChange={(v) => patch({ movePastedToTop: v })}
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Card 8: Clear Unpinned on Restart */}
-                  <div className="setting-card">
-                    <div className="shelf-card-top">
-                      <div className="setting-group-label">{t('groups.restartCleanup') || 'RESTART CLEANUP'}</div>
-                    </div>
-                    <div className="shelf-card-inline">
-                      <div className="shelf-card-inline-text">
-                        <div className="setting-title">{t('behaviour.clearUnpinnedTitle')}</div>
-                        <div className="setting-desc">{t('behaviour.clearUnpinnedDesc')}</div>
-                      </div>
-                      <div className="shelf-card-inline-action">
-                        <Toggle
-                          checked={settings.clearUnpinnedOnRestart}
-                          onChange={(v) => patch({ clearUnpinnedOnRestart: v })}
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* ── SUB-GROUP 4: Storage & Retention ─────────────── */}
-                  <div className="setting-section-divider">
-                    <span className="setting-section-divider-text">{t('tabs.storageRetention') || 'STORAGE & RETENTION'}</span>
-                  </div>
-
-                  {/* Card 9: History Capacity */}
-                  <div className="setting-card">
-                    <div className="shelf-card-top">
-                      <div className="setting-group-label">{t('groups.storageCapacity') || 'STORAGE CAPACITY'}</div>
-                      <div className="setting-title">{t('behaviour.capacityTitle')}</div>
-                      <div className="setting-desc">{t('behaviour.capacityDesc')}</div>
-                    </div>
-                    <div className="shelf-card-bottom">
-                      <div className="setting-pills">
-                        {[
-                          { label: '100', val: 100 },
-                          { label: '250', val: 250 },
-                          { label: '500', val: 500 },
-                          { label: '1000', val: 1000 }
-                        ].map((opt) => (
-                          <button
-                            key={opt.val}
-                            className={`pill ${settings.historyLimit === opt.val ? 'active' : ''}`}
-                            onClick={() => { playButtonClickSound(); patch({ historyLimit: opt.val }) }}
-                          >
-                            {opt.label}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Card 10: Auto-Delete Timer */}
-                  <div className="setting-card">
-                    <div className="shelf-card-top">
-                      <div className="setting-group-label">{t('groups.autoDelete') || 'AUTO-DELETE'}</div>
-                      <div className="setting-title">{t('behaviour.autoDeleteTitle')}</div>
-                      <div className="setting-desc">{t('behaviour.autoDeleteDesc')}</div>
-                    </div>
-                    <div className="shelf-card-bottom">
-                      <div className="setting-pills">
-                        {[
-                          { label: t('behaviour.never'), val: 0 },
-                          { label: '1h', val: 1 },
-                          { label: '6h', val: 6 },
-                          { label: '24h', val: 24 },
-                          { label: '7d', val: 168 }
-                        ].map((opt) => (
-                          <button
-                            key={opt.val}
-                            className={`pill ${settings.autoDeleteHours === opt.val ? 'active' : ''}`}
-                            onClick={() => { playButtonClickSound(); patch({ autoDeleteHours: opt.val }) }}
-                          >
-                            {opt.label}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
+                  {renderPromotedUpdateCard()}
+                  {renderBehaviourCards()}
 
                   {/* ── UPDATES SECTION (Consolidated above Community & Support) ── */}
                   {!isStoreBuild && (
                     <>
-                      <div className="setting-section-divider">
-                        <span className="setting-section-divider-text">{t('tabs.updates') || 'UPDATES'}</span>
-                      </div>
-
-                      {/* Card 11: Auto Updates (3-way selector) */}
-                      <div className="setting-card">
-                        <div className="shelf-card-top">
-                          <div className="setting-group-label">{t('groups.updates') || 'UPDATES'}</div>
-                          <div className="setting-title">{t('behaviour.autoUpdatesTitle')}</div>
-                          <div className="setting-desc">
-                            {updateMode === 'auto'
-                              ? t('behaviour.autoUpdatesDescOn')
-                              : updateMode === 'notify'
-                              ? (t('behaviour.updateModeNotifyDesc') || 'Notify when updates are available without downloading')
-                              : t('behaviour.autoUpdatesDescOff')}
-                          </div>
-                        </div>
-                        <div className="shelf-card-bottom">
-                          <div className="setting-pills" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 5 }}>
-                            {([
-                              { label: t('behaviour.updateModeAuto') || 'Automatic', val: 'auto' as UpdateMode },
-                              { label: t('behaviour.updateModeNotify') || 'Notify me', val: 'notify' as UpdateMode },
-                              { label: t('behaviour.updateModeOff') || 'Off', val: 'off' as UpdateMode }
-                            ]).map((opt) => (
-                              <button
-                                key={opt.val}
-                                className={`pill ${updateMode === opt.val ? 'active' : ''}`}
-                                onClick={() => { playButtonClickSound(); patch({ updateMode: opt.val }) }}
-                              >
-                                {opt.label}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      </div>
-
+                      <Divider label={t('tabs.updates') || 'UPDATES'} />
+                      {renderUpdateModeCard()}
                       {renderManualUpdateCard(true)}
                     </>
                   )}
@@ -1997,352 +1891,23 @@ export function Settings({
                   transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
                 >
                   {/* ── GROUP: Position ──────────────────────────────────── */}
-                  <div className="setting-section-divider">
-                    <span className="setting-section-divider-text">{t('tabs.position') || 'POSITION'}</span>
-                  </div>
-
-                  {/* Card 1: Edge Placement */}
-                  <div className="setting-card">
-                    <div className="shelf-card-top">
-                      <div className="setting-group-label">{t('groups.placement') || 'PLACEMENT'}</div>
-                      <div className="setting-title">{t('position.edgePlacementTitle')}</div>
-                      <div className="setting-desc">{t('position.edgePlacementDesc')}</div>
-                    </div>
-                    <div className="shelf-card-bottom">
-                      <div className="placement-3way-wrap">
-                        <button
-                          type="button"
-                          className={`pill ${(edgeTransition?.active ? edgeTransition.to === 'left' : settings.stickPosition === 'left') ? 'active' : ''} ${edgeTransition?.active && edgeTransition.to === 'left' ? 'transitioning' : ''}`}
-                          disabled={edgeTransition?.active}
-                          onClick={() => {
-                            void startEdgeTransition('left')
-                          }}
-                        >
-                          {t('position.leftEdge') || 'Left Edge'}
-                        </button>
-                        <button
-                          type="button"
-                          className={`pill ${(edgeTransition?.active ? edgeTransition.to === 'top' : settings.stickPosition === 'top') ? 'active' : ''} ${edgeTransition?.active && edgeTransition.to === 'top' ? 'transitioning' : ''}`}
-                          disabled={edgeTransition?.active}
-                          onClick={() => {
-                            void startEdgeTransition('top')
-                          }}
-                        >
-                          {t('position.topEdge') || 'Top Edge'}
-                        </button>
-                        <button
-                          type="button"
-                          className={`pill ${(edgeTransition?.active ? edgeTransition.to === 'right' : settings.stickPosition === 'right') ? 'active' : ''} ${edgeTransition?.active && edgeTransition.to === 'right' ? 'transitioning' : ''}`}
-                          disabled={edgeTransition?.active}
-                          onClick={() => {
-                            void startEdgeTransition('right')
-                          }}
-                        >
-                          {t('position.rightEdge') || 'Right Edge'}
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Card 2: Position Range Slider */}
-                  {(() => {
-                    const isHorizontal = settings.stickPosition === 'top'
-                    const offsetVal = isHorizontal ? (settings.horizontalOffset ?? 0.5) : (settings.verticalOffset ?? 0.5)
-                    const sliderTitle = isHorizontal ? (t('position.horizontalPositionTitle') || 'Horizontal Position') : t('position.verticalPositionTitle')
-                    const sliderDesc = isHorizontal ? (t('position.horizontalPositionDesc') || 'Adjust horizontal alignment along screen edge') : t('position.verticalPositionDesc')
-
-                    return (
-                      <div className="setting-card">
-                        <div className="shelf-card-top">
-                          <div className="setting-group-label">{t('groups.alignment') || 'ALIGNMENT'}</div>
-                          <div className="setting-slider-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
-                            <div>
-                              <div className="setting-title">{sliderTitle}</div>
-                              <div className="setting-desc">{sliderDesc}</div>
-                            </div>
-                            <div className="setting-slider-val">
-                              {`${Math.round(offsetVal * 100)}%`}
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="shelf-card-bottom">
-                          <div className="setting-slider-wrap">
-                            <WakeSlider
-                              ariaLabel={sliderTitle}
-                              min={0}
-                              max={1}
-                              step={0.002}
-                              bars={28}
-                              height={28}
-                              restHeight={8}
-                              gap={3}
-                              value={offsetVal}
-                              onStart={() => {
-                                void window.edge.setInteractive(true)
-                                setSliderActive(true)
-                              }}
-                              onRelease={(val) => {
-                                setSliderActive(false)
-                                if (isHorizontal) {
-                                  patch({ horizontalOffset: val })
-                                } else {
-                                  handleSliderRelease(val)
-                                }
-                              }}
-                              onChange={(raw) => {
-                                if (isHorizontal) {
-                                  patch({ horizontalOffset: raw })
-                                } else {
-                                  handleSliderInput(raw)
-                                }
-                              }}
-                            />
-
-                            <div className="setting-slider-labels">
-                              {[
-                                { label: isHorizontal ? 'Left' : '0%', val: 0 },
-                                { label: 'Center', val: 0.5 },
-                                { label: isHorizontal ? 'Right' : '100%', val: 1.0 }
-                              ].map((pos) => {
-                                const active = Math.abs(offsetVal - pos.val) < 0.04
-                                return (
-                                  <button
-                                    key={pos.val}
-                                    type="button"
-                                    className={`slider-label-btn${active ? ' active' : ''}`}
-                                    onClick={() => {
-                                      if (isHorizontal) {
-                                        patch({ horizontalOffset: pos.val })
-                                      } else {
-                                        handleSliderRelease(pos.val)
-                                      }
-                                    }}
-                                  >
-                                    {pos.label}
-                                  </button>
-                                )
-                              })}
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    )
-                  })()}
-
-                  {/* Card 3: Target Display */}
-                  <div className="setting-card">
-                    <div className="shelf-card-top">
-                      <div className="setting-group-label">{t('groups.displayMonitor') || 'DISPLAY MONITOR'}</div>
-                      <div className="setting-title">{t('position.displayTitle')}</div>
-                      <div className="setting-desc">{t('position.displayDesc')}</div>
-                    </div>
-                    <div className="shelf-card-bottom">
-                      <div className="setting-pills">
-                        {displays.length === 0 && <div className="pill disabled">{t('position.loadingDisplays')}</div>}
-                        {displays.map((d) => {
-                          const currentDisplay = displays.find((disp) => disp.isCurrent)
-                          const activeDisplayId = currentDisplay
-                            ? currentDisplay.id
-                            : (settings.stickDisplayId ?? displays.find((disp) => disp.isPrimary)?.id ?? displays[0]?.id)
-                          const isActive = activeDisplayId === d.id
-                          const displayName = d.isPrimary ? t('position.primaryDisplay') : d.name
-                          return (
-                            <button
-                              key={d.id}
-                              className={`pill display-pill ${isActive ? 'active' : ''}`}
-                              onClick={() => {
-                                playButtonClickSound()
-                                patch({ stickDisplayId: d.id })
-                                useStore.getState().notifyPositionChanged()
-                              }}
-                            >
-                              <div className="pill-name">{displayName}</div>
-                              <div className="pill-res">{d.resolution}</div>
-                            </button>
-                          )
-                        })}
-                      </div>
-                    </div>
-                  </div>
+                  <Divider label={t('tabs.position') || 'POSITION'} />
+                  {IS_DARWIN ? renderMacPositionHintCard() : (
+                    <>
+                      {renderPlacementCard()}
+                      {renderPositionSliderCard()}
+                      {renderDisplayCard()}
+                    </>
+                  )}
 
                   {/* ── GROUP: Trigger Zone ──────────────────────────────── */}
-                  <div className="setting-section-divider">
-                    <span className="setting-section-divider-text">{t('position.triggerZone') || 'TRIGGER ZONE'}</span>
-                  </div>
-
-                  {/* Card 4: Location Hint */}
-                  <div className="setting-card">
-                    <div className="shelf-card-top">
-                      <div className="setting-group-label">{t('groups.locationHint') || 'LOCATION HINT'}</div>
-                    </div>
-                    <div className="shelf-card-inline">
-                      <div className="shelf-card-inline-text">
-                        <div className="setting-title">{t('position.edgeLocationHintTitle')}</div>
-                        <div className="setting-desc">{t('position.edgeLocationHintDesc')}</div>
-                      </div>
-                      <div className="shelf-card-inline-action">
-                        <Toggle
-                          checked={settings.showEdgeLocationHint ?? false}
-                          onChange={(v) => patch({ showEdgeLocationHint: v })}
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Card 5: Trigger Alignment */}
-                  <div className="setting-card">
-                    <div className="shelf-card-top">
-                      <div className="setting-group-label">{t('groups.triggerPosition') || 'TRIGGER POSITION'}</div>
-                      <div className="setting-title">{t('position.edgeTriggerPositionTitle')}</div>
-                      <div className="setting-desc">{t('position.edgeTriggerPositionDesc')}</div>
-                    </div>
-                    <div className="shelf-card-bottom">
-                      <div className="setting-pills">
-                        {[
-                          { label: (settings.stickPosition === 'top') ? (t('position.left') || 'Left') : t('position.top'), val: 'top' as const },
-                          { label: t('position.center'), val: 'center' as const },
-                          { label: (settings.stickPosition === 'top') ? (t('position.right') || 'Right') : t('position.bottom'), val: 'bottom' as const }
-                        ].map((opt) => (
-                          <button
-                            key={opt.val}
-                            className={`pill ${(settings.triggerAlignment || 'center') === opt.val ? 'active' : ''}`}
-                            onClick={() => {
-                              playButtonClickSound()
-                              patch({ triggerAlignment: opt.val })
-                              useStore.getState().notifyPositionChanged()
-                            }}
-                          >
-                            {opt.label}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Card 6: Hover Area Size */}
-                  <div className="setting-card">
-                    <div className="shelf-card-top">
-                      <div className="setting-group-label">{t('groups.hoverZoneLength') || 'HOVER ZONE LENGTH'}</div>
-                      <div className="setting-title">{t('position.hoverAreaSizeTitle')}</div>
-                      <div className="setting-desc">{t('position.hoverAreaSizeDesc')}</div>
-                    </div>
-                    <div className="shelf-card-bottom">
-                      <div className="setting-pills">
-                        {[
-                          { label: t('appearance.small'), val: 0.25 },
-                          { label: t('position.medium'), val: 0.4 },
-                          { label: t('appearance.large'), val: 0.6 }
-                        ].map((opt) => (
-                          <button
-                            key={opt.label}
-                            className={`pill ${Math.abs(settings.hotZoneHeight - opt.val) < 0.08 ? 'active' : ''}`}
-                            onClick={() => {
-                              playButtonClickSound()
-                              patch({ hotZoneHeight: opt.val })
-                            }}
-                          >
-                            {opt.label}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Card 7: Edge Trigger Thickness */}
-                  <div className="setting-card">
-                    <div className="shelf-card-top">
-                      <div className="setting-group-label">{t('groups.triggerThickness') || 'TRIGGER THICKNESS'}</div>
-                      <div className="setting-slider-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
-                        <div>
-                          <div className="setting-title">{t('position.edgeTriggerThicknessTitle')}</div>
-                          <div className="setting-desc">{t('position.edgeTriggerThicknessDesc')}</div>
-                        </div>
-                        <div className="setting-slider-val">
-                          {`${settings.hotZoneWidth ?? 3}px`}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="shelf-card-bottom">
-                      <div className="setting-slider-wrap">
-                        <WakeSlider
-                          min={1}
-                          max={7}
-                          step={1}
-                          bars={28}
-                          height={28}
-                          restHeight={8}
-                          gap={3}
-                          value={settings.hotZoneWidth ?? 3}
-                          onStart={() => {
-                            void window.edge.setInteractive(true)
-                            setSliderActive(true)
-                          }}
-                          onRelease={(val) => {
-                            handleThicknessRelease(val)
-                          }}
-                          onChange={(val) => {
-                            handleThicknessInput(val)
-                          }}
-                        />
-
-                        <div className="setting-slider-labels">
-                          {[
-                            { label: 'Min', val: 1 },
-                            { label: 'Mid', val: 4 },
-                            { label: 'Max', val: 7 }
-                          ].map((preset) => {
-                            const currentPx = settings.hotZoneWidth ?? 3
-                            const active = currentPx === preset.val
-                            return (
-                              <button
-                                key={preset.val}
-                                type="button"
-                                className={`slider-label-btn${active ? ' active' : ''}`}
-                                onClick={() => {
-                                  if (currentPx !== preset.val) {
-                                    handleThicknessRelease(preset.val)
-                                  }
-                                }}
-                              >
-                                {preset.label}
-                              </button>
-                            )
-                          })}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Card 8: Panel Height */}
-                  <div className="setting-card">
-                    <div className="shelf-card-top">
-                      <div className="setting-group-label">{t('groups.panelHeight') || 'PANEL HEIGHT'}</div>
-                      <div className="setting-title">{t('position.panelHeightTitle')}</div>
-                      <div className="setting-desc">{t('position.panelHeightDesc')}</div>
-                    </div>
-                    <div className="shelf-card-bottom">
-                      <div className="setting-pills">
-                        {[
-                          { label: t('appearance.small'), val: 0.5 },
-                          { label: t('position.medium'), val: 0.65 },
-                          { label: t('appearance.large'), val: 0.8 }
-                        ].map((opt) => (
-                          <button
-                            key={opt.label}
-                            className={`pill ${Math.abs((settings.panelHeight || 0.6) - opt.val) < 0.08 ? 'active' : ''}`}
-                            onClick={() => {
-                              playButtonClickSound()
-                              patch({ panelHeight: opt.val })
-                            }}
-                          >
-                            {opt.label}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
+                  <Divider label={t('position.triggerZone') || 'TRIGGER ZONE'} />
+                  {renderLocationHintCard()}
+                  {renderTriggerAlignmentCard()}
+                  {renderHoverAreaCard()}
+                  {renderThicknessCard()}
+                  {renderPanelHeightCard()}
+                  {!IS_DARWIN && settings.stickPosition !== 'top' && renderPanelWidthCard()}
 
                   {PersistentFooter}
                 </motion.div>
@@ -2357,244 +1922,21 @@ export function Settings({
                   exit={{ opacity: 0, scale: 0.98, y: -4 }}
                   transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
                 >
+                  {IS_DARWIN && <ThemeCards />}
+
                   {/* ── GROUP: Copy Indicator ────────────────────────────── */}
-                  <div className="setting-section-divider">
-                    <span className="setting-section-divider-text">{t('appearance.copyIndicatorTitle') || 'COPY INDICATOR'}</span>
-                  </div>
-
-                  {/* Card 1: Copy Indicator Toggle */}
-                  <div className="setting-card">
-                    <div className="shelf-card-top">
-                      <div className="setting-group-label">{t('groups.copyBeacon') || 'COPY BEACON'}</div>
-                    </div>
-                    <div className="shelf-card-inline">
-                      <div className="shelf-card-inline-text">
-                        <div className="setting-title">{t('appearance.copyIndicatorTitle')}</div>
-                        <div className="setting-desc">{t('appearance.copyIndicatorDesc')}</div>
-                      </div>
-                      <div className="shelf-card-inline-action">
-                        <Toggle
-                          checked={settings.showCopyIndicator ?? true}
-                          onChange={(v) => patch({ showCopyIndicator: v })}
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Card 2: Indicator Style */}
-                  {(settings.showCopyIndicator ?? true) && (
-                    <div className="setting-card">
-                      <div className="shelf-card-top">
-                        <div className="setting-group-label">{t('groups.beaconStyle') || 'BEACON STYLE'}</div>
-                      </div>
-                      <div className="shelf-card-inline">
-                        <div className="shelf-card-inline-text">
-                          <div className="setting-title">{t('appearance.indicatorStyleTitle')}</div>
-                          <div className="setting-desc">
-                            {t('appearance.indicatorStyleDesc')}
-                          </div>
-                        </div>
-                        <div className="shelf-card-inline-action">
-                          <button
-                            type="button"
-                            className={`icon-btn style-preview-toggle-btn ${isFlyoutActive ? 'active' : ''}`}
-                            title={isFlyoutActive ? t('appearance.closeStyleSelector') : t('appearance.openStyleSelector')}
-                            onClick={(e) => {
-                              playButtonClickSound()
-                              handleToggleFlyout(e.currentTarget)
-                            }}
-                          >
-                            {isFlyoutActive ? <CloseIcon /> : <ChevronRightIcon />}
-                          </button>
-                        </div>
-                      </div>
-
-                      {isTutorial && localInlineOpen && (
-                        <motion.div
-                          initial={{ opacity: 0, height: 0 }}
-                          animate={{ opacity: 1, height: 'auto' }}
-                          exit={{ opacity: 0, height: 0 }}
-                          transition={{ duration: 0.22, ease: 'easeOut' }}
-                          style={{ overflow: 'hidden', marginTop: 12, marginBottom: 8 }}
-                        >
-                          <div style={{
-                            display: 'grid',
-                            gridTemplateColumns: 'repeat(2, 1fr)',
-                            gap: 10,
-                            padding: 12,
-                            background: '#09090b',
-                            borderRadius: 12,
-                            border: '1px solid rgba(255, 255, 255, 0.08)'
-                          }}>
-                            {/* Logo Card */}
-                            <div
-                              onClick={() => {
-                                playButtonClickSound()
-                                patch({ copyIndicatorStyle: 'logo' })
-                              }}
-                              style={{
-                                background: (settings.copyIndicatorStyle || 'logo') === 'logo' ? 'rgba(255, 255, 255, 0.12)' : 'rgba(255, 255, 255, 0.04)',
-                                border: (settings.copyIndicatorStyle || 'logo') === 'logo' ? '1px solid rgba(255, 255, 255, 0.3)' : '1px solid rgba(255, 255, 255, 0.06)',
-                                borderRadius: 10,
-                                padding: '12px 8px',
-                                display: 'flex',
-                                flexDirection: 'column',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                cursor: 'pointer',
-                                gap: 8,
-                                transition: 'all 0.2s ease'
-                              }}
-                            >
-                              <div style={{ height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                <LogoIndicatorIcon fillColor="#ffffff" size={30} />
-                              </div>
-                              <div style={{ fontSize: 12, fontWeight: 600, color: '#ffffff' }}>{t('appearance.logoStyle')}</div>
-                            </div>
-
-                            {/* Tick Card */}
-                            <div
-                              onClick={() => {
-                                playButtonClickSound()
-                                patch({ copyIndicatorStyle: 'check' })
-                              }}
-                              style={{
-                                background: settings.copyIndicatorStyle === 'check' ? 'rgba(255, 255, 255, 0.12)' : 'rgba(255, 255, 255, 0.04)',
-                                border: settings.copyIndicatorStyle === 'check' ? '1px solid rgba(255, 255, 255, 0.3)' : '1px solid rgba(255, 255, 255, 0.06)',
-                                borderRadius: 10,
-                                padding: '12px 8px',
-                                display: 'flex',
-                                flexDirection: 'column',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                cursor: 'pointer',
-                                gap: 8,
-                                transition: 'all 0.2s ease'
-                              }}
-                            >
-                              <div style={{ height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                <TickIndicatorIcon fillColor="#ffffff" size={30} />
-                              </div>
-                              <div style={{ fontSize: 12, fontWeight: 600, color: '#ffffff' }}>{t('appearance.tickStyle')}</div>
-                            </div>
-
-                            {/* Copy Card */}
-                            <div
-                              onClick={() => {
-                                playButtonClickSound()
-                                patch({ copyIndicatorStyle: 'copy' })
-                              }}
-                              style={{
-                                background: settings.copyIndicatorStyle === 'copy' ? 'rgba(255, 255, 255, 0.12)' : 'rgba(255, 255, 255, 0.04)',
-                                border: settings.copyIndicatorStyle === 'copy' ? '1px solid rgba(255, 255, 255, 0.3)' : '1px solid rgba(255, 255, 255, 0.06)',
-                                borderRadius: 10,
-                                padding: '12px 8px',
-                                display: 'flex',
-                                flexDirection: 'column',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                cursor: 'pointer',
-                                gap: 8,
-                                transition: 'all 0.2s ease'
-                              }}
-                            >
-                              <div style={{ height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                <CopyIndicatorIcon fillColor="#ffffff" size={30} />
-                              </div>
-                              <div style={{ fontSize: 12, fontWeight: 600, color: '#ffffff' }}>{t('appearance.copyStyle')}</div>
-                            </div>
-
-                            {/* Sparkle Card */}
-                            <div
-                              onClick={() => {
-                                playButtonClickSound()
-                                patch({ copyIndicatorStyle: 'sparkle' })
-                              }}
-                              style={{
-                                background: settings.copyIndicatorStyle === 'sparkle' ? 'rgba(255, 255, 255, 0.12)' : 'rgba(255, 255, 255, 0.04)',
-                                border: settings.copyIndicatorStyle === 'sparkle' ? '1px solid rgba(255, 255, 255, 0.3)' : '1px solid rgba(255, 255, 255, 0.06)',
-                                borderRadius: 10,
-                                padding: '12px 8px',
-                                display: 'flex',
-                                flexDirection: 'column',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                cursor: 'pointer',
-                                gap: 8,
-                                transition: 'all 0.2s ease'
-                              }}
-                            >
-                              <div style={{ height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                <SparkleIndicatorIcon fillColor="#ffffff" size={30} />
-                              </div>
-                              <div style={{ fontSize: 12, fontWeight: 600, color: '#ffffff' }}>{t('appearance.sparkleStyle')}</div>
-                            </div>
-                          </div>
-                        </motion.div>
-                      )}
-                    </div>
-                  )}
+                  <Divider label={t('appearance.copyIndicatorTitle') || 'COPY INDICATOR'} />
+                  {renderCopyIndicatorCard()}
+                  {(settings.showCopyIndicator ?? true) && renderIndicatorStyleCard()}
 
                   {/* ── GROUP: Typography ────────────────────────────────── */}
-                  <div className="setting-section-divider">
-                    <span className="setting-section-divider-text">{t('appearance.typography') || 'TYPOGRAPHY'}</span>
-                  </div>
-
-                  {/* Card 3: Text Size */}
-                  <div className="setting-card">
-                    <div className="shelf-card-top">
-                      <div className="setting-group-label">{t('groups.textSize') || 'TEXT SIZE'}</div>
-                      <div className="setting-title">{t('appearance.textSizeTitle')}</div>
-                      <div className="setting-desc">{t('appearance.textSizeDesc')}</div>
-                    </div>
-                    <div className="shelf-card-bottom">
-                      <div className="setting-pills">
-                        {[
-                          { label: t('appearance.small'), val: 0.85 },
-                          { label: t('appearance.normal'), val: 1.0 },
-                          { label: t('appearance.large'), val: 1.15 }
-                        ].map((opt) => (
-                          <button
-                            key={opt.label}
-                            className={`pill ${Math.abs((settings.fontSizeScale ?? 1.0) - opt.val) < 0.05 ? 'active' : ''}`}
-                            onClick={() => {
-                              playButtonClickSound()
-                              patch({ fontSizeScale: opt.val })
-                            }}
-                          >
-                            {opt.label}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
+                  <Divider label={t('appearance.typography') || 'TYPOGRAPHY'} />
+                  {renderTextSizeCard()}
 
                   {/* ── GROUP: Audio & Feedback ──────────────────────────── */}
-                  <div className="setting-section-divider">
-                    <span className="setting-section-divider-text">{t('appearance.audioAndFeedback') || 'AUDIO FEEDBACK'}</span>
-                  </div>
-
-                  {/* Card 4: Audio Feedback */}
-                  <div className="setting-card">
-                    <div className="shelf-card-top">
-                      <div className="setting-group-label">{t('groups.audioFeedback') || 'AUDIO FEEDBACK'}</div>
-                    </div>
-                    <div className="shelf-card-inline">
-                      <div className="shelf-card-inline-text">
-                        <div className="setting-title">{t('behaviour.soundEffectsTitle')}</div>
-                        <div className="setting-desc">{t('behaviour.soundEffectsDesc')}</div>
-                      </div>
-                      <div className="shelf-card-inline-action">
-                        <Toggle
-                          checked={settings.soundEffects ?? true}
-                          onChange={(v) => {
-                            if (v) playToggleSound(true)
-                            patch({ soundEffects: v })
-                          }}
-                        />
-                      </div>
-                    </div>
-                  </div>
+                  <Divider label={t('appearance.audioAndFeedback') || 'AUDIO FEEDBACK'} />
+                  {renderSoundCard()}
+                  {renderMotionCards()}
 
                   {PersistentFooter}
                 </motion.div>
@@ -2605,226 +1947,3 @@ export function Settings({
         </div>
       )
     }
-
-function Toggle({
-  checked,
-  onChange,
-  disabled
-}: {
-  checked: boolean
-  onChange: (v: boolean) => void
-  disabled?: boolean
-}) {
-  const [isHovered, setIsHovered] = useState(false)
-
-  return (
-    <button
-      type="button"
-      className={`setting-toggle${checked ? ' checked' : ''}`}
-      role="switch"
-      aria-checked={checked}
-      disabled={disabled}
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
-      onClick={() => {
-        if (disabled) return
-        playToggleSound(!checked)
-        onChange(!checked)
-      }}
-      style={{
-        flexShrink: 0,
-        width: 36,
-        height: 20,
-        borderRadius: 999,
-        background: disabled
-          ? 'rgba(255, 255, 255, 0.05)'
-          : checked
-          ? '#ffffff'
-          : isHovered
-          ? 'rgba(255, 255, 255, 0.18)'
-          : 'rgba(255, 255, 255, 0.12)',
-        border: 'none',
-        position: 'relative',
-        cursor: disabled ? 'not-allowed' : 'pointer',
-        padding: 0,
-        outline: 'none',
-        transition: 'background 0.18s ease, opacity 0.18s ease',
-        boxShadow: 'none',
-        opacity: disabled ? 0.38 : 1
-      }}
-    >
-      <motion.span
-        className="toggle-thumb"
-        initial={false}
-        animate={{
-          x: checked ? 19 : 3,
-          backgroundColor: checked ? '#000000' : '#ffffff'
-        }}
-        transition={{
-          type: 'spring',
-          stiffness: 520,
-          damping: 32,
-          mass: 0.5
-        }}
-        style={{
-          position: 'absolute',
-          top: 3,
-          left: 0,
-          width: 14,
-          height: 14,
-          borderRadius: '50%',
-          boxShadow: 'none',
-          pointerEvents: 'none'
-        }}
-      />
-    </button>
-  )
-}
-
-function LanguageDropdown({ direction = 'down', compact = false }: { direction?: 'up' | 'down'; compact?: boolean } = {}) {
-  const { language, languages } = useTranslation()
-  const patch = useStore((s) => s.patchSettings)
-  const [isOpen, setIsOpen] = useState(false)
-  const dropdownRef = useRef<HTMLDivElement | null>(null)
-  const listRef = useRef<HTMLDivElement | null>(null)
-
-  const getLangLabel = (l: { code: string; name: string; nativeName: string }) =>
-    l.code === 'system' || l.nativeName.includes('(') ? l.nativeName : `${l.nativeName} (${l.name})`
-
-  const selectedLang = languages.find((l) => l.code === (language || 'system')) || languages[0]
-
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
-        setIsOpen(false)
-      }
-    }
-    if (isOpen) {
-      window.addEventListener('mousedown', handleClickOutside)
-    }
-    return () => window.removeEventListener('mousedown', handleClickOutside)
-  }, [isOpen])
-
-  useEffect(() => {
-    if (isOpen && listRef.current) {
-      const activeBtn = listRef.current.querySelector<HTMLButtonElement>('[data-active="true"]')
-      if (activeBtn) {
-        if (selectedLang.code === 'system') {
-          listRef.current.scrollTop = 0
-        } else {
-          listRef.current.scrollTop = Math.max(0, activeBtn.offsetTop - 4)
-        }
-      }
-    }
-  }, [isOpen, selectedLang.code])
-
-  return (
-    <div ref={dropdownRef} style={{ position: 'relative', width: '100%' }}>
-      <button
-        type="button"
-        onClick={() => {
-          playButtonClickSound()
-          setIsOpen(!isOpen)
-        }}
-        style={{
-          width: '100%',
-          height: compact ? 28 : 'auto',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          background: isOpen ? 'rgba(255, 255, 255, 0.08)' : 'rgba(255, 255, 255, 0.05)',
-          color: '#ffffff',
-          border: isOpen ? '1px solid rgba(255, 255, 255, 0.22)' : '1px solid rgba(255, 255, 255, 0.12)',
-          borderRadius: compact ? 8 : 10,
-          padding: compact ? '0 10px' : '8px 12px',
-          fontSize: compact ? 11.5 : 12.5,
-          fontWeight: 500,
-          outline: 'none',
-          cursor: 'pointer',
-          boxShadow: '0 2px 8px rgba(0, 0, 0, 0.2)',
-          transition: 'all 0.15s ease'
-        }}
-      >
-        <span>{getLangLabel(selectedLang)}</span>
-        <motion.span
-          animate={{ rotate: isOpen ? 180 : 0 }}
-          transition={{ duration: 0.2 }}
-          style={{ display: 'flex', alignItems: 'center', color: 'rgba(255, 255, 255, 0.6)' }}
-        >
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            <path d="m6 9 6 6 6-6"/>
-          </svg>
-        </motion.span>
-      </button>
-
-      <AnimatePresence>
-        {isOpen && (
-          <motion.div
-            ref={listRef}
-            initial={{ opacity: 0, y: direction === 'up' ? -6 : 6, scale: 0.98 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: direction === 'up' ? -6 : 6, scale: 0.98 }}
-            transition={{ duration: 0.15, ease: 'easeOut' }}
-            style={{
-              position: 'absolute',
-              top: direction === 'up' ? 'auto' : 'calc(100% + 6px)',
-              bottom: direction === 'up' ? 'calc(100% + 5px)' : 'auto',
-              left: 0,
-              right: 0,
-              maxHeight: direction === 'up' ? (compact ? 88 : 140) : 180,
-              overflowY: 'auto',
-              background: '#121214',
-              border: '1px solid rgba(255, 255, 255, 0.14)',
-              borderRadius: 10,
-              padding: '4px',
-              boxShadow: '0 12px 32px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.05)',
-              zIndex: 100,
-              scrollbarWidth: 'none'
-            }}
-          >
-            {languages.map((lang) => {
-              const active = lang.code === (language || 'system')
-              return (
-                <button
-                  key={lang.code}
-                  type="button"
-                  data-active={active ? 'true' : 'false'}
-                  onClick={() => {
-                    playButtonClickSound()
-                    patch({ language: lang.code })
-                    setIsOpen(false)
-                  }}
-                  style={{
-                    width: '100%',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    padding: compact ? '5px 8px' : '7px 10px',
-                    borderRadius: 7,
-                    background: active ? 'rgba(255, 255, 255, 0.12)' : 'transparent',
-                    color: active ? '#ffffff' : 'rgba(255, 255, 255, 0.8)',
-                    fontSize: compact ? 11.5 : 12,
-                    fontWeight: active ? 600 : 400,
-                    border: 'none',
-                    cursor: 'pointer',
-                    textAlign: 'left',
-                    transition: 'background 0.12s ease'
-                  }}
-                  onMouseEnter={(e) => {
-                    if (!active) e.currentTarget.style.background = 'rgba(255, 255, 255, 0.07)'
-                  }}
-                  onMouseLeave={(e) => {
-                    if (!active) e.currentTarget.style.background = 'transparent'
-                  }}
-                >
-                  <span>{getLangLabel(lang)}</span>
-                  {active && <span style={{ color: '#4caf50', fontSize: 13, fontWeight: 700 }}>✓</span>}
-                </button>
-              )
-            })}
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
-  )
-}

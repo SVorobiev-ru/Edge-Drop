@@ -16,6 +16,25 @@
   --bg-card: #141414;
   --bg-card-hover: #1c1c1c;
   --bg-chip: #141414;
+  --bg-card-pinned: #181818;
+  --bg-chip-zinc: #27272a;
+  --bg-pill: #141418;
+  --bg-dock-btn: #121214;
+  --bg-dock-btn-hover: rgba(28, 28, 32, 0.96);
+  --bg-dock-pill: #121216;
+  --bg-drop-overlay: rgba(6, 6, 8, 0.95);
+  --bg-flyout: #141414;
+  --bg-flyout-drop: rgba(15, 30, 18, 0.95);
+
+  --ink: 255 255 255;
+  --text-alpha-floor: 0;
+  --surface-inverse: #ffffff;
+  --on-inverse: #000000;
+  --on-inverse-zinc: #18181b;
+  --panel-rgb: 0 0 0;
+  --panel-alpha: 1;
+  --panel-bg: rgb(var(--panel-rgb) / var(--panel-alpha));
+  --badge-ring: #000000;
 
   /* Hairlines — used only where a divider is needed, not as box outlines */
   --edge-light: rgba(255, 255, 255, 0.06);
@@ -26,10 +45,15 @@
   --text-primary: #ffffff;
   --text-secondary: rgba(255, 255, 255, 0.78);
   --text-tertiary: rgba(255, 255, 255, 0.48);
+  --text-muted: #8e8e93;
+  --text-zinc-100: #f4f4f5;
+  --text-zinc-200: #e4e4e7;
+  --text-zinc-400: #a1a1aa;
 
   /* Accent (overridden at runtime by theme.ts) */
   --accent: #8b5cf6;
   --accent-glow: rgba(139, 92, 246, 0.55);
+  --accent-strong: #7c3aed;
 
   /* Shape & depth — large radii, no hairline boxes */
   --radius-blade: 24px;
@@ -55,4 +79,61 @@
   --panel-width: 270px;
   --gap: 12px;
   --pad: 14px;
+}
+
+:root.platform-darwin {
+  --text-alpha-floor: 0.5;
+  --text-tertiary: rgba(255, 255, 255, 0.5);
+}
+
+:root.platform-darwin[data-theme='light'] {
+  color-scheme: light;
+  --bg-0: #f2f2f5;
+  --bg-1: #f2f2f5;
+  --bg-2: #ffffff;
+  --bg-3: #e8e8ed;
+  --bg-glass: rgba(242, 242, 245, 0.78);
+  --bg-card: #ffffff;
+  --bg-card-hover: #e8e8ed;
+  --bg-chip: #e8e8ed;
+  --bg-card-pinned: #fafafc;
+  --bg-chip-zinc: #e4e4e7;
+  --bg-pill: #ffffff;
+  --bg-dock-btn: #ffffff;
+  --bg-dock-btn-hover: rgba(232, 232, 237, 0.96);
+  --bg-dock-pill: #ffffff;
+  --bg-drop-overlay: rgba(242, 242, 245, 0.95);
+  --bg-flyout: #ffffff;
+  --bg-flyout-drop: rgba(226, 244, 230, 0.95);
+
+  --ink: 0 0 0;
+  --text-alpha-floor: 0.6;
+  --surface-inverse: #1d1d1f;
+  --on-inverse: #ffffff;
+  --on-inverse-zinc: #ffffff;
+  --panel-rgb: 242 242 245;
+  --badge-ring: #f2f2f5;
+
+  --edge-strong: rgba(0, 0, 0, 0.16);
+  --divider: rgba(0, 0, 0, 0.1);
+
+  --text-primary: #1d1d1f;
+  --text-secondary: rgba(0, 0, 0, 0.74);
+  --text-tertiary: rgba(0, 0, 0, 0.6);
+  --text-muted: #5c5c63;
+  --text-zinc-100: #1d1d1f;
+  --text-zinc-200: #2c2c30;
+  --text-zinc-400: #55555c;
+}
+
+:root.platform-darwin[data-theme='dark'] {
+  color-scheme: dark;
+}
+
+:root.platform-darwin[data-vibrancy='on'] {
+  --panel-alpha: 0.72;
+}
+
+:root.platform-darwin[data-vibrancy='on'][data-theme='light'] {
+  --panel-alpha: 0.78;
 }

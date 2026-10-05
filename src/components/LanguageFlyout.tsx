@@ -6,21 +6,25 @@
  */
 import { useRef, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { useStore } from '../store/appStore'
+import { useStore, selectReduceMotion } from '../store/appStore'
 import { CloseIcon } from './icons'
 import { playButtonClickSound } from '../lib/soundEffects'
 import { createPortal } from 'react-dom'
 import { useAdaptiveSpring } from '../hooks/useAdaptiveSpring'
 import { useTranslation } from '../i18n'
+import { panelRect } from '../lib/panelPosition'
+import { isHorizontalEdge } from '../../shared/panelPlacement'
+import type { StickPosition } from '../../shared/types'
 
 const flyoutEaseOpen = [0.16, 1, 0.3, 1] as const
 const flyoutEaseClose = [0.3, 0, 0.2, 1] as const
+const FLYOUT_GAP = 12
 
 const flyoutVariants = {
-  hidden: (dir: 'left' | 'right' | 'top') => ({
+  hidden: (dir: StickPosition) => ({
     opacity: 0,
     x: dir === 'right' ? 14 : dir === 'left' ? -14 : 0,
-    y: dir === 'top' ? -14 : 0,
+    y: dir === 'top' ? -14 : dir === 'bottom' ? 14 : 0,
     scale: 0.97,
   }),
   shown: {
@@ -35,10 +39,10 @@ const flyoutVariants = {
       opacity: { duration: 0.18, ease: 'easeOut' as const },
     },
   },
-  exit: (dir: 'left' | 'right' | 'top') => ({
+  exit: (dir: StickPosition) => ({
     opacity: 0,
     x: dir === 'right' ? 10 : dir === 'left' ? -10 : 0,
-    y: dir === 'top' ? -10 : 0,
+    y: dir === 'top' ? -10 : dir === 'bottom' ? 10 : 0,
     scale: 0.98,
     transition: {
       x: { duration: 0.18, ease: flyoutEaseClose },
@@ -61,12 +65,12 @@ export function LanguageFlyout({ isRight }: { isRight: boolean }) {
   const patch = useStore((s) => s.patchSettings)
   const adaptiveSpring = useAdaptiveSpring()
 
-  const stickPosition = (settings.stickPosition || (isRight ? 'right' : 'left')) as 'left' | 'right' | 'top'
-  const isHorizontal = stickPosition === 'top'
+  const stickPosition = (settings.stickPosition || (isRight ? 'right' : 'left')) as StickPosition
+  const isHorizontal = isHorizontalEdge(stickPosition)
   const isTop = stickPosition === 'top'
 
   const isVisible = languageFlyoutOpen && settingsOpen && open
-  const reduceMotion = settings.reduceMotion || adaptiveSpring.type === 'tween'
+  const reduceMotion = useStore(selectReduceMotion) || adaptiveSpring.type === 'tween'
 
   const flyoutRef = useRef<HTMLDivElement | null>(null)
   const listRef = useRef<HTMLDivElement | null>(null)
@@ -83,9 +87,10 @@ export function LanguageFlyout({ isRight }: { isRight: boolean }) {
 
   const languageFlyoutAnchorRect = useStore((s) => s.languageFlyoutAnchorRect)
 
-  const dockWidth = Math.min(screenW - 60, 1080)
+  const dock = panelRect(settings, { width: screenW, height: screenH }, null, null)
+  const dockWidth = dock.width
   const flyoutWidth = isHorizontal ? 270 : 280
-  const dockLeft = Math.round((screenW - dockWidth) / 2)
+  const dockLeft = dock.x
   const anchorCenterX = isHorizontal && languageFlyoutAnchorRect?.x !== undefined
     ? (languageFlyoutAnchorRect.x + (languageFlyoutAnchorRect.width || 32) / 2) - dockLeft
     : dockWidth / 2
@@ -98,7 +103,7 @@ export function LanguageFlyout({ isRight }: { isRight: boolean }) {
   const originX = isHorizontal
     ? Math.max(0.08, Math.min(0.92, (anchorCenterX - flyoutLeft) / flyoutWidth))
     : (isRight ? 1 : 0)
-  const originY = isHorizontal ? 0 : 0.5
+  const originY = isHorizontal ? (isTop ? 0 : 1) : 0.5
 
   useEffect(() => {
     if (!isVisible || !flyoutRef.current) {
@@ -111,8 +116,8 @@ export function LanguageFlyout({ isRight }: { isRight: boolean }) {
       const h = flyoutRef.current.offsetHeight
       if (isHorizontal) {
         useStore.getState().setPreviewFlyoutRect({
-          top: 210,
-          bottom: 222 + h,
+          top: isTop ? dock.y + dock.height : dock.y - FLYOUT_GAP - h,
+          bottom: isTop ? dock.y + dock.height + FLYOUT_GAP + h : dock.y,
           left: flyoutLeft,
           right: flyoutLeft + flyoutWidth
         })
@@ -132,7 +137,7 @@ export function LanguageFlyout({ isRight }: { isRight: boolean }) {
       window.removeEventListener('resize', updateRect)
       useStore.getState().setPreviewFlyoutRect(null)
     }
-  }, [isVisible, isHorizontal, isTop, screenH, flyoutLeft, flyoutWidth, panelTop, panelH])
+  }, [isVisible, isHorizontal, isTop, screenH, flyoutLeft, flyoutWidth, panelTop, panelH, dock.y, dock.height])
 
   // Auto-scroll to active language on open
   useEffect(() => {
@@ -186,7 +191,7 @@ export function LanguageFlyout({ isRight }: { isRight: boolean }) {
             isHorizontal
               ? {
                   position: 'absolute',
-                  top: 222,
+                  ...(isTop ? { top: dock.y + dock.height + FLYOUT_GAP } : { bottom: screenH - dock.y + FLYOUT_GAP }),
                   left: dockLeft + flyoutLeft,
                   width: flyoutWidth,
                   pointerEvents: 'none',
@@ -222,7 +227,7 @@ export function LanguageFlyout({ isRight }: { isRight: boolean }) {
             style={{
               width: '100%',
               maxHeight: maxFlyoutHeight,
-              background: '#141414',
+              background: 'var(--bg-2)',
               borderRadius: 18,
               border: 'none',
               outline: 'none',
@@ -239,10 +244,10 @@ export function LanguageFlyout({ isRight }: { isRight: boolean }) {
             {/* Header */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 4px 8px 4px', borderBottom: 'none' }}>
               <div>
-                <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'rgba(255, 255, 255, 0.42)', marginBottom: 2 }}>
+                <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'rgb(var(--ink) / max(0.42, var(--text-alpha-floor)))', marginBottom: 2 }}>
                   LANGUAGE
                 </div>
-                <div style={{ fontSize: 13, fontWeight: 600, color: '#ffffff', letterSpacing: '-0.01em' }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', letterSpacing: '-0.01em' }}>
                   {t('behaviour.languageTitle')}
                 </div>
               </div>
@@ -253,9 +258,9 @@ export function LanguageFlyout({ isRight }: { isRight: boolean }) {
                   width: 24,
                   height: 24,
                   borderRadius: 6,
-                  background: 'rgba(255,255,255,0.06)',
+                  background: 'rgb(var(--ink) / 0.06)',
                   border: 'none',
-                  color: 'rgba(255,255,255,0.7)',
+                  color: 'rgb(var(--ink) / max(0.7, var(--text-alpha-floor)))',
                   cursor: 'pointer',
                   display: 'flex',
                   alignItems: 'center',
@@ -308,9 +313,9 @@ export function LanguageFlyout({ isRight }: { isRight: boolean }) {
                       justifyContent: 'space-between',
                       padding: '7px 10px',
                       borderRadius: 8,
-                      background: active ? 'rgba(255, 255, 255, 0.12)' : 'transparent',
-                      border: active ? '1px solid rgba(255, 255, 255, 0.18)' : '1px solid transparent',
-                      color: active ? '#ffffff' : 'rgba(255, 255, 255, 0.8)',
+                      background: active ? 'rgb(var(--ink) / 0.12)' : 'transparent',
+                      border: active ? '1px solid rgb(var(--ink) / 0.18)' : '1px solid transparent',
+                      color: active ? 'var(--text-primary)' : 'rgb(var(--ink) / max(0.8, var(--text-alpha-floor)))',
                       fontSize: 12,
                       fontWeight: active ? 600 : 400,
                       cursor: 'pointer',
@@ -321,17 +326,17 @@ export function LanguageFlyout({ isRight }: { isRight: boolean }) {
                     }}
                   >
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, overflow: 'hidden' }}>
-                      <span style={{ fontWeight: active ? 600 : 500, color: active ? '#ffffff' : 'rgba(255, 255, 255, 0.9)', fontSize: 12, whiteSpace: 'nowrap' }}>
+                      <span style={{ fontWeight: active ? 600 : 500, color: active ? 'var(--text-primary)' : 'rgb(var(--ink) / max(0.9, var(--text-alpha-floor)))', fontSize: 12, whiteSpace: 'nowrap' }}>
                         {lang.nativeName}
                       </span>
                       {lang.code !== 'system' && !lang.nativeName.includes('(') && lang.nativeName !== lang.name && (
-                        <span style={{ fontSize: 10.5, color: 'rgba(255, 255, 255, 0.42)', fontWeight: 400, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        <span style={{ fontSize: 10.5, color: 'rgb(var(--ink) / max(0.42, var(--text-alpha-floor)))', fontWeight: 400, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                           ({lang.name})
                         </span>
                       )}
                     </div>
                     {active && (
-                      <span style={{ color: '#ffffff', fontSize: 12, fontWeight: 700, marginLeft: 6, flexShrink: 0 }}>
+                      <span style={{ color: 'var(--text-primary)', fontSize: 12, fontWeight: 700, marginLeft: 6, flexShrink: 0 }}>
                         ✓
                       </span>
                     )}

@@ -129,8 +129,25 @@ export function macReportedPoint(input: {
   } else if (distFromEdge >= -BUFFER_PX && distFromEdge <= TRIGGER_PX) {
     dist = TRIGGER_PX + 1
   }
+  if (stickPosition === 'bottom') return { x: clientX, y: zone.probeArea.height - dist }
   return {
     x: stickPosition === 'right' ? zone.probeArea.width - dist : dist,
     y: clientY
   }
+}
+
+export interface PanelPlacement {
+  displayId: number | undefined
+  bounds: ScreenRect
+}
+
+export function panelPlacementChanged(before: PanelPlacement | null, after: PanelPlacement | null): boolean {
+  if (!before || !after) return before !== after
+  if (before.displayId !== after.displayId) return true
+  return (
+    before.bounds.x !== after.bounds.x ||
+    before.bounds.y !== after.bounds.y ||
+    before.bounds.width !== after.bounds.width ||
+    before.bounds.height !== after.bounds.height
+  )
 }

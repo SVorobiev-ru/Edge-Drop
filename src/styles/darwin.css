@@ -1,0 +1,298 @@
+:root.platform-darwin {
+  --font-ui: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Plus Jakarta Sans', 'Segoe UI', sans-serif;
+}
+
+.platform-darwin :is(
+  button,
+  [role='button'],
+  [style*='cursor: pointer'],
+  .item-main,
+  .pinned-header-interactive,
+  .bundle-actions,
+  .horizontal-bundle-header,
+  .emoji-cell,
+  .emoji-tone-pop-below,
+  .emoji-tone-choice,
+  .pill,
+  .setting-toggle,
+  .indicator-card,
+  .hotkey-field,
+  .settings-header-pill,
+  .version-separator
+):not(:disabled, .rubber-segment__item, .version-changelog-link, [style*='not-allowed'], [style*='cursor: grab']) {
+  cursor: default !important;
+}
+
+@media (prefers-contrast: more) {
+  :root.platform-darwin {
+    --text-secondary: rgba(255, 255, 255, 0.94);
+    --text-tertiary: rgba(255, 255, 255, 0.76);
+    --edge-strong: rgba(255, 255, 255, 0.32);
+    --divider: rgba(255, 255, 255, 0.26);
+  }
+
+  :root.platform-darwin[data-theme='light'] {
+    --text-secondary: rgba(0, 0, 0, 0.86);
+    --text-tertiary: rgba(0, 0, 0, 0.74);
+    --text-alpha-floor: 0.74;
+    --edge-strong: rgba(0, 0, 0, 0.34);
+    --divider: rgba(0, 0, 0, 0.28);
+  }
+
+  .platform-darwin .act-divider,
+  .platform-darwin .setting-section-divider::after {
+    background: rgb(var(--ink) / 0.4);
+  }
+
+  .platform-darwin :is(.bundle-actions, .list.horizontal .recent-section .section-label.recent-header, .settings-shelf-track.tab-view .shelf-section-divider) {
+    border-color: rgb(var(--ink) / 0.4);
+  }
+
+  .platform-darwin .item:not(.is-color-card) :is(.meta, .meta-time) {
+    color: rgb(var(--ink) / 0.76);
+  }
+}
+
+.platform-darwin .blade-container.blade-left .blade {
+  box-shadow: 1px 0 0 rgb(var(--ink) / 0.1), 14px 0 32px -14px rgba(0, 0, 0, 0.5);
+}
+
+.platform-darwin .blade-container.blade-right .blade {
+  box-shadow: -1px 0 0 rgb(var(--ink) / 0.1), -14px 0 32px -14px rgba(0, 0, 0, 0.5);
+}
+
+.platform-darwin .blade-container.blade-top .blade {
+  box-shadow: 0 1px 0 rgb(var(--ink) / 0.1), 0 14px 32px -14px rgba(0, 0, 0, 0.5);
+}
+
+.platform-darwin .blade-container.blade-bottom .blade {
+  box-shadow: 0 -1px 0 rgb(var(--ink) / 0.1), 0 -14px 32px -14px rgba(0, 0, 0, 0.5);
+}
+
+.platform-darwin .panel-morph-shell {
+  position: absolute;
+  left: var(--panel-x);
+  top: var(--panel-y);
+  width: var(--panel-w);
+  height: var(--panel-h);
+  border-radius: var(--panel-radius);
+  background: var(--panel-bg);
+  pointer-events: none;
+  z-index: 11;
+  transition:
+    left 0.24s cubic-bezier(0.22, 1, 0.36, 1),
+    top 0.24s cubic-bezier(0.22, 1, 0.36, 1),
+    width 0.24s cubic-bezier(0.22, 1, 0.36, 1),
+    height 0.24s cubic-bezier(0.22, 1, 0.36, 1),
+    border-radius 0.24s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.14s ease-out;
+}
+
+.platform-darwin .panel-morph-shell.is-revealing {
+  opacity: 0;
+}
+
+:root.platform-darwin[data-theme='light'] .blade-container .blade {
+  --panel-shadow-tone: rgba(0, 0, 0, 0.22);
+}
+
+:root.platform-darwin[data-theme='light'] .blade-container.blade-left .blade {
+  box-shadow: 1px 0 0 rgb(0 0 0 / 0.1), 14px 0 32px -14px var(--panel-shadow-tone);
+}
+
+:root.platform-darwin[data-theme='light'] .blade-container.blade-right .blade {
+  box-shadow: -1px 0 0 rgb(0 0 0 / 0.1), -14px 0 32px -14px var(--panel-shadow-tone);
+}
+
+:root.platform-darwin[data-theme='light'] .blade-container.blade-top .blade {
+  box-shadow: 0 1px 0 rgb(0 0 0 / 0.1), 0 14px 32px -14px var(--panel-shadow-tone);
+}
+
+:root.platform-darwin[data-theme='light'] .blade-container.blade-bottom .blade {
+  box-shadow: 0 -1px 0 rgb(0 0 0 / 0.1), 0 -14px 32px -14px var(--panel-shadow-tone);
+}
+
+:root.platform-darwin[data-theme='light'] .item::before {
+  background: none;
+  box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.06);
+}
+
+:root.platform-darwin[data-theme='light'] .item.is-color-card::before {
+  box-shadow: none;
+}
+
+:root.platform-darwin[data-theme='light'] .item-footer {
+  background: none;
+}
+
+:root.platform-darwin[data-theme='light'] :is(.actions, .fluid-row-actions, .horizontal-subitem-actions, .toast, .emoji-tone-pop, .scroll-top-btn) {
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.14), 0 0 0 1px rgba(0, 0, 0, 0.06);
+}
+
+:root.platform-darwin[data-vibrancy='on'] .item {
+  box-shadow: 0 0 0 1px rgb(var(--ink) / 0.06);
+}
+
+:root.platform-darwin[data-theme='light'] .scroll-top-btn.horizontal {
+  background: var(--bg-dock-btn);
+}
+
+:root.platform-darwin[data-theme='light'] {
+  --ob-bg: var(--bg-1);
+  --ob-card: var(--bg-2);
+  --ob-line: var(--divider);
+  --ob-muted: var(--text-muted);
+  --ob-hover: var(--bg-3);
+  --ob-btn: var(--bg-3);
+  --ob-btn-line: var(--edge-strong);
+  --ob-btn-hover: #dcdce2;
+  --ob-disabled: rgb(var(--ink) / 0.3);
+  --ob-dot: rgb(var(--ink) / 0.2);
+}
+
+:root.platform-darwin[data-theme='light'] :is(.github-promo-btn, .store-review-promo-btn, .shelf-github-btn):hover {
+  background: #dcdce2;
+}
+
+:root.platform-darwin[data-theme='light'] .indicator-card {
+  border-color: rgb(var(--ink) / 0.08) !important;
+}
+
+:root.platform-darwin[data-theme='light'] .indicator-card.active {
+  border-color: var(--surface-inverse) !important;
+}
+
+:root.platform-darwin[data-theme='light'] .slide-commit {
+  --sc-track: rgb(var(--ink) / 0.08) !important;
+  --sc-ink: var(--surface-inverse) !important;
+  --sc-ok: var(--surface-inverse) !important;
+  --sc-on-ink: var(--on-inverse) !important;
+  --sc-on-ok: var(--on-inverse) !important;
+}
+
+:root.platform-darwin[data-theme='light'] .wake-slider {
+  --ws-fill: var(--surface-inverse) !important;
+  --ws-track: var(--bg-chip-zinc) !important;
+  --ws-crest: var(--surface-inverse) !important;
+}
+
+.platform-darwin .settings-tab-btn,
+.platform-darwin .settings-tab-text {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: center;
+}
+
+.platform-darwin .setting-section-divider .setting-section-divider-text {
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.platform-darwin .setting-card .setting-slider-header > :first-child {
+  flex: 1;
+  min-width: 0;
+}
+
+.platform-darwin .setting-card .setting-pills {
+  flex-wrap: wrap;
+}
+
+.platform-darwin .setting-card .pill,
+.platform-darwin .setting-card .setting-pills .pill {
+  flex: 1 0 auto;
+  max-width: 100%;
+  height: auto;
+  min-height: 32px;
+  padding: 6px 8px;
+  line-height: 1.2;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+}
+
+.platform-darwin .setting-card .update-action-row,
+.platform-darwin .app-version-footer {
+  flex-wrap: wrap;
+}
+
+.platform-darwin :is(.update-action-btn, .manual-update-pill, .kofi-support-btn, .github-promo-btn, .store-review-promo-btn) {
+  height: auto;
+  max-height: none;
+  padding-block: 7px;
+  line-height: 1.25;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  text-align: center;
+}
+
+.platform-darwin :is(.update-action-btn, .manual-update-pill) {
+  min-height: 32px;
+}
+
+.platform-darwin :is(.kofi-support-btn, .github-promo-btn, .store-review-promo-btn) {
+  min-height: 38px;
+}
+
+.platform-darwin .setting-card .update-header-row {
+  gap: 6px;
+}
+
+.platform-darwin .setting-card .update-group-label {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.platform-darwin .setting-card .hotkey-field {
+  height: auto;
+  min-height: 38px;
+  padding-block: 6px;
+}
+
+.platform-darwin .setting-card :is(.hotkey-field-content, .hotkey-keycaps-row, .hotkey-recording-indicator) {
+  flex-wrap: wrap;
+  gap: 4px;
+  min-width: 0;
+}
+
+.platform-darwin .setting-card .ignored-app-name {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.platform-darwin .list:not(.horizontal) .meta {
+  flex-wrap: wrap;
+  row-gap: 2px;
+  white-space: normal;
+}
+
+.platform-darwin .list:not(.horizontal) .actions {
+  max-width: calc(100% - 16px);
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.platform-darwin .footer {
+  flex-wrap: wrap;
+  row-gap: 6px;
+}
+
+.platform-darwin .list.horizontal :is(.item, .pinned-header-interactive, .recent-section .section-label.recent-header) {
+  height: calc(var(--panel-h, 210px) - 64px);
+}
+
+:root.platform-darwin .scroll-top-btn {
+  position: absolute;
+  bottom: 16px;
+  right: 16px;
+}
+
+:root.platform-darwin .scroll-top-btn.horizontal {
+  bottom: 12px;
+  right: 12px;
+}
+
+:root.platform-darwin .item-main:active:has(:is(button, [role='button'], .fluid-card-row, .fluid-grid-img, .horizontal-subitem-tile):active) {
+  transform: none;
+}

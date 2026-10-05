@@ -1,4 +1,5 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { restorePlatform, setPlatform } from './helpers/platform'
 
 const mocks = vi.hoisted(() => ({
   availableFormats: vi.fn((): string[] => []),
@@ -25,33 +26,7 @@ vi.mock('node:fs', async (importOriginal) => {
   return { ...actual, existsSync: (p: string) => mocks.existsSync(p) }
 })
 
-vi.mock('koffi', () => ({
-  default: {
-    load: () => {
-      if (mocks.bridgeBroken) throw new Error('no objc runtime')
-      return {
-        func: (decl: string, ret?: string, args?: string[]) => {
-          if (decl.includes('objc_getClass')) return () => 'NSPasteboard'
-          if (decl.includes('sel_registerName')) return (name: string) => name
-          if (ret === 'long') return (_obj: unknown, sel: string) => (sel === 'count' ? (mocks.nativeTypes ?? []).length : 7)
-          if (ret === 'str') return (item: { name: string }) => item.name
-          if (args && args.length === 3) return (_arr: unknown, _sel: string, i: number) => ({ name: (mocks.nativeTypes ?? [])[i] })
-          return (_obj: unknown, sel: string) => {
-            if (sel === 'generalPasteboard') return 'pb'
-            if (sel === 'types') return mocks.nativeTypes ? 'types' : null
-            return null
-          }
-        }
-      }
-    }
-  }
-}))
-
-const realPlatform = process.platform
-
-function setPlatform(value: string): void {
-  Object.defineProperty(process, 'platform', { value, configurable: true })
-}
+vi.mock('koffi', async () => ({ default: (await import('./helpers/koffiMock')).pasteboardTypesKoffi(mocks) }))
 
 async function loadFormats(platform: string): Promise<typeof import('../electron/clipboard/formats')> {
   setPlatform(platform)
@@ -80,11 +55,11 @@ beforeEach(() => {
 })
 
 afterEach(() => {
-  setPlatform(realPlatform)
+  restorePlatform()
 })
 
 afterAll(() => {
-  setPlatform(realPlatform)
+  restorePlatform()
 })
 
 describe('hasExcludedPasteboardType', () => {

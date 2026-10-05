@@ -1,4 +1,5 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { restorePlatform, setPlatform } from './helpers/platform'
 
 const mocks = vi.hoisted(() => ({
   loaded: [] as string[],
@@ -46,12 +47,6 @@ vi.mock('koffi', () => ({
   }
 }))
 
-const realPlatform = process.platform
-
-function setPlatform(value: string): void {
-  Object.defineProperty(process, 'platform', { value, configurable: true })
-}
-
 async function loadNative(platform: string): Promise<typeof import('../electron/main/macNative')> {
   setPlatform(platform)
   vi.resetModules()
@@ -76,11 +71,11 @@ describe('macNative input helpers', () => {
 
   afterEach(() => {
     vi.restoreAllMocks()
-    setPlatform(realPlatform)
+    restorePlatform()
   })
 
   afterAll(() => {
-    setPlatform(realPlatform)
+    restorePlatform()
   })
 
   it('does not load any native library and reports nothing off macOS', async () => {

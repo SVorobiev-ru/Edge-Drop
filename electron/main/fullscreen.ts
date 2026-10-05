@@ -14,8 +14,9 @@
  * the panel suppresses itself after a game goes fullscreen, which is fine.
  */
 import koffi from 'koffi'
-import { systemPreferences } from 'electron'
-import { systemPresentationOptions, isFullscreenPresentation } from './macPresentation'
+import { systemPreferences, screen } from 'electron'
+import { systemPresentationOptions, isFullscreenPresentation, onScreenWindows, fullscreenDisplayId } from './macPresentation'
+import { frontmostPid } from './macNative'
 
 // Windows QUERY_USER_NOTIFICATION_STATE enum values:
 // 1 = QUNS_NOT_PRESENT        (screen saver / locked)
@@ -70,10 +71,11 @@ if (process.platform === 'win32') {
 }
 
 let isFullscreenActiveCache = false
+let macFullscreenDisplayId: number | null = null
 let checkTimer: ReturnType<typeof setInterval> | null = null
-let onFullscreenDetectedFn: (() => void) | null = null
+let onFullscreenDetectedFn: ((fullscreenDisplayId: number | null) => void) | null = null
 
-export function registerFullscreenActiveListener(fn: () => void): void {
+export function registerFullscreenActiveListener(fn: (fullscreenDisplayId: number | null) => void): void {
   onFullscreenDetectedFn = fn
 }
 
@@ -109,8 +111,24 @@ function queryNotificationState(): number {
   }
 }
 
-export function isFullscreenAppActive(): boolean {
-  return isFullscreenActiveCache
+export function isFullscreenAppActive(panelDisplayId?: number): boolean {
+  if (!isFullscreenActiveCache) return false
+  if (process.platform !== 'darwin' || panelDisplayId === undefined || macFullscreenDisplayId === null) return true
+  return macFullscreenDisplayId === panelDisplayId
+}
+
+function resolveMacFullscreenDisplay(): number | null {
+  try {
+    const pid = frontmostPid()
+    if (!pid || pid === process.pid) return null
+    const displays = screen.getAllDisplays().map((d) => ({ id: d.id, bounds: d.bounds }))
+    if (displays.length < 2) return null
+    const windows = onScreenWindows()
+    if (!windows) return null
+    return fullscreenDisplayId(windows, pid, displays)
+  } catch {
+    return null
+  }
 }
 
 function triggerMacFullscreenCheck(): void {
@@ -118,9 +136,10 @@ function triggerMacFullscreenCheck(): void {
   if (options === null) return
 
   const isNowFullscreen = isFullscreenPresentation(options)
+  macFullscreenDisplayId = isNowFullscreen ? resolveMacFullscreenDisplay() : null
   isFullscreenActiveCache = isNowFullscreen
   if (isNowFullscreen) {
-    onFullscreenDetectedFn?.()
+    onFullscreenDetectedFn?.(macFullscreenDisplayId)
   }
 }
 
@@ -142,7 +161,7 @@ export function triggerFullscreenCheck(): void {
 
   isFullscreenActiveCache = isNowFullscreen
   if (isNowFullscreen) {
-    onFullscreenDetectedFn?.()
+    onFullscreenDetectedFn?.(null)
   }
 }
 
@@ -213,4 +232,5 @@ export function stopFullscreenMonitor(): void {
   }
   unsubscribeMacSpaceChange()
   isFullscreenActiveCache = false
+  macFullscreenDisplayId = null
 }

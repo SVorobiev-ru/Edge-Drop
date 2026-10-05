@@ -21,22 +21,129 @@
  *  Drag-awareness: while an external OS file drag is active we never close.
  */
 import { useEffect, useRef } from 'react'
-import { edge } from '../lib/edge'
+import { edge, IS_DARWIN } from '../lib/edge'
 import { useStore } from '../store/appStore'
+import { isShelfClosing, releaseInteractive, watchShelfClose } from '../lib/shelf'
 import { TRIGGER_PX, BUFFER_PX } from '../../shared/edgeZones'
+import type { Settings, SolidRect } from '../../shared/types'
+import { PANEL_WIDTH_DEFAULT, clampDockHeight, clampPanelWidth } from '../../shared/panelWidth'
+import { dockSpan, isHorizontalEdge } from '../../shared/panelPlacement'
+import { PANEL_LAYOUT_EVENT } from '../lib/panelPosition'
+
+export { PANEL_WIDTH_DEFAULT, PANEL_WIDTH_MAX, PANEL_WIDTH_MIN, PANEL_WIDTH_STEP } from '../../shared/panelWidth'
 
 const DWELL_MS = 40      // cursor must linger this long to open
 const GRACE_MS = 250     // close delay after leaving
-const PANEL_WIDE = 270   // blade is 270px (var(--panel-width))
+const OPEN_COMMIT_TIMEOUT_MS = 250
+const PANEL_STATE_SETTLE_MS = 450
+const PANEL_STATE_RENEW_MS = 1500
+
+export function resolvePanelWidth(settings: Pick<Settings, 'panelWidth' | 'stickPosition'>): number {
+  if (isHorizontalEdge(settings.stickPosition)) return PANEL_WIDTH_DEFAULT
+  return clampPanelWidth(settings.panelWidth)
+}
+
 /** Hysteresis thresholds for closing the panel.
  * KEEP_OPEN_PX: if cursor x is <= this, the panel stays open (clearly inside blade).
  * START_CLOSE_PX: if cursor x is > this, start the close timer (clearly outside).
  * Gap between the two prevents rapid cancel/schedule oscillation at the blade edge
  * when the cursor hovers just outside the visual boundary.
  */
-const KEEP_OPEN_PX = PANEL_WIDE - 15  // 255 — clearly inside blade
-const START_CLOSE_PX = PANEL_WIDE + 20 // 290 — 20px buffer outside the visual boundary
-const PREVIEW_WIDE = 740             // Extended width when preview flyout is active
+export function panelZones(settings: Pick<Settings, 'panelWidth' | 'stickPosition'>) {
+  const wide = resolvePanelWidth(settings)
+  return {
+    wide,
+    keepOpen: wide - 15,
+    startClose: wide + 20,
+    previewWide: wide + 470
+  }
+}
+
+function solidRectOf(el: Element | null): SolidRect | null {
+  if (!el) return null
+  const r = el.getBoundingClientRect()
+  if (!(r.width > 0 && r.height > 0)) return null
+  const x = Math.floor(r.left)
+  const y = Math.floor(r.top)
+  return { x, y, width: Math.ceil(r.right) - x, height: Math.ceil(r.bottom) - y }
+}
+
+function collectSolidRects(root: ParentNode = document): SolidRect[] {
+  const rects: SolidRect[] = []
+  const blade = root.querySelector('.blade-container.is-morphing') ? null : solidRectOf(root.querySelector('.blade'))
+  if (blade) rects.push(blade)
+  root.querySelectorAll('[data-preview-flyout]').forEach((el) => {
+    const rect = solidRectOf(el)
+    if (rect) rects.push(rect)
+  })
+  return rects
+}
+
+function startPanelStateReporter(): () => void {
+  let frame: number | undefined
+  let settleUntil = 0
+  let lastKey = ''
+
+  const send = (force: boolean) => {
+    const { open, settings } = useStore.getState()
+    const rects = open ? collectSolidRects() : []
+    const key = JSON.stringify([open, rects, settings.stickPosition])
+    if (!force && key === lastKey) return
+    lastKey = key
+    try {
+      void edge.setPanelState({ open, rects, edge: settings.stickPosition })?.catch?.(() => {})
+    } catch { /* ignore */ }
+  }
+
+  const loop = () => {
+    frame = undefined
+    if (Date.now() < settleUntil) {
+      send(false)
+      frame = window.requestAnimationFrame(loop)
+      return
+    }
+    send(true)
+  }
+
+  const kick = () => {
+    settleUntil = Date.now() + PANEL_STATE_SETTLE_MS
+    if (frame === undefined) frame = window.requestAnimationFrame(loop)
+  }
+
+  const unsubscribe = useStore.subscribe((state, prev) => {
+    if (prev.open && !state.open) send(false)
+    if (
+      state.open !== prev.open ||
+      state.previewItemId !== prev.previewItemId ||
+      state.styleFlyoutOpen !== prev.styleFlyoutOpen ||
+      state.languageFlyoutOpen !== prev.languageFlyoutOpen ||
+      state.settingsOpen !== prev.settingsOpen ||
+      state.emojiOpen !== prev.emojiOpen ||
+      state.settings !== prev.settings ||
+      state.toasts !== prev.toasts ||
+      state.dragActive !== prev.dragActive ||
+      state.sliderActive !== prev.sliderActive ||
+      state.edgeTransition !== prev.edgeTransition
+    ) {
+      kick()
+    }
+  })
+  const renew = window.setInterval(() => {
+    if (useStore.getState().open) send(true)
+  }, PANEL_STATE_RENEW_MS)
+  window.addEventListener('resize', kick)
+  window.addEventListener(PANEL_LAYOUT_EVENT, kick)
+  kick()
+
+  return () => {
+    unsubscribe()
+    window.clearInterval(renew)
+    window.removeEventListener('resize', kick)
+    window.removeEventListener(PANEL_LAYOUT_EVENT, kick)
+    if (frame !== undefined) window.cancelAnimationFrame(frame)
+    frame = undefined
+  }
+}
 
 export const PANEL_LEAVE_EVENT = 'panel:leave'
 export const PANEL_ENTER_EVENT = 'panel:enter'
@@ -65,16 +172,19 @@ export function notifyPreviewClosedByUser(): void {
   }, PREVIEW_CLOSE_STAY_MS)
 }
 
+/** Depth of the dock area that keeps the panel open, measured from its screen edge. */
+export function dockBladeHeight(settings: Pick<Settings, 'dockHeight'>): number {
+  return clampDockHeight(settings.dockHeight) + 8
+}
+
 export function getHorizontalDockMetrics(
   displayWidth: number,
   horizontalOffset = 0.5,
   hotZoneHeight = 0.25,
-  triggerAlignment: 'top' | 'center' | 'bottom' | 'left' | 'right' = 'center'
+  triggerAlignment: 'top' | 'center' | 'bottom' | 'left' | 'right' = 'center',
+  dockWidthSetting?: number
 ) {
-  const dockWidth = Math.min(displayWidth - 60, 1080)
-  const pad = displayWidth >= dockWidth + 60 ? 30 : 0
-  const minX = pad
-  const maxX = displayWidth - dockWidth - pad
+  const { width: dockWidth, minX, maxX } = dockSpan(displayWidth, dockWidthSetting)
   const hOffset = Math.min(1, Math.max(0, horizontalOffset))
   const dockX = minX + Math.round(Math.max(0, maxX - minX) * hOffset)
   const dockCenterX = dockX + dockWidth / 2
@@ -138,7 +248,7 @@ export function useEdgeHover(): void {
     const recompute = () => {
       const h = window.innerHeight
       const s = useStore.getState().settings
-      const isHorizontal = s.stickPosition === 'top'
+      const isHorizontal = isHorizontalEdge(s.stickPosition)
 
       const pFrac = s.panelHeight || 0.6
       const panelH = h * pFrac
@@ -165,7 +275,7 @@ export function useEdgeHover(): void {
 
       // Horizontal dock bounds (for top/bottom) — calculated in DISPLAY coordinates
       const dispW = displaySize.current.width
-      const dockMetrics = getHorizontalDockMetrics(dispW, s.horizontalOffset ?? 0.5, s.hotZoneHeight ?? 0.25, s.triggerAlignment || 'center')
+      const dockMetrics = getHorizontalDockMetrics(dispW, s.horizontalOffset ?? 0.5, s.hotZoneHeight ?? 0.25, s.triggerAlignment || 'center', s.dockWidth)
       const left = dockMetrics.triggerLeft
       const right = dockMetrics.triggerRight
       const midX = dockMetrics.dockCenterX
@@ -194,7 +304,8 @@ export function useEdgeHover(): void {
         state.settings.verticalOffset !== prevState.settings.verticalOffset ||
         state.settings.horizontalOffset !== prevState.settings.horizontalOffset ||
         state.settings.stickPosition !== prevState.settings.stickPosition ||
-        state.settings.triggerAlignment !== prevState.settings.triggerAlignment
+        state.settings.triggerAlignment !== prevState.settings.triggerAlignment ||
+        state.settings.dockWidth !== prevState.settings.dockWidth
       ) {
         recompute()
       }
@@ -209,18 +320,15 @@ export function useEdgeHover(): void {
   useEffect(() => {
     let dwellTimer: number | undefined
     let graceTimer: number | undefined
-    let interactiveTimer: number | undefined
+    let commitTimer: number | undefined
+    const stopCloseWatch = watchShelfClose()
+    const stopPanelState = edge.platform === 'darwin' ? startPanelStateReporter() : () => {}
 
     const closePanelNow = () => {
       const s = useStore.getState()
       if (s.styleFlyoutOpen) s.setStyleFlyoutOpen(false)
       if (s.languageFlyoutOpen) s.setLanguageFlyoutOpen(false)
       s.setOpen(false)
-      if (interactiveTimer !== undefined) window.clearTimeout(interactiveTimer)
-      interactiveTimer = window.setTimeout(() => {
-        interactiveTimer = undefined
-        if (!useStore.getState().open) edge.setInteractive(false)
-      }, 300)
     }
 
     const closePanel = () => {
@@ -263,6 +371,7 @@ export function useEdgeHover(): void {
     const scheduleClose = (delay = GRACE_MS) => {
       const state = useStore.getState()
       if (state.sliderActive || state.edgeTransition?.active) return
+      if (state.itemMenuOpen) return
       if (state.dragActive && !state.internalDragReq) return
       if (graceTimer !== undefined) return // already closing
 
@@ -283,10 +392,6 @@ export function useEdgeHover(): void {
       if (graceTimer !== undefined) {
         window.clearTimeout(graceTimer)
         graceTimer = undefined
-      }
-      if (interactiveTimer !== undefined) {
-        window.clearTimeout(interactiveTimer)
-        interactiveTimer = undefined
       }
       // User re-entered the clipboard — clear the preview grace period flags only
       // after the 1750ms position-changed stay window has completed, so the panel
@@ -311,10 +416,6 @@ export function useEdgeHover(): void {
         window.clearTimeout(dwellTimer)
         dwellTimer = undefined
       }
-      if (interactiveTimer !== undefined) {
-        window.clearTimeout(interactiveTimer)
-        interactiveTimer = undefined
-      }
       // Sequence the open across two steps so the OS/DWM surface work
       // (click-through off + always-on-top re-assert over IPC) starts before
       // the React clip-path/spring commit. Previously both fired in the same
@@ -325,10 +426,22 @@ export function useEdgeHover(): void {
         void (edge.setInteractive(true) as unknown as Promise<void>)?.catch?.(() => {})
       } catch { /* ignore IPC errors; close path still governs state */ }
       if (useStore.getState().open) return
+      let committed = false
       const commitOpen = () => {
+        if (committed) return
+        committed = true
+        if (commitTimer !== undefined) window.clearTimeout(commitTimer)
+        commitTimer = undefined
         if (useStore.getState().open) return
         useStore.getState().setOpen(true)
       }
+      if (commitTimer !== undefined) window.clearTimeout(commitTimer)
+      commitTimer = window.setTimeout(() => {
+        commitTimer = undefined
+        if (committed) return
+        committed = true
+        if (!useStore.getState().open) releaseInteractive()
+      }, OPEN_COMMIT_TIMEOUT_MS)
       try {
         if (typeof window.requestAnimationFrame === 'function') {
           window.requestAnimationFrame(() => commitOpen())
@@ -354,14 +467,16 @@ export function useEdgeHover(): void {
       const { x, y } = lastClient.current
       if (x < -BUFFER_PX || y < 0) return true // unknown — be conservative, don't close
       const s = state.settings
+      const zones = panelZones(s)
       const hasFlyout = !!(state.previewItemId || state.styleFlyoutOpen || state.languageFlyoutOpen)
-      const currentPanelWide = hasFlyout ? PREVIEW_WIDE : PANEL_WIDE
+      const currentPanelWide = hasFlyout ? zones.previewWide : zones.wide
 
-      if (s.stickPosition === 'top') {
+      if (isHorizontalEdge(s.stickPosition)) {
         const dispW = displaySize.current.width
-        const { dockWidth, dockX } = getHorizontalDockMetrics(dispW, s.horizontalOffset ?? 0.5, s.hotZoneHeight ?? 0.25, s.triggerAlignment || 'center')
-        const bladeHeight = 218
-        const inBlade = y >= -BUFFER_PX && y <= bladeHeight && x >= dockX - BUFFER_PX && x <= dockX + dockWidth + BUFFER_PX
+        const { dockWidth, dockX } = getHorizontalDockMetrics(dispW, s.horizontalOffset ?? 0.5, s.hotZoneHeight ?? 0.25, s.triggerAlignment || 'center', s.dockWidth)
+        const bladeHeight = dockBladeHeight(s)
+        const depth = s.stickPosition === 'bottom' ? displaySize.current.height - y : y
+        const inBlade = depth >= -BUFFER_PX && depth <= bladeHeight && x >= dockX - BUFFER_PX && x <= dockX + dockWidth + BUFFER_PX
         if (inBlade) return true
         if (hasFlyout && state.previewFlyoutRect && state.previewFlyoutRect.left !== undefined && state.previewFlyoutRect.right !== undefined) {
           const FLYOUT_BUFFER = 24
@@ -376,16 +491,17 @@ export function useEdgeHover(): void {
       }
 
       let insideX = false
+      const dispW = edge.platform === 'darwin' ? displaySize.current.width : window.innerWidth
       if (s.stickPosition === 'right') {
-        insideX = x >= window.innerWidth - currentPanelWide - BUFFER_PX && x <= window.innerWidth + BUFFER_PX
+        insideX = x >= dispW - currentPanelWide - BUFFER_PX && x <= dispW + BUFFER_PX
       } else {
         insideX = x >= -BUFFER_PX && x <= currentPanelWide + BUFFER_PX
       }
       if (!insideX) return false
 
       const inPreviewCol = s.stickPosition === 'right'
-        ? x < window.innerWidth - KEEP_OPEN_PX
-        : x > KEEP_OPEN_PX
+        ? x < dispW - zones.keepOpen
+        : x > zones.keepOpen
 
       if (inPreviewCol && hasFlyout && state.previewFlyoutRect) {
         const FLYOUT_BUFFER = 24
@@ -397,6 +513,7 @@ export function useEdgeHover(): void {
     }
 
     const onPanelLeave = () => {
+      if (useStore.getState().keyboardMode) return
       if (isInsideBlade()) {
         cancelClose()
         return
@@ -435,16 +552,18 @@ export function useEdgeHover(): void {
       const { stickPosition, displayWidth } = data
       const { top, bottom, midY, panelHalfH } = zone.current
       const hasFlyout = !!(state.previewItemId || state.styleFlyoutOpen || state.languageFlyoutOpen)
-      const currentKeepOpenPx = hasFlyout ? PREVIEW_WIDE - 15 : KEEP_OPEN_PX
-      const currentStartClosePx = hasFlyout ? PREVIEW_WIDE + 20 : START_CLOSE_PX
+      const zones = panelZones(state.settings)
+      const currentKeepOpenPx = hasFlyout ? zones.previewWide - 15 : zones.keepOpen
+      const currentStartClosePx = hasFlyout ? zones.previewWide + 20 : zones.startClose
 
       switch (stickPosition) {
-        case 'top': {
-          const distFromTop = data.y
+        case 'top':
+        case 'bottom': {
+          const distFromEdge = stickPosition === 'bottom' ? (data.displayHeight || displaySize.current.height) - data.y : data.y
           const triggerDepth = Math.max(state.settings.hotZoneWidth ?? 3, 1)
-          const inEdgeNear = distFromTop >= -BUFFER_PX && distFromTop <= (triggerDepth + 25)
+          const inEdgeNear = distFromEdge >= -BUFFER_PX && distFromEdge <= (triggerDepth + 25)
           const dispW = displayWidth || displaySize.current.width
-          const { dockWidth, dockX, triggerLeft, triggerRight } = getHorizontalDockMetrics(dispW, state.settings.horizontalOffset ?? 0.5, state.settings.hotZoneHeight ?? 0.25, state.settings.triggerAlignment || 'center')
+          const { dockWidth, dockX, triggerLeft, triggerRight } = getHorizontalDockMetrics(dispW, state.settings.horizontalOffset ?? 0.5, state.settings.hotZoneHeight ?? 0.25, state.settings.triggerAlignment || 'center', state.settings.dockWidth)
           const inZone = data.x >= triggerLeft && data.x <= triggerRight
 
           if (!inEdgeNear) {
@@ -457,7 +576,7 @@ export function useEdgeHover(): void {
             triggerEdgeHint()
           }
 
-          if (distFromTop >= -BUFFER_PX && distFromTop <= triggerDepth && inZone && !state.open && isHoverEnabled) {
+          if (distFromEdge >= -BUFFER_PX && distFromEdge <= triggerDepth && inZone && !state.open && isHoverEnabled) {
             if (state.edgeHintActive) state.setEdgeHintActive(false)
             cancelClose()
             if (dwellTimer === undefined) {
@@ -478,12 +597,13 @@ export function useEdgeHover(): void {
           if (state.edgeHintActive) state.setEdgeHintActive(false)
 
           const now = Date.now()
-          if (now - lastSetInteractiveRef.current > 2000) {
+          if (!isShelfClosing() && now - lastSetInteractiveRef.current > 2000) {
             lastSetInteractiveRef.current = now
             edge.setInteractive(true)
           }
+          if (state.keyboardMode) return
 
-          const baseBladeH = 218
+          const baseBladeH = dockBladeHeight(state.settings)
           const keepOpenDepth = baseBladeH
           const startCloseDepth = baseBladeH + 40
           const insideX = data.x >= dockX - BUFFER_PX && data.x <= dockX + dockWidth + BUFFER_PX
@@ -494,17 +614,17 @@ export function useEdgeHover(): void {
             const FLYOUT_BUFFER = 24
             const flyoutScreenLeft = dockX + state.previewFlyoutRect.left
             const flyoutScreenRight = dockX + state.previewFlyoutRect.right
-            inFlyout = distFromTop >= (state.previewFlyoutRect.top - FLYOUT_BUFFER) &&
-              distFromTop <= (state.previewFlyoutRect.bottom + FLYOUT_BUFFER) &&
+            inFlyout = data.y >= (state.previewFlyoutRect.top - FLYOUT_BUFFER) &&
+              data.y <= (state.previewFlyoutRect.bottom + FLYOUT_BUFFER) &&
               data.x >= flyoutScreenLeft - FLYOUT_BUFFER && data.x <= flyoutScreenRight + FLYOUT_BUFFER
           }
 
-          if ((distFromTop >= -BUFFER_PX && distFromTop <= keepOpenDepth && insideX) || inFlyout) {
+          if ((distFromEdge >= -BUFFER_PX && distFromEdge <= keepOpenDepth && insideX) || inFlyout) {
             cancelClose()
             return
           }
 
-          if (distFromTop > startCloseDepth || distFromTop < -BUFFER_PX || outsideX) {
+          if (distFromEdge > startCloseDepth || distFromEdge < -BUFFER_PX || outsideX) {
             scheduleClose()
           }
           break
@@ -547,12 +667,13 @@ export function useEdgeHover(): void {
           if (state.edgeHintActive) state.setEdgeHintActive(false)
 
           const now = Date.now()
-          if (now - lastSetInteractiveRef.current > 2000) {
+          if (!isShelfClosing() && now - lastSetInteractiveRef.current > 2000) {
             lastSetInteractiveRef.current = now
             edge.setInteractive(true)
           }
+          if (state.keyboardMode) return
 
-          const inPreviewColumn = distFromRight > KEEP_OPEN_PX
+          const inPreviewColumn = distFromRight > zones.keepOpen
           let insideY = false
           if (inPreviewColumn && hasFlyout && state.previewFlyoutRect) {
             const FLYOUT_BUFFER = 24
@@ -609,12 +730,13 @@ export function useEdgeHover(): void {
           if (state.edgeHintActive) state.setEdgeHintActive(false)
 
           const now = Date.now()
-          if (now - lastSetInteractiveRef.current > 2000) {
+          if (!isShelfClosing() && now - lastSetInteractiveRef.current > 2000) {
             lastSetInteractiveRef.current = now
             edge.setInteractive(true)
           }
+          if (state.keyboardMode) return
 
-          const inPreviewColumn = data.x > KEEP_OPEN_PX
+          const inPreviewColumn = data.x > zones.keepOpen
           let insideY = false
           if (inPreviewColumn && hasFlyout && state.previewFlyoutRect) {
             const FLYOUT_BUFFER = 24
@@ -659,6 +781,7 @@ export function useEdgeHover(): void {
     const onWindowBlur = () => {
       const state = useStore.getState()
       if (!state.open) return
+      if (IS_DARWIN && state.isInternalCopying) return
       // Don't close during an external OS file drag — the drag surface may
       // temporarily shift focus to the OS drag-ghost or file manager.
       if (state.dragActive && !state.internalDragReq) return
@@ -718,7 +841,9 @@ export function useEdgeHover(): void {
       document.removeEventListener('dragend', onDocDragEnd)
       window.clearTimeout(dwellTimer)
       window.clearTimeout(graceTimer)
-      window.clearTimeout(interactiveTimer)
+      window.clearTimeout(commitTimer)
+      stopCloseWatch()
+      stopPanelState()
     }
   }, [])
 }

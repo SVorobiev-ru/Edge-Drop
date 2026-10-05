@@ -9,13 +9,15 @@
   "main": "out/main/index.js",
   "type": "module",
   "scripts": {
+    "predev": "install-electron",
     "dev": "electron-vite dev",
-    "build": "electron-vite build",
+    "build": "electron-vite build && node scripts/strip-dev-csp.cjs",
     "build:github": "npm run build && electron-builder --win nsis -c.extraMetadata.buildTarget=github",
     "build:store": "npm run build && electron-builder --win appx -c.extraMetadata.buildTarget=store",
     "build:msix": "npm run build && electron-builder --win appx -c.extraMetadata.buildTarget=store",
     "build:win": "npm run build:github",
     "package": "npm run build:github",
+    "prepreview": "install-electron",
     "preview": "electron-vite preview",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json --composite false",
@@ -55,12 +57,6 @@
       "!**/node_modules/react-dom/**",
       "!**/node_modules/koffi/doc/**"
     ],
-    "extraResources": [
-      {
-        "from": "node_modules/emoji-datasource-twitter/img/twitter/64",
-        "to": "emoji/64"
-      }
-    ],
     "asarUnpack": [
       "**/*.{node,dll}",
       "**/node_modules/koffi/**/*",
@@ -89,6 +85,10 @@
       ],
       "icon": "resources/icon.ico",
       "extraResources": [
+        {
+          "from": "node_modules/emoji-datasource-twitter/img/twitter/64",
+          "to": "emoji/64"
+        },
         {
           "from": "resources/startup/EdgeDropStartup.exe",
           "to": "startup/EdgeDropStartup.exe"
@@ -135,13 +135,82 @@
       ],
       "icon": "resources/icon.icns",
       "category": "public.app-category.productivity",
+      "minimumSystemVersion": "12.0",
       "artifactName": "Edge-Drop-${version}-mac-${arch}.${ext}",
       "identity": null,
       "hardenedRuntime": false,
       "notarize": false,
+      "electronLanguages": [
+        "ar",
+        "bn",
+        "cs",
+        "da",
+        "de",
+        "el",
+        "en",
+        "es",
+        "fa",
+        "fi",
+        "fr",
+        "he",
+        "hi",
+        "hu",
+        "id",
+        "it",
+        "ja",
+        "ko",
+        "nl",
+        "nb",
+        "pl",
+        "pt_BR",
+        "pt_PT",
+        "ro",
+        "ru",
+        "sv",
+        "th",
+        "tr",
+        "uk",
+        "vi",
+        "zh_CN",
+        "zh_TW"
+      ],
       "files": [
+        "out/**/*",
+        "!out/renderer/**/*.gif",
+        "resources/**/*",
+        "!resources/startup/**/*.exe",
+        "!resources/startup/**/*.cs",
+        "!resources/appx/**",
+        "package.json",
+        "!**/node_modules/emoji-datasource-twitter/**",
+        "!**/node_modules/lucide-react/**",
+        "!**/node_modules/gsap/**",
+        "!**/node_modules/framer-motion/**",
+        "!**/node_modules/@fontsource/**",
+        "!**/node_modules/@iconify-json/**",
+        "!**/node_modules/@iconify/react/**",
+        "!**/node_modules/@radix-ui/**",
+        "!**/node_modules/svg-path-bbox/**",
+        "!**/node_modules/react-dom/**",
+        "!**/node_modules/koffi/doc/**",
         "!**/node_modules/@koromix/koffi-!(darwin-${arch})/**",
-        "!**/node_modules/@resvg/resvg-js-!(darwin-${arch})/**"
+        "!**/node_modules/@resvg/resvg-js-!(darwin-${arch})/**",
+        "!**/node_modules/electron-updater/**",
+        "!**/node_modules/builder-util-runtime/**",
+        "!**/node_modules/debug/**",
+        "!**/node_modules/ms/**",
+        "!**/node_modules/sax/**",
+        "!**/node_modules/fs-extra/**",
+        "!**/node_modules/graceful-fs/**",
+        "!**/node_modules/jsonfile/**",
+        "!**/node_modules/universalify/**",
+        "!**/node_modules/js-yaml/**",
+        "!**/node_modules/argparse/**",
+        "!**/node_modules/lazy-val/**",
+        "!**/node_modules/lodash.escaperegexp/**",
+        "!**/node_modules/lodash.isequal/**",
+        "!**/node_modules/semver/**",
+        "!**/node_modules/tiny-typed-emitter/**"
       ],
       "publish": {
         "provider": "github",
@@ -157,7 +226,15 @@
         "NSCameraUsageDescription": null,
         "NSMicrophoneUsageDescription": null,
         "NSBluetoothAlwaysUsageDescription": null,
-        "NSBluetoothPeripheralUsageDescription": null
+        "NSBluetoothPeripheralUsageDescription": null,
+        "CFBundleURLTypes": [
+          {
+            "CFBundleURLName": "com.edgedrop.app",
+            "CFBundleURLSchemes": [
+              "edgedrop"
+            ]
+          }
+        ]
       }
     }
   },
@@ -173,7 +250,7 @@
     "@types/react-dom": "^18.2.22",
     "@vitalets/google-translate-api": "^9.2.1",
     "@vitejs/plugin-react": "^4.2.1",
-    "electron": "^34.2.0",
+    "electron": "^43.7.7",
     "electron-builder": "^26.15.3",
     "electron-vite": "^2.1.0",
     "emoji-datasource-twitter": "^16.0.0",

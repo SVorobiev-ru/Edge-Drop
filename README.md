@@ -32,6 +32,13 @@
 </p>
 
 <p align="center">
+  <strong>macOS (Apple silicon and Intel):</strong> this fork publishes its own builds.
+  <a href="https://github.com/SVorobiev-ru/Edge-Drop/releases/latest">Download the DMG from the fork releases</a>
+  · <a href="#macos">install notes</a>
+  · <a href="MACOS.md">permissions, updates and known limitations</a>
+</p>
+
+<p align="center">
   <a href="https://github.com/Deepender25/Edge-Drop/releases"><img alt="Release" src="https://img.shields.io/github/v/release/Deepender25/Edge-Drop?style=flat-square&labelColor=23272e&color=d2f4e8" /></a>
   <a href="https://github.com/Deepender25/Edge-Drop/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/Deepender25/Edge-Drop?style=flat-square&labelColor=23272e&color=f6c7d6" /></a>
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/github/license/Deepender25/Edge-Drop?style=flat-square&labelColor=23272e&color=ffe6b3" /></a>
@@ -216,7 +223,7 @@ This repository is a fork that ports Edge-Drop to macOS (Apple silicon and Intel
 
 1. Download the DMG for your Mac from the [fork releases](https://github.com/SVorobiev-ru/Edge-Drop/releases/latest): `arm64` for Apple silicon, `x64` for Intel.
 2. Open it and drag **Edge-Drop** into **Applications**.
-3. Run `xattr -dr com.apple.quarantine /Applications/Edge-Drop.app` in Terminal, then start the app. The build is signed ad-hoc and not notarized, so macOS blocks it until the quarantine attribute is removed.
+3. Run `xattr -dr com.apple.quarantine /Applications/Edge-Drop.app` in Terminal, then start the app. The build is not notarized, so macOS blocks it until the quarantine attribute is removed.
 
 Permissions, updates, building from source and known limitations are described in [MACOS.md](MACOS.md).
 
@@ -272,7 +279,7 @@ npm run build:store  # outputs an MSIX package for Microsoft Store submission
 - **High-Performance Image Thumbnailing Protocol (`edgelocal://thumb/`):** Custom Electron protocol streams 240px thumbnails for history cards instead of loading multi-megapixel raw image files into memory, preventing GPU memory bloat.
 
 **Configurable Global Toggle Shortcut**
-- **Tactile Keycap Hotkey Recorder (`<HotkeyRecorder />`):** Customize the shelf toggle shortcut (defaults to `Alt+C`) with live modifier keycap preview, instant clear/reset buttons, and non-blocking key capture.
+- **Tactile Keycap Hotkey Recorder (`<HotkeyRecorder />`):** Customize the shelf toggle shortcut (defaults to `Alt+C`, `⌘⇧V` on macOS) with live modifier keycap preview, instant clear/reset buttons, and non-blocking key capture.
 - **Collision Detection & Dynamic Registration:** Dynamically updates Electron `globalShortcut` with automatic collision resolution and instant toast feedback.
 - **Zero OS Focus Stealing:** Dynamically toggles window focusability exclusively during active key recording, keeping normal shelf clicks non-intrusive.
 
@@ -416,7 +423,7 @@ Edge-Drop touches the OS clipboard, the filesystem, and the Win32 OLE drag pipel
 
 | Control | Implementation |
 |---|---|
-| Modern Runtime | **Electron 34.2.0+** — Patches EOL Chromium memory corruption and RCE vectors |
+| Modern Runtime | **Electron 43+** — Patches EOL Chromium memory corruption and RCE vectors |
 | Encrypted Storage | **Windows DPAPI `safeStorage`** — Plaintext history (`items.json`) encrypted at rest with user-session DPAPI keys & zero-data-loss auto-migration (`.bak` backups) |
 | Process Isolation | `contextIsolation: true` · `nodeIntegration: false` · `sandbox: true` on all browser windows |
 | PowerShell Hardening | Absolute executable path `${SystemRoot}\System32\WindowsPowerShell\v1.0\powershell.exe`, non-blocking `execFile`, strict path validation (`pathValidation.ts`), and queue deadlock protection |
@@ -434,7 +441,7 @@ Edge-Drop touches the OS clipboard, the filesystem, and the Win32 OLE drag pipel
 
 | Layer | Choice | Why |
 |---|---|---|
-| Desktop runtime | **Electron 34+** | Only way to access Win32 OLE drag pipelines and native clipboard formats from JS |
+| Desktop runtime | **Electron 43+** | Only way to access Win32 OLE drag pipelines and native clipboard formats from JS |
 | Build tooling | **electron-vite** | Separate Main / Preload / Renderer builds with Vite HMR |
 | UI | **React 18 + TypeScript 5.4** | Strongly typed component hierarchy |
 | Audio | **Web Audio API** | Synthesized haptic audio feedback (ticks, clicks, pops, thuds) with 0 audio asset overhead |

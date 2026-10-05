@@ -17,7 +17,7 @@ export function ToastStack() {
   const dismiss = useStore((s) => s.dismissToast)
 
   return (
-    <div className="toast-stack">
+    <div className="toast-stack" role="status" aria-live="polite">
       <AnimatePresence>
         {toasts.map((toastMsg) => (
           <motion.button

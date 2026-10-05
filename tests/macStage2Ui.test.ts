@@ -1,11 +1,13 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { restorePlatform, setPlatform } from './helpers/platform'
 
 const mocks = vi.hoisted(() => ({
   userData: '',
-  svgKinds: [] as string[][]
+  svgKinds: [] as string[][],
+  resvgOptions: [] as Array<Record<string, any>>
 }))
 
 vi.mock('electron', () => ({
@@ -22,6 +24,9 @@ vi.mock('electron', () => ({
 
 vi.mock('@resvg/resvg-js', () => ({
   Resvg: class {
+    constructor(_svg: string, options: Record<string, any>) {
+      mocks.resvgOptions.push(options)
+    }
     render() {
       return { asPng: () => Buffer.from('png') }
     }
@@ -39,12 +44,6 @@ vi.mock('../electron/main/state', () => ({
   getStore: () => ({ get: () => null, getImagePath: () => '' })
 }))
 
-const realPlatform = process.platform
-
-function setPlatform(value: string): void {
-  Object.defineProperty(process, 'platform', { value, configurable: true })
-}
-
 describe('drag icon kind for macOS app bundles', () => {
   let work = ''
   let appPath = ''
@@ -61,16 +60,17 @@ describe('drag icon kind for macOS app bundles', () => {
     mkdirSync(folderPath, { recursive: true })
     writeFileSync(join(work, 'note.txt'), 'x')
     mocks.svgKinds.length = 0
+    mocks.resvgOptions.length = 0
   })
 
   afterEach(() => {
-    setPlatform(realPlatform)
+    restorePlatform()
     rmSync(mocks.userData, { recursive: true, force: true })
     rmSync(work, { recursive: true, force: true })
   })
 
   afterAll(() => {
-    setPlatform(realPlatform)
+    restorePlatform()
   })
 
   async function dragKinds(platform: string, paths: string[], entries?: Array<{ name: string; ext: string; size: number; isImage: boolean; isDirectory?: boolean }>): Promise<string[]> {
@@ -112,6 +112,19 @@ describe('drag icon kind for macOS app bundles', () => {
 
   it('on win32 a directory named *.app stays a folder', async () => {
     expect(await dragKinds('win32', [appPath])).toEqual(['folder'])
+  })
+
+  it('on darwin draws icon text with Helvetica plus a fallback font for non-Latin scripts, without a system font scan', async () => {
+    await dragKinds('darwin', [join(work, 'note.txt')])
+    const font = mocks.resvgOptions.at(-1)?.font
+    expect(font.loadSystemFonts).toBe(false)
+    const expected = ['/System/Library/Fonts/Helvetica.ttc', '/System/Library/Fonts/Supplemental/Arial Unicode.ttf'].filter((file) => existsSync(file))
+    expect(font.fontFiles).toEqual(expected)
+  })
+
+  it('on win32 leaves Resvg font options at their defaults', async () => {
+    await dragKinds('win32', [join(work, 'note.txt')])
+    expect(mocks.resvgOptions.at(-1)?.font).toBeUndefined()
   })
 })
 

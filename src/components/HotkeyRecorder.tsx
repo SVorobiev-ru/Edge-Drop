@@ -1,24 +1,26 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { playToggleSound, playButtonClickSound } from '../lib/soundEffects'
 import { RotateCcwIcon, CloseIcon } from './icons'
-import { edge } from '../lib/edge'
+import { edge, IS_DARWIN } from '../lib/edge'
+import { useStore } from '../store/appStore'
 import { useTranslation } from '../i18n'
+import { isReservedMacAccelerator } from './settings/hotkeys'
 
 interface HotkeyRecorderProps {
   hotkey: string
   onChange: (nextHotkey: string) => void
+  defaultHotkey?: string
+  onReject?: (reason: 'reserved') => void
 }
-
-const IS_MAC = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform || navigator.userAgent || '')
 
 /** Formats an Electron accelerator string (e.g. "Alt+Shift+C") into individual display keys. */
 export function parseKeyBadges(accelerator: string): string[] {
-  if (!accelerator) return IS_MAC ? ['⌥', 'C'] : ['Alt', 'C']
+  if (!accelerator) return IS_DARWIN ? ['⌥', 'C'] : ['Alt', 'C']
   return accelerator
     .split('+')
     .map((k) => {
       const trimmed = k.trim()
-      if (IS_MAC) {
+      if (IS_DARWIN) {
         if (trimmed === 'CommandOrControl' || trimmed === 'Meta' || trimmed === 'Super' || trimmed === 'Command') return '⌘'
         if (trimmed === 'Ctrl' || trimmed === 'Control') return '⌃'
         if (trimmed === 'Alt' || trimmed === 'Option') return '⌥'
@@ -31,7 +33,7 @@ export function parseKeyBadges(accelerator: string): string[] {
 }
 
 /** Converts a KeyboardEvent to modifier list + primary key name. */
-function eventToAccelerator(e: KeyboardEvent): { accelerator: string; isValid: boolean; partialBadges: string[] } {
+export function eventToAccelerator(e: KeyboardEvent): { accelerator: string; isValid: boolean; partialBadges: string[] } {
   const modifiers: string[] = []
 
   if (e.ctrlKey) modifiers.push('Ctrl')
@@ -48,7 +50,7 @@ function eventToAccelerator(e: KeyboardEvent): { accelerator: string; isValid: b
     keyName = code.slice(3).toUpperCase()
   } else if (/^Digit[0-9]$/i.test(code)) {
     keyName = code.slice(5)
-  } else if (/^F[1-9][0-2]?$/i.test(code)) {
+  } else if (/^F(?:[1-9]|1[0-9])$/i.test(code)) {
     keyName = code.toUpperCase()
   } else if (code === 'Space') {
     keyName = 'Space'
@@ -75,7 +77,7 @@ function eventToAccelerator(e: KeyboardEvent): { accelerator: string; isValid: b
   }
 
   const isModifierOnly = ['Control', 'Alt', 'Shift', 'Meta'].includes(key)
-  const isFKey = /^F[1-9][0-2]?$/i.test(keyName)
+  const isFKey = /^F(?:[1-9]|1[0-9])$/i.test(keyName)
   const hasModifier = modifiers.length > 0
 
   const allParts = [...modifiers]
@@ -88,27 +90,29 @@ function eventToAccelerator(e: KeyboardEvent): { accelerator: string; isValid: b
   return {
     accelerator: allParts.join('+'),
     isValid,
-    partialBadges: IS_MAC ? parseKeyBadges(allParts.join('+')) : allParts.map(p => (p === 'Super' ? 'Win' : p))
+    partialBadges: IS_DARWIN ? parseKeyBadges(allParts.join('+')) : allParts.map(p => (p === 'Super' ? 'Win' : p))
   }
 }
 
-export function HotkeyRecorder({ hotkey, onChange }: HotkeyRecorderProps) {
+export function HotkeyRecorder({ hotkey, onChange, defaultHotkey = 'Alt+C', onReject }: HotkeyRecorderProps) {
   const { t } = useTranslation()
   const [isRecording, setIsRecording] = useState(false)
   const [pressedBadges, setPressedBadges] = useState<string[]>([])
   const containerRef = useRef<HTMLDivElement>(null)
 
-  const activeHotkey = hotkey || 'Alt+C'
+  const activeHotkey = hotkey || defaultHotkey
   const displayBadges = parseKeyBadges(activeHotkey)
-  const isDefault = activeHotkey === 'Alt+C'
+  const isDefault = activeHotkey === defaultHotkey
 
   const stopRecording = useCallback((canceled = false) => {
     setIsRecording(false)
     setPressedBadges([])
-    try {
-      edge.focusWindow(false).catch?.(() => {})
-    } catch {
-      /* ignore */
+    if (!useStore.getState().keyboardMode) {
+      try {
+        edge.focusWindow(false).catch?.(() => {})
+      } catch {
+        /* ignore */
+      }
     }
     try {
       edge.pauseHotkey(false).catch?.(() => {})
@@ -159,6 +163,11 @@ export function HotkeyRecorder({ hotkey, onChange }: HotkeyRecorderProps) {
       setPressedBadges(partialBadges)
 
       if (isValid) {
+        if (IS_DARWIN && isReservedMacAccelerator(accelerator)) {
+          stopRecording(true)
+          onReject?.('reserved')
+          return
+        }
         playToggleSound(true)
         stopRecording(false)
         onChange(accelerator)
@@ -185,18 +194,18 @@ export function HotkeyRecorder({ hotkey, onChange }: HotkeyRecorderProps) {
       window.removeEventListener('keyup', handleKeyUp, { capture: true })
       window.removeEventListener('mousedown', handleClickOutside)
     }
-  }, [isRecording, onChange, stopRecording])
+  }, [isRecording, onChange, onReject, stopRecording])
 
   const handleResetDefault = (e: React.MouseEvent) => {
     e.stopPropagation()
     playButtonClickSound()
     stopRecording(false)
-    onChange('Alt+C')
+    onChange(defaultHotkey)
   }
 
   const recordingHint = t('behaviour.hotkeyRecording') || 'Press key combination...'
   const cancelTitle = `${t('behaviour.hotkeyCancel') || 'Cancel'} (Esc)`
-  const resetTitle = t('behaviour.hotkeyReset', { shortcut: 'Alt+C' }) || 'Reset to default (Alt+C)'
+  const resetTitle = t('behaviour.hotkeyReset', { shortcut: defaultHotkey }) || `Reset to default (${defaultHotkey})`
   const editLabel = t('behaviour.hotkeyEdit') || 'Edit'
 
   return (

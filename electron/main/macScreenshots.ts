@@ -21,12 +21,15 @@ import { convertHeicToPng } from './macHeic'
 const IMAGE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.heic', '.tiff', '.tif', '.gif', '.bmp', '.webp'])
 const NATIVE_EXTS = new Set(['.png', '.jpg', '.jpeg'])
 const DIR_POLL_MS = 180_000
+const CAPTURE_ATTEMPTS = 3
+const CAPTURE_RETRY_MS = 250
 
 export type ScreenshotHandler = (png: Buffer, fileName: string) => void
 
 let watcher: FSWatcher | null = null
 let watchedDir = ''
 const seen = new Map<string, number>()
+const inFlight = new Set<string>()
 let dirTimer: NodeJS.Timeout | null = null
 let attaching = false
 let handler: ScreenshotHandler | null = null
@@ -79,7 +82,7 @@ async function handleCandidate(file: string, onScreenshot: ScreenshotHandler, is
   const name = basename(file)
   if (name.startsWith('.')) return
   if (!IMAGE_EXTS.has(extname(name).toLowerCase())) return
-  if (seen.has(file)) return
+  if (seen.has(file) || inFlight.has(file)) return
   let st
   try {
     st = statSync(file)
@@ -89,26 +92,42 @@ async function handleCandidate(file: string, onScreenshot: ScreenshotHandler, is
   if (!st.isFile() || st.size === 0) return
   // Only brand-new files (rename from the hidden temp file happens instantly).
   if (Date.now() - st.birthtimeMs > 15_000) return
+  inFlight.add(file)
+  try {
+    let flagged = false
+    for (let attempt = 0; attempt < CAPTURE_ATTEMPTS; attempt++) {
+      // Give macOS a beat to finish writing + stamping attributes.
+      await new Promise((r) => setTimeout(r, CAPTURE_RETRY_MS))
+      if (!isEnabled()) return
+      if (!(await isScreenCapture(file))) continue
+      flagged = true
+      try {
+        const img = await loadScreenshot(file)
+        if (!img) continue
+        if (img.isEmpty()) {
+          console.error('[Screenshots] empty image after loading', file)
+          continue
+        }
+        markSeen(file)
+        onScreenshot(img.toPNG(), name.replace(/\.[^.]+$/, '.png'))
+        console.log('[Screenshots] captured', name)
+        return
+      } catch (err) {
+        console.error('[Screenshots] failed to load', file, err)
+      }
+    }
+    if (!flagged) markSeen(file)
+  } finally {
+    inFlight.delete(file)
+  }
+}
+
+function markSeen(file: string): void {
   seen.set(file, Date.now())
   // Prune memory.
   if (seen.size > 200) {
     const cutoff = Date.now() - 60_000
     for (const [k, v] of seen) if (v < cutoff) seen.delete(k)
-  }
-  // Give macOS a beat to finish writing + stamping attributes.
-  await new Promise((r) => setTimeout(r, 250))
-  if (!(await isScreenCapture(file))) return
-  try {
-    const img = await loadScreenshot(file)
-    if (!img) return
-    if (img.isEmpty()) {
-      console.error('[Screenshots] empty image after loading', file)
-      return
-    }
-    onScreenshot(img.toPNG(), name.replace(/\.[^.]+$/, '.png'))
-    console.log('[Screenshots] captured', name)
-  } catch (err) {
-    console.error('[Screenshots] failed to load', file, err)
   }
 }
 
@@ -176,5 +195,6 @@ export function startScreenshotWatcher(onScreenshot: ScreenshotHandler, isEnable
 export function stopScreenshotWatcher(): void {
   detach()
   seen.clear()
+  inFlight.clear()
   handler = null
 }

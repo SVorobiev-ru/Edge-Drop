@@ -1,5 +1,6 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ItemData } from '../shared/types'
+import { restorePlatform, setPlatform } from './helpers/platform'
 
 const mocks = vi.hoisted(() => ({
   text: '',
@@ -40,34 +41,7 @@ vi.mock('node:fs', async (importOriginal) => {
   return { ...actual, existsSync: (p: string) => mocks.existing.has(p) }
 })
 
-vi.mock('koffi', () => ({
-  default: {
-    load: () => {
-      if (mocks.bridgeBroken) throw new Error('no objc runtime')
-      return {
-        func: (decl: string, ret?: string, args?: string[]) => {
-          if (decl.includes('objc_getClass')) return () => 'NSPasteboard'
-          if (decl.includes('sel_registerName')) return (name: string) => name
-          if (decl.includes('GetClipboardSequenceNumber')) return () => 0
-          if (ret === 'long') return (_obj: unknown, sel: string) => (sel === 'count' ? (mocks.nativeTypes ?? []).length : mocks.changeCount)
-          if (ret === 'str') return (item: { name: string }) => item.name
-          if (args && args.length === 3) return (_arr: unknown, _sel: string, i: number) => ({ name: (mocks.nativeTypes ?? [])[i] })
-          return (_obj: unknown, sel: string) => {
-            if (sel === 'generalPasteboard') return mocks.changeCount === null ? null : 'pb'
-            if (sel === 'types') return mocks.nativeTypes ? 'types' : null
-            return null
-          }
-        }
-      }
-    }
-  }
-}))
-
-const realPlatform = process.platform
-
-function setPlatform(value: string): void {
-  Object.defineProperty(process, 'platform', { value, configurable: true })
-}
+vi.mock('koffi', async () => ({ default: (await import('./helpers/koffiMock')).pasteboardTypesKoffi(mocks) }))
 
 async function loadFormats(platform: string): Promise<typeof import('../electron/clipboard/formats')> {
   setPlatform(platform)
@@ -93,11 +67,11 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers()
-  setPlatform(realPlatform)
+  restorePlatform()
 })
 
 afterAll(() => {
-  setPlatform(realPlatform)
+  restorePlatform()
 })
 
 describe('readClipboard item kind on darwin', () => {
@@ -314,6 +288,27 @@ describe('own "image + file-url" write on darwin', () => {
     expect(onNew).not.toHaveBeenCalled()
     watcher.stop()
     vi.restoreAllMocks()
+  })
+
+  it('reads the pasteboard image once per captured image', async () => {
+    vi.useFakeTimers()
+    const { ClipboardWatcher } = await loadWatcher()
+    const onNew = vi.fn()
+    const watcher = new ClipboardWatcher(250, 220)
+    watcher.start(onNew)
+    mocks.readImage.mockClear()
+
+    mocks.image = { width: 320, height: 200 }
+    mocks.nativeTypes = ['public.tiff']
+    mocks.changeCount = (mocks.changeCount ?? 0) + 1
+    await vi.advanceTimersByTimeAsync(1000)
+
+    expect(onNew).toHaveBeenCalledTimes(1)
+    expect(onNew.mock.calls[0][0]).toMatchObject({ kind: 'image', width: 320, height: 200, bytes: 3, ext: 'png' })
+    expect(onNew.mock.calls[0][1]).toEqual(Buffer.from('png'))
+    expect(onNew.mock.calls[0][2]).toBeDefined()
+    expect(mocks.readImage).toHaveBeenCalledTimes(1)
+    watcher.stop()
   })
 
   it('still captures the next real copy after the own write', async () => {

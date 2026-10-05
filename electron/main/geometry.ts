@@ -1,4 +1,24 @@
-export type StickPosition = 'left' | 'right' | 'top'
+import { clampPanelWidth } from '../../shared/panelWidth'
+import type { StickPosition } from '../../shared/types'
+
+export type { StickPosition }
+
+const LEGACY_PANEL_MARGIN = 114
+const PREVIEW_EXTRA_WIDTH = 550
+
+/**
+ * The macOS window covers the whole work area of its display: the panel moves
+ * along any edge, changes its size and opens the preview without the window
+ * being resized or moved.
+ */
+export function windowFillsWorkArea(platform: string): boolean {
+  return platform === 'darwin'
+}
+
+export function stickWindowWidth(input: { panelWidth: unknown; previewActive: boolean }): number {
+  if (!input.previewActive) return clampPanelWidth(input.panelWidth) + LEGACY_PANEL_MARGIN
+  return clampPanelWidth(input.panelWidth) + PREVIEW_EXTRA_WIDTH
+}
 
 export interface DisplayInfo {
   id: number
@@ -24,6 +44,7 @@ export interface StickBoundsParams {
   horizontalOffset?: number
   currentBounds?: { x: number; y: number }
   previewActive?: boolean
+  fillWorkArea?: boolean
 }
 
 export interface StickBoundsResult {
@@ -107,12 +128,17 @@ export function computeStickBounds(params: StickBoundsParams): StickBoundsResult
 
   const wa = display.workArea
 
+  if (params.fillWorkArea) {
+    return { ...wa, displayId: display.id, resolvedDisplay: display }
+  }
+
   let x: number
   let y: number
   let width: number
   let height: number
 
   switch (position) {
+    case 'bottom':
     case 'left':
       x = wa.x
       y = wa.y

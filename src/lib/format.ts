@@ -2,13 +2,9 @@
  * Small display helpers for clipboard item previews.
  */
 import { t, getResolvedLanguage } from '../i18n'
+import { isDarwin } from './edge'
 
-export const IS_MAC = (() => {
-  const g = globalThis as any
-  if (g.process && g.process.platform) return g.process.platform === 'darwin'
-  const nav = g.navigator
-  return !!nav && /Mac/i.test(nav.platform || nav.userAgent || '')
-})()
+export const IS_MAC = isDarwin()
 
 /** Truncate long text for list previews. */
 export function previewText(text: string, max = 160): string {
@@ -20,10 +16,12 @@ export function previewText(text: string, max = 160): string {
 }
 
 /** Human-readable byte size. */
-export function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+export function formatBytes(bytes: number, decimal: boolean = IS_MAC): string {
+  const base = decimal ? 1000 : 1024
+  if (bytes < base) return `${bytes} B`
+  if (bytes < base ** 2) return `${(bytes / base).toFixed(1)} KB`
+  if (bytes < base ** 3) return `${(bytes / base ** 2).toFixed(1)} MB`
+  return `${(bytes / base ** 3).toFixed(1)} GB`
 }
 
 /** Relative time formatted with native Intl locale rules (e.g. "2 дня назад", "3 hours ago"). */
@@ -96,6 +94,13 @@ export function formatImageDisplayName(
     return label
   }
   return name
+}
+
+export function imageItemDisplayName(
+  image: { imageId: string; source?: 'screenshot' | 'image'; fileName?: string },
+  capturedAt?: number
+): string {
+  return formatImageDisplayName(`edge-drop/images/${image.imageId}`, capturedAt, image.source, image.fileName)
 }
 
 /** Is this a path to an image (by extension)? */

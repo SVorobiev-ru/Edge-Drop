@@ -1,9 +1,9 @@
 /* ---- RubberSegment.css ---- */
 .rubber-segment {
-  --rs-track: var(--bg-card, #141414);
-  --rs-thumb: #ffffff;
-  --rs-ink: rgba(255, 255, 255, 0.72);
-  --rs-ink-active: #000000;
+  --rs-track: var(--bg-card, var(--bg-2));
+  --rs-thumb: var(--surface-inverse);
+  --rs-ink: rgb(var(--ink) / max(0.72, var(--text-alpha-floor)));
+  --rs-ink-active: var(--on-inverse);
   --rs-radius: 9999px;
   --rs-inset: 2px;
   --rs-thumb-radius: 9999px;
@@ -24,7 +24,7 @@
   padding: var(--rs-inset);
   border-radius: var(--rs-radius);
   background: var(--rs-track);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid rgb(var(--ink) / 0.08);
   font-family: inherit;
   touch-action: pan-y;
   user-select: none;
@@ -87,13 +87,13 @@
 }
 
 .rubber-segment__item:focus-visible {
-  outline: 2px solid rgba(255, 255, 255, 0.4);
+  outline: 2px solid rgb(var(--ink) / 0.4);
   outline-offset: 2px;
 }
 
 @media (hover: hover) and (pointer: fine) {
   .rubber-segment__item[aria-checked='false']:hover {
-    color: #ffffff;
+    color: var(--text-primary);
   }
 }
 

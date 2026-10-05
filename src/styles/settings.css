@@ -46,8 +46,8 @@
   font-size: calc(11.5px * var(--font-scale, 1));
   font-weight: 500;
   line-height: 1.25;
-  color: rgba(255, 255, 255, 0.72);
-  background: #141414;
+  color: rgb(var(--ink) / max(0.72, var(--text-alpha-floor)));
+  background: var(--bg-2);
   border: none;
   cursor: pointer;
   outline: none;
@@ -58,14 +58,14 @@
 }
 
 .settings-tab-btn:hover:not(.active) {
-  color: #ffffff;
-  background: #141414;
+  color: var(--text-primary);
+  background: var(--bg-2);
 }
 
 .settings-tab-btn.active {
-  color: #000000;
+  color: var(--on-inverse);
   font-weight: 600;
-  background: #ffffff;
+  background: var(--surface-inverse);
   box-shadow: none;
 }
 
@@ -73,7 +73,7 @@
   position: absolute;
   inset: 0;
   border-radius: 999px;
-  background: #ffffff;
+  background: var(--surface-inverse);
   box-shadow: none;
   z-index: 0;
   pointer-events: none;
@@ -114,7 +114,7 @@
 .setting-title {
   font-size: calc(14px * var(--font-scale, 1));
   font-weight: 600;
-  color: #ffffff;
+  color: var(--text-primary);
   letter-spacing: 0.01em;
   line-height: 1.35;
   white-space: normal;
@@ -125,7 +125,7 @@
 .setting-desc {
   font-size: calc(12.5px * var(--font-scale, 1));
   font-weight: 400;
-  color: rgba(255, 255, 255, 0.78);
+  color: rgb(var(--ink) / max(0.78, var(--text-alpha-floor)));
   line-height: 1.48;
   white-space: normal;
   word-break: break-word;
@@ -134,7 +134,7 @@
 
 .setting-divider {
   height: 1px;
-  background: rgba(255, 255, 255, 0.08);
+  background: rgb(var(--ink) / 0.08);
   margin: 4px 4px;
   flex-shrink: 0;
 }
@@ -159,7 +159,7 @@
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: rgba(255, 255, 255, 0.38);
+  color: rgb(var(--ink) / max(0.38, var(--text-alpha-floor)));
   white-space: nowrap;
 }
 
@@ -167,7 +167,7 @@
   content: '';
   flex: 1;
   height: 1px;
-  background: rgba(255, 255, 255, 0.08);
+  background: rgb(var(--ink) / 0.08);
 }
 
 .setting-group-label {
@@ -175,7 +175,7 @@
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  color: rgba(255, 255, 255, 0.42);
+  color: rgb(var(--ink) / max(0.42, var(--text-alpha-floor)));
   margin: 18px 4px 8px;
   user-select: none;
   white-space: normal;
@@ -190,7 +190,7 @@
 /* ── Vertical Setting Card (Matches Horizontal Shelf Card Aesthetic) ── */
 .setting-card {
   width: 100%;
-  background: var(--bg-card, #141414);
+  background: var(--bg-card, var(--bg-2));
   border: none;
   border-radius: var(--radius-card, 16px);
   padding: 12px 14px;
@@ -217,21 +217,21 @@
   background: 
     radial-gradient(
       ellipse 70% 1px at 50% 0%,
-      rgba(255, 255, 255, 0.22) 0%,
-      rgba(255, 255, 255, 0.08) 45%,
+      rgb(var(--ink) / 0.22) 0%,
+      rgb(var(--ink) / 0.08) 45%,
       transparent 80%
     ) top / 100% 1px no-repeat,
     linear-gradient(
       90deg,
       transparent 0%,
-      rgba(255, 255, 255, 0.035) 20%,
-      rgba(255, 255, 255, 0.035) 80%,
+      rgb(var(--ink) / 0.035) 20%,
+      rgb(var(--ink) / 0.035) 80%,
       transparent 100%
     ) bottom / 100% 1px no-repeat;
 }
 
 .setting-card:hover {
-  background: var(--bg-card-hover, #1c1c1c);
+  background: var(--bg-card-hover, var(--bg-3));
 }
 
 .setting-card:hover::before {
@@ -243,7 +243,7 @@
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: rgba(255, 255, 255, 0.42);
+  color: rgb(var(--ink) / max(0.42, var(--text-alpha-floor)));
   margin: 0 0 2px 0;
   flex-shrink: 0;
 }
@@ -251,13 +251,13 @@
 .setting-card .setting-title {
   font-size: calc(13px * var(--font-scale, 1));
   font-weight: 600;
-  color: #ffffff;
+  color: var(--text-primary);
   line-height: 1.3;
 }
 
 .setting-card .setting-desc {
   font-size: calc(11.5px * var(--font-scale, 1));
-  color: rgba(255, 255, 255, 0.62);
+  color: rgb(var(--ink) / max(0.62, var(--text-alpha-floor)));
   line-height: 1.4;
   margin-top: 2px;
 }
@@ -288,26 +288,26 @@
 .setting-card .setting-pills .pill {
   height: 32px;
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  color: rgba(255, 255, 255, 0.78);
+  background: rgb(var(--ink) / 0.05);
+  border: 1px solid rgb(var(--ink) / 0.08);
+  color: rgb(var(--ink) / max(0.78, var(--text-alpha-floor)));
   font-size: 11.5px;
   font-weight: 500;
   transition: all 0.14s ease;
 }
 
 .setting-card .setting-pills .pill:hover {
-  background: rgba(255, 255, 255, 0.09);
-  border-color: rgba(255, 255, 255, 0.16);
-  color: #ffffff;
+  background: rgb(var(--ink) / 0.09);
+  border-color: rgb(var(--ink) / 0.16);
+  color: var(--text-primary);
 }
 
 .setting-card .setting-pills .pill.active {
-  background: #ffffff;
-  color: #000000;
+  background: var(--surface-inverse);
+  color: var(--on-inverse);
   font-weight: 600;
-  border-color: #ffffff;
-  box-shadow: 0 2px 10px rgba(255, 255, 255, 0.2);
+  border-color: var(--surface-inverse);
+  box-shadow: 0 2px 10px rgb(var(--ink) / 0.2);
 }
 
 .setting-badge-subtle {
@@ -317,9 +317,9 @@
   padding: 2px 7px;
   font-size: calc(10px * var(--font-scale, 1));
   font-weight: 500;
-  color: rgba(255, 255, 255, 0.55);
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: rgb(var(--ink) / max(0.55, var(--text-alpha-floor)));
+  background: rgb(var(--ink) / 0.04);
+  border: 1px solid rgb(var(--ink) / 0.08);
   border-radius: 4px;
   width: fit-content;
   user-select: none;
@@ -376,9 +376,9 @@
   font-size: calc(11px * var(--font-scale, 1));
   padding: 0 4px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  color: rgba(255, 255, 255, 0.78);
+  background: rgb(var(--ink) / 0.05);
+  border: 1px solid rgb(var(--ink) / 0.08);
+  color: rgb(var(--ink) / max(0.78, var(--text-alpha-floor)));
   font-weight: 500;
   transition: all 0.14s ease;
   display: flex;
@@ -389,24 +389,24 @@
 }
 
 .placement-3way-wrap.shelf-placement-3way .pill:hover:not(.active) {
-  background: rgba(255, 255, 255, 0.09);
-  border-color: rgba(255, 255, 255, 0.16);
-  color: #ffffff;
+  background: rgb(var(--ink) / 0.09);
+  border-color: rgb(var(--ink) / 0.16);
+  color: var(--text-primary);
 }
 
 .placement-3way-wrap.shelf-placement-3way .pill.active {
-  background: #ffffff;
-  color: #000000;
+  background: var(--surface-inverse);
+  color: var(--on-inverse);
   font-weight: 600;
-  border-color: #ffffff;
-  box-shadow: 0 2px 10px rgba(255, 255, 255, 0.2);
+  border-color: var(--surface-inverse);
+  box-shadow: 0 2px 10px rgb(var(--ink) / 0.2);
 }
 
 /* Edge pill transition pulse */
 .placement-3way-wrap .pill.transitioning,
 .placement-diamond-wrap .pill.transitioning {
   animation: edgePillPulse 0.44s ease-in-out infinite alternate;
-  box-shadow: 0 0 12px rgba(255, 255, 255, 0.45);
+  box-shadow: 0 0 12px rgb(var(--ink) / 0.45);
 }
 
 @keyframes edgePillPulse {
@@ -417,7 +417,7 @@
   100% {
     transform: scale(1.02);
     opacity: 1;
-    box-shadow: 0 0 16px rgba(255, 255, 255, 0.6);
+    box-shadow: 0 0 16px rgb(var(--ink) / 0.6);
   }
 }
 
@@ -441,9 +441,9 @@
   font-size: calc(11px * var(--font-scale, 1));
   font-weight: 600;
   font-family: var(--font-mono);
-  color: #ffffff;
-  background: rgba(255, 255, 255, 0.1);
-  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: var(--text-primary);
+  background: rgb(var(--ink) / 0.1);
+  border: 1px solid rgb(var(--ink) / 0.18);
   padding: 3px 9px;
   border-radius: 999px;
   letter-spacing: 0.02em;
@@ -472,8 +472,8 @@
   width: 14px;
   height: 14px;
   border-radius: 50%;
-  background: #ffffff;
-  border: 1.5px solid #000000;
+  background: var(--surface-inverse);
+  border: 1.5px solid var(--on-inverse);
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
   cursor: grab;
   transition: transform 0.15s ease;
@@ -506,7 +506,7 @@
 .slider-tick {
   width: 1px;
   height: 4px;
-  background: rgba(255, 255, 255, 0.22);
+  background: rgb(var(--ink) / 0.22);
   border-radius: 1px;
   transition: background 0.15s ease, height 0.15s ease;
 }
@@ -514,12 +514,12 @@
 .slider-tick.major {
   height: 7px;
   width: 1.5px;
-  background: rgba(255, 255, 255, 0.55);
+  background: rgb(var(--ink) / 0.55);
 }
 
 .slider-tick.active {
-  background: #ffffff;
-  box-shadow: 0 0 6px rgba(255, 255, 255, 0.4);
+  background: var(--surface-inverse);
+  box-shadow: 0 0 6px rgb(var(--ink) / 0.4);
 }
 
 /* 3 Main Percentage Labels (0%, 50%, 100%) */
@@ -535,7 +535,7 @@
   font-size: 10.5px;
   font-weight: 500;
   font-family: var(--font-mono);
-  color: rgba(255, 255, 255, 0.45);
+  color: rgb(var(--ink) / max(0.45, var(--text-alpha-floor)));
   background: transparent;
   border: none;
   cursor: pointer;
@@ -545,11 +545,11 @@
 }
 
 .slider-label-btn:hover {
-  color: #ffffff;
+  color: var(--text-primary);
 }
 
 .slider-label-btn.active {
-  color: #ffffff;
+  color: var(--text-primary);
   font-weight: 700;
 }
 
@@ -560,8 +560,8 @@
   border-radius: 999px;
   font-size: calc(12px * var(--font-scale, 1));
   font-weight: 500;
-  color: rgba(255, 255, 255, 0.72);
-  background: #141414;
+  color: rgb(var(--ink) / max(0.72, var(--text-alpha-floor)));
+  background: var(--bg-2);
   border: none;
   cursor: pointer;
   transition: all 0.15s ease;
@@ -572,13 +572,13 @@
 }
 
 .pill:hover:not(.active) {
-  color: #ffffff;
-  background: #1c1c1c;
+  color: var(--text-primary);
+  background: var(--bg-3);
 }
 
 .pill.active {
-  background: #ffffff;
-  color: #000000;
+  background: var(--surface-inverse);
+  color: var(--on-inverse);
   font-weight: 600;
   box-shadow: none;
 }
@@ -606,7 +606,7 @@
   width: 36px;
   height: 20px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.12);
+  background: rgb(var(--ink) / 0.12);
   border: none;
   position: relative;
   cursor: pointer;
@@ -617,7 +617,7 @@
 }
 
 .setting-toggle:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.18);
+  background: rgb(var(--ink) / 0.18);
 }
 
 .toggle-thumb {
@@ -627,22 +627,22 @@
   width: 14px;
   height: 14px;
   border-radius: 50%;
-  background: #ffffff;
+  background: var(--surface-inverse);
   box-shadow: none;
   pointer-events: none;
 }
 
 .setting-toggle.checked {
-  background: #ffffff;
+  background: var(--surface-inverse);
   border: none;
 }
 
 .setting-toggle.checked:hover:not(:disabled) {
-  background: #ffffff;
+  background: var(--surface-inverse);
 }
 
 .setting-toggle.checked .toggle-thumb {
-  background: #000000;
+  background: var(--on-inverse);
 }
 
 /* Update Prompt Banner (Monochrome Glassmorphic Glow) */
@@ -651,8 +651,8 @@
   flex-direction: column;
   gap: 10px;
   padding: 14px 12px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgb(var(--ink) / 0.04);
+  border: 1px solid rgb(var(--ink) / 0.12);
   border-radius: 10px;
   margin: 6px 4px 10px 4px;
 }
@@ -660,7 +660,7 @@
 .update-text {
   font-size: 12.5px;
   font-weight: 500;
-  color: #ffffff;
+  color: var(--text-primary);
   line-height: 1.45;
   letter-spacing: 0.01em;
 }
@@ -671,8 +671,8 @@
   border-radius: 6px;
   font-size: 12.5px;
   font-weight: 600;
-  color: #000000;
-  background: #ffffff;
+  color: var(--on-inverse);
+  background: var(--surface-inverse);
   border: none;
   cursor: pointer;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
@@ -682,7 +682,7 @@
 
 .update-btn:hover {
   opacity: 0.92;
-  box-shadow: 0 4px 12px rgba(255, 255, 255, 0.2);
+  box-shadow: 0 4px 12px rgb(var(--ink) / 0.2);
 }
 
 .update-btn:active {
@@ -731,7 +731,7 @@
   align-items: center;
   gap: 12px;
   padding: 16px 14px 14px;
-  background: #141414;
+  background: var(--bg-2);
   border: none;
   border-radius: 16px;
   margin: 16px 4px 8px 4px;
@@ -741,7 +741,7 @@
 
 .support-promo-title {
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.68);
+  color: rgb(var(--ink) / max(0.68, var(--text-alpha-floor)));
   line-height: 1.48;
   font-weight: 450;
   max-width: 100%;
@@ -771,8 +771,8 @@
   border-radius: 999px;
   font-size: 12.5px;
   font-weight: 600;
-  color: #000000;
-  background: #ffffff;
+  color: var(--on-inverse);
+  background: var(--surface-inverse);
   border: none;
   box-shadow: none;
   cursor: pointer;
@@ -781,7 +781,7 @@
 }
 
 .kofi-support-btn:hover {
-  background: rgba(255, 255, 255, 0.92);
+  background: rgb(var(--ink) / 0.92);
   transform: translateY(-1px);
 }
 
@@ -802,8 +802,8 @@
   border-radius: 999px;
   font-size: 12.5px;
   font-weight: 550;
-  color: rgba(255, 255, 255, 0.9);
-  background: #1c1c1c;
+  color: rgb(var(--ink) / max(0.9, var(--text-alpha-floor)));
+  background: var(--bg-3);
   border: none;
   box-shadow: none;
   cursor: pointer;
@@ -814,7 +814,7 @@
 .github-promo-btn:hover,
 .store-review-promo-btn:hover {
   background: #252525;
-  color: #ffffff;
+  color: var(--text-primary);
   transform: translateY(-1px);
 }
 
@@ -826,7 +826,7 @@
 .github-promo-btn .github-octocat-icon,
 .store-review-promo-btn .store-logo-icon {
   flex-shrink: 0;
-  color: rgba(255, 255, 255, 0.9);
+  color: rgb(var(--ink) / max(0.9, var(--text-alpha-floor)));
 }
 
 .github-promo-btn .star-icon {
@@ -839,7 +839,7 @@
   justify-content: center;
   gap: 6px;
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.38);
+  color: rgb(var(--ink) / max(0.38, var(--text-alpha-floor)));
   font-weight: 500;
   letter-spacing: 0.02em;
   margin-top: 4px;
@@ -853,7 +853,7 @@
 .version-changelog-link {
   background: transparent;
   border: none;
-  color: rgba(255, 255, 255, 0.45);
+  color: rgb(var(--ink) / max(0.45, var(--text-alpha-floor)));
   font: inherit;
   font-size: 11px;
   cursor: pointer;
@@ -865,7 +865,7 @@
 }
 
 .version-changelog-link:hover {
-  color: #ffffff;
+  color: var(--text-primary);
 }
 
 /* Subtle Bottom Quit Button */
@@ -879,7 +879,7 @@
   border-radius: 999px;
   font-size: 11.5px;
   font-weight: 500;
-  color: rgba(255, 255, 255, 0.5);
+  color: rgb(var(--ink) / max(0.5, var(--text-alpha-floor)));
   background: transparent;
   border: none;
   box-shadow: none;
@@ -914,9 +914,9 @@
   width: 32px;
   height: 32px;
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  color: #ffffff;
+  background: rgb(var(--ink) / 0.06);
+  border: 1px solid rgb(var(--ink) / 0.12);
+  color: var(--text-primary);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -927,16 +927,16 @@
 }
 
 .style-preview-toggle-btn:hover {
-  background: rgba(255, 255, 255, 0.14);
-  border-color: rgba(255, 255, 255, 0.25);
-  color: #ffffff;
+  background: rgb(var(--ink) / 0.14);
+  border-color: rgb(var(--ink) / 0.25);
+  color: var(--text-primary);
 }
 
 .style-preview-toggle-btn.active {
-  background: rgba(255, 255, 255, 0.18);
-  color: #ffffff;
-  border-color: rgba(255, 255, 255, 0.32);
-  box-shadow: 0 0 14px rgba(255, 255, 255, 0.15);
+  background: rgb(var(--ink) / 0.18);
+  color: var(--text-primary);
+  border-color: rgb(var(--ink) / 0.32);
+  box-shadow: 0 0 14px rgb(var(--ink) / 0.15);
 }
 
 .indicator-card {
@@ -961,9 +961,9 @@
 }
 
 .indicator-card.active {
-  background: #141414;
-  border-color: #ffffff;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5), 0 0 14px rgba(255, 255, 255, 0.12);
+  background: var(--bg-2);
+  border-color: var(--surface-inverse);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5), 0 0 14px rgb(var(--ink) / 0.12);
   outline: none;
 }
 
@@ -983,13 +983,13 @@
 .indicator-card-title {
   font-size: 12px;
   font-weight: 600;
-  color: #ffffff;
+  color: var(--text-primary);
   margin-top: 2px;
 }
 
 .indicator-card-desc {
   font-size: 10.5px;
-  color: #a1a1aa;
+  color: var(--text-zinc-400);
   text-align: center;
   line-height: 1.2;
 }
@@ -1023,8 +1023,8 @@
   width: 100%;
   height: 38px;
   padding: 0 10px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgb(var(--ink) / 0.04);
+  border: 1px solid rgb(var(--ink) / 0.1);
   border-radius: 8px;
   cursor: pointer;
   outline: none;
@@ -1033,8 +1033,8 @@
 }
 
 .hotkey-field:hover {
-  background: rgba(255, 255, 255, 0.07);
-  border-color: rgba(255, 255, 255, 0.2);
+  background: rgb(var(--ink) / 0.07);
+  border-color: rgb(var(--ink) / 0.2);
 }
 
 .hotkey-field.is-recording {
@@ -1064,7 +1064,7 @@
 }
 
 .hotkey-plus-symbol {
-  color: rgba(255, 255, 255, 0.35);
+  color: rgb(var(--ink) / max(0.35, var(--text-alpha-floor)));
   font-size: 11px;
   font-weight: 600;
   user-select: none;
@@ -1077,11 +1077,11 @@
   min-width: 22px;
   padding: 2px 7px;
   height: 22px;
-  background: rgba(255, 255, 255, 0.12);
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  border-bottom: 2px solid rgba(255, 255, 255, 0.32);
+  background: rgb(var(--ink) / 0.12);
+  border: 1px solid rgb(var(--ink) / 0.18);
+  border-bottom: 2px solid rgb(var(--ink) / 0.32);
   border-radius: 5px;
-  color: #ffffff;
+  color: var(--text-primary);
   font-family: var(--font-mono, monospace);
   font-size: 11px;
   font-weight: 600;
@@ -1104,13 +1104,13 @@
 
 .hotkey-field-edit-badge {
   font-size: 10.5px;
-  color: rgba(255, 255, 255, 0.4);
+  color: rgb(var(--ink) / max(0.4, var(--text-alpha-floor)));
   font-weight: 500;
   transition: color 0.15s ease;
 }
 
 .hotkey-field:hover .hotkey-field-edit-badge {
-  color: rgba(255, 255, 255, 0.7);
+  color: rgb(var(--ink) / max(0.7, var(--text-alpha-floor)));
 }
 
 .hotkey-inline-reset-btn {
@@ -1120,17 +1120,17 @@
   width: 22px;
   height: 22px;
   border-radius: 4px;
-  background: rgba(255, 255, 255, 0.07);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  color: rgba(255, 255, 255, 0.6);
+  background: rgb(var(--ink) / 0.07);
+  border: 1px solid rgb(var(--ink) / 0.12);
+  color: rgb(var(--ink) / max(0.6, var(--text-alpha-floor)));
   cursor: pointer;
   transition: all 0.15s ease;
 }
 
 .hotkey-inline-reset-btn:hover {
-  background: rgba(255, 255, 255, 0.14);
-  color: #ffffff;
-  border-color: rgba(255, 255, 255, 0.25);
+  background: rgb(var(--ink) / 0.14);
+  color: var(--text-primary);
+  border-color: rgb(var(--ink) / 0.25);
 }
 
 /* Recording Mode Elements */
@@ -1169,24 +1169,24 @@
   padding: 3px 6px;
   height: 22px;
   border-radius: 4px;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  color: rgba(255, 255, 255, 0.7);
+  background: rgb(var(--ink) / 0.08);
+  border: 1px solid rgb(var(--ink) / 0.14);
+  color: rgb(var(--ink) / max(0.7, var(--text-alpha-floor)));
   cursor: pointer;
   transition: all 0.15s ease;
 }
 
 .hotkey-cancel-icon-btn:hover {
-  background: rgba(255, 255, 255, 0.16);
-  color: #ffffff;
-  border-color: rgba(255, 255, 255, 0.25);
+  background: rgb(var(--ink) / 0.16);
+  color: var(--text-primary);
+  border-color: rgb(var(--ink) / 0.25);
 }
 
 .hotkey-esc-text {
   font-size: 9.5px;
   font-family: var(--font-mono, monospace);
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.5);
+  color: rgb(var(--ink) / max(0.5, var(--text-alpha-floor)));
   line-height: 1;
 }
 
@@ -1196,7 +1196,7 @@
   flex-direction: column;
   gap: 8px;
   padding: 14px 16px;
-  background: #141414;
+  background: var(--bg-2);
   border-radius: 14px;
   margin: 4px 4px 14px 4px;
   box-shadow: none;
@@ -1228,13 +1228,13 @@
   gap: 8px;
   font-size: 12px;
   font-weight: 550;
-  color: #ffffff;
+  color: var(--text-primary);
   letter-spacing: -0.01em;
 }
 
 .settings-update-desc {
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.65);
+  color: rgb(var(--ink) / max(0.65, var(--text-alpha-floor)));
   line-height: 1.35;
 }
 
@@ -1243,7 +1243,7 @@
   height: 6px;
   border-radius: 50%;
   flex-shrink: 0;
-  background: #ffffff;
+  background: var(--surface-inverse);
 }
 
 .settings-update-restart-btn {
@@ -1254,8 +1254,8 @@
   height: 36px;
   min-height: 36px;
   max-height: 36px;
-  background: #ffffff;
-  color: #000000;
+  background: var(--surface-inverse);
+  color: var(--on-inverse);
   border: none;
   border-radius: 999px;
   font-size: 12.5px;
@@ -1272,7 +1272,7 @@
 }
 
 .settings-update-restart-btn:hover {
-  background: rgba(255, 255, 255, 0.92);
+  background: rgb(var(--ink) / 0.92);
   transform: translateY(-1px);
 }
 
@@ -1286,7 +1286,7 @@
 }
 
 .settings-update-restart-btn.downloading:hover {
-  background: #ffffff;
+  background: var(--surface-inverse);
   transform: none;
 }
 
@@ -1307,17 +1307,17 @@
   flex-direction: column;
   gap: 8px;
   padding: 12px 14px;
-  background: var(--bg-card, #141414);
+  background: var(--bg-card, var(--bg-2));
   border-radius: var(--radius-card, 16px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid rgb(var(--ink) / 0.08);
   box-sizing: border-box;
   animation: updateCardFadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
   transition: background 0.14s ease, border-color 0.14s ease;
 }
 
 .manual-update-card:hover {
-  background: var(--bg-card-hover, #1c1c1c);
-  border-color: rgba(255, 255, 255, 0.14);
+  background: var(--bg-card-hover, var(--bg-3));
+  border-color: rgb(var(--ink) / 0.14);
 }
 
 .manual-update-info {
@@ -1332,7 +1332,7 @@
   gap: 6px;
   font-size: calc(13px * var(--font-scale, 1));
   font-weight: 600;
-  color: #ffffff;
+  color: var(--text-primary);
   line-height: 1.3;
 }
 
@@ -1342,7 +1342,7 @@
 
 .manual-update-desc {
   font-size: calc(11.5px * var(--font-scale, 1));
-  color: rgba(255, 255, 255, 0.62);
+  color: rgb(var(--ink) / max(0.62, var(--text-alpha-floor)));
   line-height: 1.35;
 }
 
@@ -1375,12 +1375,12 @@
 }
 
 .manual-update-pill.primary {
-  background: #ffffff;
-  color: #000000;
+  background: var(--surface-inverse);
+  color: var(--on-inverse);
 }
 
 .manual-update-pill.primary:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.9);
+  background: rgb(var(--ink) / 0.9);
   transform: translateY(-1px);
 }
 
@@ -1394,16 +1394,16 @@
 }
 
 .manual-update-pill.outline {
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  color: rgba(255, 255, 255, 0.85);
+  background: rgb(var(--ink) / 0.05);
+  border: 1px solid rgb(var(--ink) / 0.08);
+  color: rgb(var(--ink) / max(0.85, var(--text-alpha-floor)));
   font-weight: 500;
 }
 
 .manual-update-pill.outline:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.09);
-  border-color: rgba(255, 255, 255, 0.16);
-  color: #ffffff;
+  background: rgb(var(--ink) / 0.09);
+  border-color: rgb(var(--ink) / 0.16);
+  color: var(--text-primary);
   transform: translateY(-1px);
 }
 
@@ -1461,7 +1461,7 @@
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: rgba(255, 255, 255, 0.45);
+  color: rgb(var(--ink) / max(0.45, var(--text-alpha-floor)));
   margin: 0;
   user-select: none;
 }
@@ -1477,7 +1477,7 @@
   border: none;
   border-radius: 6px;
   background: transparent;
-  color: rgba(255, 255, 255, 0.45);
+  color: rgb(var(--ink) / max(0.45, var(--text-alpha-floor)));
   cursor: pointer;
   outline: none;
   transition: color 0.15s ease, background-color 0.15s ease, transform 0.1s ease;
@@ -1485,8 +1485,8 @@
 }
 
 .update-info-btn:hover {
-  color: #ffffff;
-  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-primary);
+  background: rgb(var(--ink) / 0.08);
   transform: scale(1.08);
 }
 
@@ -1533,38 +1533,38 @@
 }
 
 .update-action-btn.primary {
-  background: #ffffff;
-  color: #000000;
-  box-shadow: 0 0 14px rgba(255, 255, 255, 0.16), 0 2px 8px rgba(0, 0, 0, 0.35);
+  background: var(--surface-inverse);
+  color: var(--on-inverse);
+  box-shadow: 0 0 14px rgb(var(--ink) / 0.16), 0 2px 8px rgba(0, 0, 0, 0.35);
   animation: updateBtnGlow 3s ease-in-out infinite;
 }
 
 .update-action-btn.primary:hover:not(:disabled) {
-  background: #ffffff;
-  box-shadow: 0 0 22px rgba(255, 255, 255, 0.35), 0 4px 12px rgba(0, 0, 0, 0.45);
+  background: var(--surface-inverse);
+  box-shadow: 0 0 22px rgb(var(--ink) / 0.35), 0 4px 12px rgba(0, 0, 0, 0.45);
   transform: translateY(-1px);
 }
 
 @keyframes updateBtnGlow {
   0%, 100% {
-    box-shadow: 0 0 12px rgba(255, 255, 255, 0.12), 0 2px 6px rgba(0, 0, 0, 0.35);
+    box-shadow: 0 0 12px rgb(var(--ink) / 0.12), 0 2px 6px rgba(0, 0, 0, 0.35);
   }
   50% {
-    box-shadow: 0 0 20px rgba(255, 255, 255, 0.28), 0 2px 8px rgba(0, 0, 0, 0.4);
+    box-shadow: 0 0 20px rgb(var(--ink) / 0.28), 0 2px 8px rgba(0, 0, 0, 0.4);
   }
 }
 
 .update-action-btn.secondary {
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  color: rgba(255, 255, 255, 0.85);
+  background: rgb(var(--ink) / 0.06);
+  border: 1px solid rgb(var(--ink) / 0.12);
+  color: rgb(var(--ink) / max(0.85, var(--text-alpha-floor)));
   font-weight: 500;
 }
 
 .update-action-btn.secondary:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.11);
-  border-color: rgba(255, 255, 255, 0.22);
-  color: #ffffff;
+  background: rgb(var(--ink) / 0.11);
+  border-color: rgb(var(--ink) / 0.22);
+  color: var(--text-primary);
   transform: translateY(-1px);
 }
 
@@ -1575,14 +1575,14 @@
 
 /* ── Promoted Active Update Card at Top/Front (Border-free) ── */
 .update-promoted-card {
-  background: var(--bg-card, #141414) !important;
+  background: var(--bg-card, var(--bg-2)) !important;
   border: none !important;
   box-shadow: none !important;
   transition: background 0.14s ease;
 }
 
 .update-promoted-card:hover {
-  background: var(--bg-card-hover, #1c1c1c) !important;
+  background: var(--bg-card-hover, var(--bg-3)) !important;
 }
 
 .settings-shelf-card.update-promoted-card {
@@ -1605,9 +1605,9 @@
   height: 24px;
   padding: 0 10px;
   border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.04);
-  color: rgba(255, 255, 255, 0.65);
+  border: 1px solid rgb(var(--ink) / 0.08);
+  background: rgb(var(--ink) / 0.04);
+  color: rgb(var(--ink) / max(0.65, var(--text-alpha-floor)));
   font-size: 11px;
   font-weight: 500;
   cursor: pointer;
@@ -1621,16 +1621,16 @@
 }
 
 .settings-header-pill:hover {
-  background: rgba(255, 255, 255, 0.1);
-  color: #ffffff;
-  border-color: rgba(255, 255, 255, 0.15);
+  background: rgb(var(--ink) / 0.1);
+  color: var(--text-primary);
+  border-color: rgb(var(--ink) / 0.15);
 }
 
 .settings-header-pill.active {
-  background: #ffffff;
-  color: #000000;
+  background: var(--surface-inverse);
+  color: var(--on-inverse);
   font-weight: 600;
-  border-color: #ffffff;
+  border-color: var(--surface-inverse);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
 }
 
@@ -1686,7 +1686,7 @@
   margin: 0 2px 0 0;
   padding: 0;
   background: transparent;
-  border-left: 1px solid rgba(255, 255, 255, 0.08);
+  border-left: 1px solid rgb(var(--ink) / 0.08);
   box-sizing: border-box;
   flex-shrink: 0;
   user-select: none;
@@ -1703,7 +1703,7 @@
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: rgba(255, 255, 255, 0.38);
+  color: rgb(var(--ink) / max(0.38, var(--text-alpha-floor)));
   max-height: 130px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1714,7 +1714,7 @@
 .settings-shelf-card {
   flex: 0 0 auto;
   height: 146px;
-  background: var(--bg-card, #141414);
+  background: var(--bg-card, var(--bg-2));
   border: none;
   border-radius: var(--radius-card, 18px);
   padding: 12px 14px;
@@ -1742,15 +1742,15 @@
   background: 
     radial-gradient(
       ellipse 70% 1px at 50% 0%,
-      rgba(255, 255, 255, 0.22) 0%,
-      rgba(255, 255, 255, 0.08) 45%,
+      rgb(var(--ink) / 0.22) 0%,
+      rgb(var(--ink) / 0.08) 45%,
       transparent 80%
     ) top / 100% 1px no-repeat,
     linear-gradient(
       90deg,
       transparent 0%,
-      rgba(255, 255, 255, 0.035) 20%,
-      rgba(255, 255, 255, 0.035) 80%,
+      rgb(var(--ink) / 0.035) 20%,
+      rgb(var(--ink) / 0.035) 80%,
       transparent 100%
     ) bottom / 100% 1px no-repeat;
 }
@@ -1770,7 +1770,7 @@
 
 .settings-shelf-track.tab-view .settings-shelf-card:hover,
 .settings-shelf-card:hover {
-  background: var(--bg-card-hover, #1c1c1c);
+  background: var(--bg-card-hover, var(--bg-3));
 }
 
 .settings-shelf-track.tab-view .hotkey-field {
@@ -1784,7 +1784,7 @@
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: rgba(255, 255, 255, 0.42);
+  color: rgb(var(--ink) / max(0.42, var(--text-alpha-floor)));
   margin: 0 0 3px 0;
   flex-shrink: 0;
 }
@@ -1792,13 +1792,13 @@
 .settings-shelf-card .setting-title {
   font-size: 13px;
   font-weight: 600;
-  color: #ffffff;
+  color: var(--text-primary);
   line-height: 1.28;
 }
 
 .settings-shelf-card .setting-desc {
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.62);
+  color: rgb(var(--ink) / max(0.62, var(--text-alpha-floor)));
   line-height: 1.36;
   margin-top: 2px;
 }
@@ -1842,26 +1842,26 @@
 .settings-shelf-card .setting-pills .pill {
   height: 32px;
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  color: rgba(255, 255, 255, 0.78);
+  background: rgb(var(--ink) / 0.05);
+  border: 1px solid rgb(var(--ink) / 0.08);
+  color: rgb(var(--ink) / max(0.78, var(--text-alpha-floor)));
   font-size: 11.5px;
   font-weight: 500;
   transition: all 0.14s ease;
 }
 
 .settings-shelf-card .setting-pills .pill:hover {
-  background: rgba(255, 255, 255, 0.09);
-  border-color: rgba(255, 255, 255, 0.16);
-  color: #ffffff;
+  background: rgb(var(--ink) / 0.09);
+  border-color: rgb(var(--ink) / 0.16);
+  color: var(--text-primary);
 }
 
 .settings-shelf-card .setting-pills .pill.active {
-  background: #ffffff;
-  color: #000000;
+  background: var(--surface-inverse);
+  color: var(--on-inverse);
   font-weight: 600;
-  border-color: #ffffff;
-  box-shadow: 0 2px 10px rgba(255, 255, 255, 0.2);
+  border-color: var(--surface-inverse);
+  box-shadow: 0 2px 10px rgb(var(--ink) / 0.2);
 }
 
 /* Specific Card Widths tailored dynamically to content */
@@ -1877,11 +1877,11 @@
   flex-direction: row;
   align-items: center;
   justify-content: space-between;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.10);
+  background: rgb(var(--ink) / 0.05);
+  border: 1px solid rgb(var(--ink) / 0.10);
   border-radius: 10px;
   padding: 0 12px;
-  color: #ffffff;
+  color: var(--text-primary);
   font-size: 11.5px;
   font-weight: 500;
   cursor: pointer;
@@ -1891,16 +1891,16 @@
 }
 
 .language-shelf-btn:hover {
-  background: rgba(255, 255, 255, 0.09);
-  border-color: rgba(255, 255, 255, 0.18);
-  color: #ffffff;
+  background: rgb(var(--ink) / 0.09);
+  border-color: rgb(var(--ink) / 0.18);
+  color: var(--text-primary);
 }
 
 .language-shelf-btn.flyout-open {
-  background: rgba(255, 255, 255, 0.10);
-  border-color: rgba(255, 255, 255, 0.28);
-  color: #ffffff;
-  box-shadow: 0 0 12px rgba(255, 255, 255, 0.06);
+  background: rgb(var(--ink) / 0.10);
+  border-color: rgb(var(--ink) / 0.28);
+  color: var(--text-primary);
+  box-shadow: 0 0 12px rgb(var(--ink) / 0.06);
 }
 
 .settings-shelf-card.hotkey-card {
@@ -1972,7 +1972,7 @@
 }
 
 .settings-shelf-card.display-card .shelf-card-bottom::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.2);
+  background: rgb(var(--ink) / 0.2);
   border-radius: 999px;
 }
 
@@ -2040,14 +2040,14 @@
   font-size: 9px;
   font-weight: 700;
   letter-spacing: 0.08em;
-  color: rgba(255, 255, 255, 0.45);
+  color: rgb(var(--ink) / max(0.45, var(--text-alpha-floor)));
   text-transform: uppercase;
 }
 
 .shelf-card-title {
   font-size: calc(12.5px * var(--font-scale, 1));
   font-weight: 600;
-  color: #ffffff;
+  color: var(--text-primary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2077,7 +2077,7 @@
 .shelf-row-label {
   font-size: calc(11.5px * var(--font-scale, 1));
   font-weight: 500;
-  color: rgba(255, 255, 255, 0.85);
+  color: rgb(var(--ink) / max(0.85, var(--text-alpha-floor)));
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2087,7 +2087,7 @@
 /* Card Footer */
 .shelf-card-footer {
   font-size: calc(10.5px * var(--font-scale, 1));
-  color: rgba(255, 255, 255, 0.45);
+  color: rgb(var(--ink) / max(0.45, var(--text-alpha-floor)));
   line-height: 1.3;
   flex-shrink: 0;
   white-space: nowrap;
@@ -2111,22 +2111,22 @@
   gap: 3px;
   padding: 5px 3px;
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.07);
+  background: rgb(var(--ink) / 0.04);
+  border: 1px solid rgb(var(--ink) / 0.07);
   cursor: pointer;
   transition: all 0.15s ease;
   user-select: none;
 }
 
 .shelf-indicator-item:hover {
-  background: rgba(255, 255, 255, 0.08);
-  border-color: rgba(255, 255, 255, 0.15);
+  background: rgb(var(--ink) / 0.08);
+  border-color: rgb(var(--ink) / 0.15);
 }
 
 .shelf-indicator-item.active {
-  background: rgba(255, 255, 255, 0.12);
-  border-color: rgba(255, 255, 255, 0.35);
-  box-shadow: 0 0 8px rgba(255, 255, 255, 0.1);
+  background: rgb(var(--ink) / 0.12);
+  border-color: rgb(var(--ink) / 0.35);
+  box-shadow: 0 0 8px rgb(var(--ink) / 0.1);
 }
 
 .shelf-indicator-icon {
@@ -2139,7 +2139,7 @@
 .shelf-indicator-name {
   font-size: 9.5px;
   font-weight: 500;
-  color: rgba(255, 255, 255, 0.85);
+  color: rgb(var(--ink) / max(0.85, var(--text-alpha-floor)));
   white-space: nowrap;
 }
 
@@ -2155,8 +2155,8 @@
   border-radius: 999px;
   font-size: 11.5px;
   font-weight: 600;
-  color: #000000;
-  background: #ffffff;
+  color: var(--on-inverse);
+  background: var(--surface-inverse);
   border: none;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
   cursor: pointer;
@@ -2166,7 +2166,7 @@
 }
 
 .shelf-kofi-btn:hover {
-  background: rgba(255, 255, 255, 0.92);
+  background: rgb(var(--ink) / 0.92);
   transform: translateY(-1px);
 }
 
@@ -2185,9 +2185,9 @@
   border-radius: 999px;
   font-size: 11.5px;
   font-weight: 550;
-  color: rgba(255, 255, 255, 0.92);
-  background: #1c1c1c;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: rgb(var(--ink) / max(0.92, var(--text-alpha-floor)));
+  background: var(--bg-3);
+  border: 1px solid rgb(var(--ink) / 0.08);
   box-shadow: none;
   cursor: pointer;
   white-space: nowrap;
@@ -2197,8 +2197,8 @@
 
 .shelf-github-btn:hover {
   background: #262626;
-  border-color: rgba(255, 255, 255, 0.18);
-  color: #ffffff;
+  border-color: rgb(var(--ink) / 0.18);
+  color: var(--text-primary);
   transform: translateY(-1px);
 }
 
@@ -2209,7 +2209,7 @@
 .shelf-github-btn .github-octocat-icon,
 .shelf-github-btn .store-logo-icon {
   flex-shrink: 0;
-  color: rgba(255, 255, 255, 0.9);
+  color: rgb(var(--ink) / max(0.9, var(--text-alpha-floor)));
 }
 
 .shelf-github-btn .star-icon {
@@ -2227,9 +2227,9 @@
   align-items: center;
   justify-content: center;
   gap: 4px;
-  color: rgba(255, 255, 255, 0.55);
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: rgb(var(--ink) / max(0.55, var(--text-alpha-floor)));
+  background: rgb(var(--ink) / 0.05);
+  border: 1px solid rgb(var(--ink) / 0.08);
   cursor: pointer;
   outline: none;
   transition: all 0.18s ease;
@@ -2251,8 +2251,8 @@
 .shelf-update-progress-wrap {
   width: 100%;
   height: 32px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.10);
+  background: rgb(var(--ink) / 0.05);
+  border: 1px solid rgb(var(--ink) / 0.10);
   border-radius: 10px;
   position: relative;
   overflow: hidden;
@@ -2267,7 +2267,7 @@
   left: 0;
   top: 0;
   bottom: 0;
-  background: rgba(255, 255, 255, 0.18);
+  background: rgb(var(--ink) / 0.18);
   transition: width 0.2s ease;
 }
 
@@ -2276,18 +2276,18 @@
   z-index: 1;
   font-size: 11.5px;
   font-weight: 600;
-  color: #ffffff;
+  color: var(--text-primary);
   letter-spacing: 0.01em;
 }
 
 /* ── SlideCommit Swipe-to-Confirm Capsule ── */
 .slide-commit {
-  --sc-track: rgba(255, 255, 255, 0.08);
-  --sc-ink: #ffffff;
-  --sc-ok: #ffffff;
+  --sc-track: rgb(var(--ink) / 0.08);
+  --sc-ink: var(--surface-inverse);
+  --sc-ok: var(--surface-inverse);
   --sc-no: #ff453a;
-  --sc-on-ink: #000000;
-  --sc-on-ok: #000000;
+  --sc-on-ink: var(--on-inverse);
+  --sc-on-ok: var(--on-inverse);
   --sc-on-no: #ffffff;
   --sc-radius: 10px;
   --sc-grip-r: 7px;
@@ -2313,7 +2313,7 @@
   height: 100%;
   border-radius: var(--sc-radius);
   background: var(--sc-track);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid rgb(var(--ink) / 0.08);
   box-sizing: border-box;
   cursor: grab;
   touch-action: none;
@@ -2322,13 +2322,13 @@
   -webkit-touch-callout: none;
   -webkit-tap-highlight-color: transparent;
   overflow: hidden;
-  box-shadow: 0 0 10px rgba(255, 255, 255, 0.06);
+  box-shadow: 0 0 10px rgb(var(--ink) / 0.06);
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
 .slide-commit:hover .slide-commit__track {
-  border-color: rgba(255, 255, 255, 0.16);
-  box-shadow: 0 0 16px rgba(255, 255, 255, 0.12);
+  border-color: rgb(var(--ink) / 0.16);
+  box-shadow: 0 0 16px rgb(var(--ink) / 0.12);
 }
 
 .slide-commit[data-held] .slide-commit__track {
@@ -2355,7 +2355,7 @@
 
 .slide-commit__text {
   grid-area: 1 / 1;
-  color: rgba(255, 255, 255, 0.65);
+  color: rgb(var(--ink) / max(0.65, var(--text-alpha-floor)));
   transition:
     opacity 200ms ease,
     filter 200ms ease;
@@ -2389,7 +2389,7 @@
   transition:
     background-color 200ms ease,
     color 200ms ease;
-  box-shadow: 0 0 12px rgba(255, 255, 255, 0.24), 0 1px 4px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 0 12px rgb(var(--ink) / 0.24), 0 1px 4px rgba(0, 0, 0, 0.3);
 }
 
 .slide-commit[data-phase='done'] .slide-commit__capsule {
@@ -2498,9 +2498,9 @@
 
 /* ── WakeSlider Segmented Wave Slider ── */
 .wake-slider {
-  --ws-fill: #ffffff;
-  --ws-track: rgba(255, 255, 255, 0.12);
-  --ws-crest: #ffffff;
+  --ws-fill: var(--surface-inverse);
+  --ws-track: rgb(var(--ink) / 0.12);
+  --ws-crest: var(--surface-inverse);
   --ws-height: 28px;
   --ws-gap: 3px;
   --ws-rest: 0.28;
@@ -2588,7 +2588,7 @@
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   text-align: right;
-  color: rgba(255, 255, 255, 0.85);
+  color: rgb(var(--ink) / max(0.85, var(--text-alpha-floor)));
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -2598,3 +2598,153 @@
 }
 
 
+
+.update-action-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+}
+
+.settings-shelf-card .update-action-stack {
+  gap: 4px;
+}
+
+.settings-shelf-card .update-action-stack .update-action-btn {
+  height: 28px;
+}
+
+.accessibility-status.granted {
+  color: #43e97b;
+}
+
+.accessibility-status.missing {
+  color: #ff8e53;
+}
+
+.hotkey-conflict-hint {
+  font-size: calc(11px * var(--font-scale, 1));
+  color: rgb(var(--ink) / max(0.55, var(--text-alpha-floor)));
+}
+
+.accessibility-repair-hint {
+  margin-top: 6px;
+  font-size: calc(11.5px * var(--font-scale, 1));
+  color: rgb(var(--ink) / max(0.55, var(--text-alpha-floor)));
+}
+
+.setting-desc-note {
+  display: block;
+  margin-top: 4px;
+  color: rgb(var(--ink) / max(0.55, var(--text-alpha-floor)));
+}
+
+.ignored-apps-list {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+}
+
+.ignored-apps-empty {
+  font-size: calc(12px * var(--font-scale, 1));
+  color: rgb(var(--ink) / max(0.5, var(--text-alpha-floor)));
+}
+
+.ignored-app-row,
+.ignored-apps-chooser-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  width: 100%;
+  padding: 5px 8px;
+  border-radius: 8px;
+  background: rgb(var(--ink) / 0.05);
+  box-sizing: border-box;
+}
+
+.ignored-app-icon {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  border-radius: 4px;
+  object-fit: contain;
+}
+
+.ignored-app-icon.placeholder {
+  background: rgb(var(--ink) / 0.12);
+}
+
+.ignored-app-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: calc(12.5px * var(--font-scale, 1));
+  color: rgb(var(--ink) / max(0.9, var(--text-alpha-floor)));
+  text-align: left;
+}
+
+.ignored-app-remove {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: rgb(var(--ink) / max(0.6, var(--text-alpha-floor)));
+  cursor: pointer;
+}
+
+.ignored-app-remove:hover {
+  background: rgb(var(--ink) / 0.12);
+  color: var(--text-primary);
+}
+
+.ignored-apps-add-wrap {
+  position: relative;
+  width: 100%;
+}
+
+.ignored-apps-chooser {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 168px;
+  overflow-y: auto;
+  padding: 4px;
+  border-radius: 10px;
+  background: var(--bg-dock-btn);
+  border: 1px solid rgb(var(--ink) / 0.14);
+}
+
+.ignored-apps-chooser-item {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.ignored-apps-chooser-item:hover {
+  background: rgb(var(--ink) / 0.08);
+}
+
+.ignored-apps-chooser-item.other .ignored-app-name {
+  color: rgb(var(--ink) / max(0.7, var(--text-alpha-floor)));
+}
+
+.settings-shelf-card.accessibility-card,
+.settings-shelf-card.ignored-apps-card {
+  justify-content: flex-start;
+  overflow-y: auto;
+  scrollbar-width: none;
+}

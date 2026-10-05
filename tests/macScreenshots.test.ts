@@ -1,4 +1,5 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { restorePlatform, setPlatform } from './helpers/platform'
 
 type ExecCallback = (err: Error | null, stdout?: string, stderr?: string) => void
 type WatchListener = (event: string, fileName: string | null) => void
@@ -62,12 +63,7 @@ vi.mock('../electron/store/paths', () => ({
 
 import { refreshScreenshotWatcher, screenshotDir, startScreenshotWatcher, stopScreenshotWatcher } from '../electron/main/macScreenshots'
 
-const realPlatform = process.platform
 const PNG = Buffer.from('png-bytes')
-
-function setPlatform(value: string): void {
-  Object.defineProperty(process, 'platform', { value, configurable: true })
-}
 
 function commandCalls(cmd: string): unknown[][] {
   return mocks.execFile.mock.calls.filter((c) => c[0] === cmd)
@@ -129,11 +125,11 @@ describe('macOS screenshot watcher', () => {
     stopScreenshotWatcher()
     vi.useRealTimers()
     vi.restoreAllMocks()
-    setPlatform(realPlatform)
+    restorePlatform()
   })
 
   afterAll(() => {
-    setPlatform(realPlatform)
+    restorePlatform()
   })
 
   async function start(onScreenshot = vi.fn(), isEnabled?: () => boolean) {
@@ -185,12 +181,70 @@ describe('macOS screenshot watcher', () => {
     const onScreenshot = await start()
     mocks.screenCapture = false
     await emit('photo.png')
+    await vi.advanceTimersByTimeAsync(1000)
     mocks.screenCapture = true
+    await emit('photo.png')
     await emit('.Screenshot.png')
     await emit('notes.txt')
     mocks.statSync.mockImplementation(() => ({ isFile: () => true, size: 1024, birthtimeMs: Date.now() - 60_000 }))
     await emit('old.png')
     expect(onScreenshot).not.toHaveBeenCalled()
+  })
+
+  it('captures a screenshot whose screen-capture attribute is stamped late', async () => {
+    const onScreenshot = await start()
+    mocks.screenCapture = false
+    await emit('Late.png')
+    expect(onScreenshot).not.toHaveBeenCalled()
+
+    mocks.screenCapture = true
+    await vi.advanceTimersByTimeAsync(300)
+    expect(onScreenshot).toHaveBeenCalledTimes(1)
+    expect(onScreenshot).toHaveBeenCalledWith(PNG, 'Late.png')
+    expect(commandCalls('xattr')).toHaveLength(2)
+  })
+
+  it('gives up on a file without the attribute after three checks', async () => {
+    const onScreenshot = await start()
+    mocks.screenCapture = false
+    await emit('photo.png')
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(commandCalls('xattr')).toHaveLength(3)
+
+    mocks.screenCapture = true
+    await emit('photo.png')
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(commandCalls('xattr')).toHaveLength(3)
+    expect(onScreenshot).not.toHaveBeenCalled()
+  })
+
+  it('retries a flagged screenshot whose image is not readable yet and does not blacklist it', async () => {
+    let empty = true
+    mocks.createFromPath.mockImplementation(() => ({ isEmpty: () => empty, toPNG: () => PNG }))
+    const onScreenshot = await start()
+    await emit('Slow.png')
+    expect(onScreenshot).not.toHaveBeenCalled()
+
+    empty = false
+    await vi.advanceTimersByTimeAsync(300)
+    expect(onScreenshot).toHaveBeenCalledTimes(1)
+
+    empty = true
+    await emit('Never.png')
+    await vi.advanceTimersByTimeAsync(2000)
+    empty = false
+    await emit('Never.png')
+    expect(onScreenshot).toHaveBeenCalledTimes(2)
+    expect(onScreenshot).toHaveBeenLastCalledWith(PNG, 'Never.png')
+  })
+
+  it('handles duplicate watcher events for one file only once while it is being checked', async () => {
+    const onScreenshot = await start()
+    mocks.watchers[0].listener('rename', 'Burst.png')
+    mocks.watchers[0].listener('change', 'Burst.png')
+    await vi.advanceTimersByTimeAsync(300)
+    expect(onScreenshot).toHaveBeenCalledTimes(1)
+    expect(commandCalls('xattr')).toHaveLength(1)
   })
 
   it('does not watch the folder or poll defaults while the setting is off', async () => {

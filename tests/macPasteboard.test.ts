@@ -1,4 +1,5 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { restorePlatform, setPlatform } from './helpers/platform'
 
 type NSStr = { str: string }
 type NSUrl = { url: string; types?: NSStr[] }
@@ -120,12 +121,6 @@ vi.mock('koffi', () => ({
 
 type Mod = typeof import('../electron/main/macPasteboard')
 
-const realPlatform = process.platform
-
-function setPlatform(value: string): void {
-  Object.defineProperty(process, 'platform', { value, configurable: true })
-}
-
 async function loadModule(platform = 'darwin'): Promise<Mod> {
   setPlatform(platform)
   vi.resetModules()
@@ -155,11 +150,11 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks()
-  setPlatform(realPlatform)
+  restorePlatform()
 })
 
 afterAll(() => {
-  setPlatform(realPlatform)
+  restorePlatform()
 })
 
 describe('writeFileUrls', () => {

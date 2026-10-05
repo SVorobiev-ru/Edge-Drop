@@ -1,6 +1,51 @@
+import { useSyncExternalStore } from 'react'
 import { useStore } from '../store/appStore'
-import { LANGUAGES, TRANSLATIONS, en } from './translations'
+import type { TranslationKeys } from './types'
+import { LANGUAGES } from './languages'
+import en from './locales/en'
 import { RTL_LANGUAGES, macify, resolveText } from '../../shared/platformText'
+import { isDarwin } from '../lib/edge'
+
+const localeLoaders = import.meta.glob<TranslationKeys>(['./locales/*.ts', '!./locales/en.ts'], { import: 'default' })
+const loadedLocales: Record<string, TranslationKeys> = { en }
+const pendingLocales = new Map<string, Promise<void>>()
+const localeListeners = new Set<() => void>()
+let localeVersion = 0
+
+function subscribeLocales(listener: () => void): () => void {
+  localeListeners.add(listener)
+  return () => {
+    localeListeners.delete(listener)
+  }
+}
+
+function getLocaleVersion(): number {
+  return localeVersion
+}
+
+export function isLanguageLoaded(code: string): boolean {
+  return !!loadedLocales[code]
+}
+
+export function loadLanguage(code: string): Promise<void> {
+  if (loadedLocales[code]) return Promise.resolve()
+  const pending = pendingLocales.get(code)
+  if (pending) return pending
+  const loader = localeLoaders[`./locales/${code}.ts`]
+  if (!loader) return Promise.resolve()
+  const loading = loader()
+    .then((dict) => {
+      loadedLocales[code] = dict
+      localeVersion++
+      localeListeners.forEach((listener) => listener())
+    })
+    .catch(() => {})
+    .finally(() => {
+      pendingLocales.delete(code)
+    })
+  pendingLocales.set(code, loading)
+  return loading
+}
 
 /**
  * Resolves the active language code.
@@ -56,15 +101,12 @@ export function getResolvedLanguage(settingLang?: string): string {
 export function t(path: string, params?: Record<string, string | number>): string {
   const settingsLang = useStore.getState().settings.language
   const langCode = getResolvedLanguage(settingsLang)
-  return resolveText(TRANSLATIONS[langCode], en, path, langCode, IS_MAC, params)
+  const dict = loadedLocales[langCode]
+  if (!dict) void loadLanguage(langCode)
+  return resolveText(dict, en, path, langCode, IS_MAC, params)
 }
 
-const IS_MAC = (() => {
-  const g = globalThis as any
-  if (g.process && g.process.platform) return g.process.platform === 'darwin'
-  const nav = g.navigator
-  return !!nav && /Mac/i.test(nav.platform || nav.userAgent || '')
-})()
+const IS_MAC = isDarwin()
 
 export { macify, RTL_LANGUAGES }
 
@@ -74,12 +116,15 @@ export { macify, RTL_LANGUAGES }
 export function useTranslation() {
   const language = useStore((s) => s.settings.language)
   const resolvedLang = getResolvedLanguage(language)
+  useSyncExternalStore(subscribeLocales, getLocaleVersion)
+  void loadLanguage(resolvedLang)
 
   // Update text direction for RTL languages like Arabic, Persian & Hebrew
   const g = globalThis as any
   if (g.document && g.document.documentElement) {
     const isRtl = RTL_LANGUAGES.includes(resolvedLang)
     g.document.documentElement.dir = isRtl ? 'rtl' : 'ltr'
+    g.document.documentElement.lang = resolvedLang
   }
 
   return {

@@ -28,6 +28,7 @@ fi
 cd "$(dirname "$0")/.."
 
 VERSION="$(node scripts/mac-version.cjs)"
+SIGN_IDENTITY="${EDGE_DROP_SIGN_NAME:-${EDGE_DROP_SIGN_IDENTITY:-}}"
 DMG="dist/${APP_NAME}-${VERSION}-mac-${ARCH}.dmg"
 ZIP="dist/${APP_NAME}-${VERSION}-mac-${ARCH}.zip"
 
@@ -66,10 +67,18 @@ check_app() {
   codesign --verify --deep --strict "$app" || fail "codesign --verify failed"
   details="$(codesign -dv --verbose=2 "$app" 2>&1)"
   echo "$details" | grep -E '^(Identifier=|Format=|CodeDirectory |Signature=|TeamIdentifier=)' || true
-  echo "$details" | grep -q '^Signature=adhoc$' || fail "signature is not ad-hoc"
+  if [[ -n "$SIGN_IDENTITY" ]]; then
+    echo "$details" | grep -E '^Authority=' || true
+    echo "$details" | grep -qxF "Authority=${SIGN_IDENTITY}" || fail "signature is not made with ${SIGN_IDENTITY}"
+    codesign -d -r- "$app" 2>&1 | grep -q 'certificate leaf = H"' || fail "designated requirement is not bound to the certificate"
+  else
+    echo "$details" | grep -q '^Signature=adhoc$' || fail "signature is not ad-hoc"
+  fi
   if echo "$details" | grep -q 'flags=.*runtime'; then
     fail "hardened runtime is enabled"
   fi
+
+  node scripts/check-mac-asar.cjs "$app" || fail "app.asar holds files outside the allow-list"
 
   archs="$(lipo -archs "${app}/Contents/MacOS/${APP_NAME}")"
   echo "main binary: ${archs}"
@@ -107,4 +116,8 @@ hdiutil detach "$MOUNT" -quiet
 ditto -x -k "$ZIP" "${WORK}/zip"
 check_app "${WORK}/zip/${APP_NAME}.app" "$ZIP"
 
-echo "OK: ${VERSION} ${ARCH} DMG and ZIP are ad-hoc signed and match the architecture"
+if [[ -n "$SIGN_IDENTITY" ]]; then
+  echo "OK: ${VERSION} ${ARCH} DMG and ZIP are signed with ${SIGN_IDENTITY} and match the architecture"
+else
+  echo "OK: ${VERSION} ${ARCH} DMG and ZIP are ad-hoc signed and match the architecture"
+fi

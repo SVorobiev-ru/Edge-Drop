@@ -152,3 +152,88 @@ describe('staged temp lifecycle (registry + ownership cleanup)', () => {
     expect(registryOnDisk().entries).toHaveLength(0)
   })
 })
+
+describe('staged temp registry privacy and atomic writes', () => {
+  let registry: string
+
+  beforeEach(async () => {
+    delete process.env.APP_BUILD_TARGET
+    fsRoots.userData = join(tmpdir(), `ed-staged-ud-${Date.now()}-${Math.random().toString(16).slice(2)}`)
+    fsRoots.home = join(tmpdir(), `ed-staged-home-${Date.now()}-${Math.random().toString(16).slice(2)}`)
+    mkdirSync(join(fsRoots.userData, 'temp'), { recursive: true })
+    mkdirSync(fsRoots.home, { recursive: true })
+    registry = join(fsRoots.userData, 'temp-staged.json')
+    vi.resetModules()
+    mod = await import('../electron/main/stagedTemp')
+  })
+
+  afterEach(() => {
+    rmSync(fsRoots.userData, { recursive: true, force: true })
+    rmSync(fsRoots.home, { recursive: true, force: true })
+  })
+
+  function artifact(name: string): string {
+    const p = join(fsRoots.userData, 'temp', name)
+    writeFileSync(p, `bytes-${name}`)
+    return p
+  }
+
+  it('does not write the copied text into the registry', () => {
+    const secret = 'my secret token 12345'
+    const data = { kind: 'text' as const, text: secret, isUrl: false }
+    mod.recordStagedFiles(data, [artifact('Snippet_a.txt')])
+    mod.flushStagedTempRegistry()
+
+    const raw = readFileSync(registry, 'utf8')
+    expect(raw).not.toContain(secret)
+    expect(JSON.parse(raw).entries[0].sig).toMatch(/^text\|sha256:[0-9a-f]{64}$/)
+    expect(existsSync(`${registry}.tmp`)).toBe(false)
+  })
+
+  it('treats entries with old clear-text signatures as stale and survives them', () => {
+    const oldFile = artifact('Snippet_old.txt')
+    const liveFile = artifact('Screenshot live.png')
+    const image = { kind: 'image' as const, imageId: 'img', width: 10, height: 10, bytes: 8, ext: 'png' }
+    const text = { kind: 'text' as const, text: 'still in history', isUrl: false }
+    writeFileSync(registry, JSON.stringify({
+      v: 1,
+      entries: [
+        { sig: 'text|still in history', files: [oldFile] },
+        { sig: 'image|10x10|8', files: [liveFile] }
+      ]
+    }))
+
+    expect(() => mod.reconcileTempOnStartup([
+      { id: 't', data: text, capturedAt: 1, hitCount: 1, pinned: false },
+      { id: 'i', data: image, capturedAt: 1, hitCount: 1, pinned: false }
+    ] as any)).not.toThrow()
+
+    expect(existsSync(oldFile)).toBe(false)
+    expect(existsSync(liveFile)).toBe(true)
+    const raw = readFileSync(registry, 'utf8')
+    expect(raw).not.toContain('still in history')
+    expect(JSON.parse(raw).entries).toEqual([{ sig: 'image|10x10|8', files: [liveFile] }])
+  })
+
+  it('drops old clear-text entries on the first write even without a startup reconciliation', () => {
+    writeFileSync(registry, JSON.stringify({ v: 1, entries: [{ sig: 'text|leaked text', files: [artifact('Snippet_x.txt')] }] }))
+
+    mod.forgetStagedItems([{ data: { kind: 'text', text: 'leaked text', isUrl: false } }])
+    mod.flushStagedTempRegistry()
+
+    expect(readFileSync(registry, 'utf8')).not.toContain('leaked text')
+  })
+
+  it('keeps the previous registry when the new one cannot be written', () => {
+    const data = { kind: 'image' as const, imageId: 'img', width: 10, height: 10, bytes: 8, ext: 'png' }
+    mod.recordStagedFiles(data, [artifact('a.png')])
+    mod.flushStagedTempRegistry()
+    const before = readFileSync(registry, 'utf8')
+
+    mkdirSync(`${registry}.tmp`)
+    mod.recordStagedFiles({ ...data, bytes: 9 }, [artifact('b.png')])
+    mod.flushStagedTempRegistry()
+
+    expect(readFileSync(registry, 'utf8')).toBe(before)
+  })
+})

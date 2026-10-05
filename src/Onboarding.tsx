@@ -2,14 +2,25 @@ import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import logoUrl from './assets/logo.svg'
 import { Settings } from './components/Settings'
+import { Toggle } from './components/settings/Toggle'
 import { useTranslation } from './i18n'
 import { useStore } from './store/appStore'
-import { edge } from './lib/edge'
+import { edge, IS_DARWIN } from './lib/edge'
+import { applyTheme, resolveTheme } from './lib/theme'
+import { useSystemDark } from './hooks/useSystemDark'
+import { defaultToggleHotkey } from '../shared/types'
 
 export function Onboarding() {
   const { t } = useTranslation()
+  const settings = useStore((s) => s.settings)
   const [currentIndex, setCurrentIndex] = useState(0)
   const [accessibilityTrusted, setAccessibilityTrusted] = useState<boolean | null>(null)
+  const themeMode = settings.theme
+  const systemDark = useSystemDark(() => typeof window === 'undefined' || !window.matchMedia || window.matchMedia('(prefers-color-scheme: dark)').matches)
+
+  useEffect(() => {
+    applyTheme(resolveTheme(themeMode, systemDark, edge.platform), false)
+  }, [themeMode, systemDark])
 
   useEffect(() => {
     let cancelled = false
@@ -53,6 +64,15 @@ export function Onboarding() {
       videoSrc: 'welcome.webm',
       placeholderColor: 'linear-gradient(135deg, #FF6B6B 0%, #FF8E53 100%)'
     },
+    ...(IS_DARWIN
+      ? [{
+          id: 'slide-permissions',
+          title: t('onboarding.permissionsTitle'),
+          description: t('onboarding.permissionsDesc'),
+          videoSrc: '',
+          placeholderColor: 'transparent'
+        }]
+      : []),
     {
       id: 'slide-2',
       title: t('onboarding.collectTitle'),
@@ -119,7 +139,13 @@ export function Onboarding() {
     }
   }
 
+  const permissionsIndex = slides.findIndex((slide) => slide.id === 'slide-permissions')
+
   const handleSkip = async () => {
+    if (permissionsIndex >= 0 && currentIndex < permissionsIndex) {
+      setCurrentIndex(permissionsIndex)
+      return
+    }
     await useStore.getState().patchSettings({ tutorialCompleted: true })
     window.close()
   }
@@ -130,12 +156,14 @@ export function Onboarding() {
     <div style={{
       width: '100vw',
       height: '100vh',
-      background: '#121212',
-      color: '#fff',
+      background: 'var(--ob-bg, #121212)',
+      color: 'var(--text-primary)',
       display: 'flex',
       flexDirection: 'column',
       userSelect: 'none',
-      fontFamily: 'Plus Jakarta Sans, Segoe UI, sans-serif'
+      fontFamily: IS_DARWIN
+        ? "-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Plus Jakarta Sans', sans-serif"
+        : 'Plus Jakarta Sans, Segoe UI, sans-serif'
     }}>
       {/* Header Bar */}
       <div style={{
@@ -144,7 +172,7 @@ export function Onboarding() {
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
-        borderBottom: '1px solid #262626'
+        borderBottom: '1px solid var(--ob-line, #262626)'
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           <img src={logoUrl} alt="Edge-Drop Logo" style={{ width: '28px', height: '28px' }} />
@@ -155,15 +183,15 @@ export function Onboarding() {
           style={{
             background: 'transparent',
             border: 'none',
-            color: '#888',
+            color: 'var(--ob-muted, #888)',
             fontSize: '14px',
             cursor: 'pointer',
             padding: '6px 12px',
             borderRadius: '6px',
             transition: 'color 0.2s, background 0.2s'
           }}
-          onMouseOver={(e) => { e.currentTarget.style.color = '#fff'; e.currentTarget.style.background = '#222' }}
-          onMouseOut={(e) => { e.currentTarget.style.color = '#888'; e.currentTarget.style.background = 'transparent' }}
+          onMouseOver={(e) => { e.currentTarget.style.color = 'var(--text-primary)'; e.currentTarget.style.background = 'var(--ob-hover, #222)' }}
+          onMouseOut={(e) => { e.currentTarget.style.color = 'var(--ob-muted, #888)'; e.currentTarget.style.background = 'transparent' }}
         >
           {t('onboarding.skip')}
         </button>
@@ -176,24 +204,41 @@ export function Onboarding() {
             <h1 style={{ fontSize: '28px', margin: '0 0 12px 0', fontWeight: 700, letterSpacing: '-0.02em' }}>
               {currentSlide.title}
             </h1>
-            <p style={{ fontSize: '15px', lineHeight: 1.6, color: 'rgba(255,255,255,0.7)', margin: '0 0 24px 0' }}>
+            <p style={{ fontSize: '15px', lineHeight: 1.6, color: 'rgb(var(--ink) / max(0.7, var(--text-alpha-floor)))', margin: '0 0 24px 0' }}>
               {currentSlide.description}
             </p>
-            <div style={{ background: '#1a1a1c', padding: '16px 20px', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.08)' }}>
-              <div style={{ fontSize: '13px', fontWeight: 600, color: '#fff', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            <div style={{ background: 'var(--ob-card, #1a1a1c)', padding: '16px 20px', borderRadius: '12px', border: '1px solid rgb(var(--ink) / 0.08)' }}>
+              <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                 {t('onboarding.proTips')}
               </div>
-              <ul style={{ fontSize: '14px', color: 'rgba(255,255,255,0.6)', margin: 0, paddingLeft: '20px', lineHeight: 1.6 }}>
-                <li>{t('onboarding.proTip1')}</li>
+              <ul style={{ fontSize: '14px', color: 'rgb(var(--ink) / max(0.6, var(--text-alpha-floor)))', margin: 0, paddingLeft: '20px', lineHeight: 1.6 }}>
+                <li>{t('onboarding.proTip1', { shortcut: settings.toggleHotkey || defaultToggleHotkey(IS_DARWIN) })}</li>
                 <li>{t('onboarding.proTip2')}</li>
                 <li>{t('onboarding.proTip3')}</li>
                 <li>{t('onboarding.proTip4')}</li>
+                {IS_DARWIN && <li>{t('onboarding.menuBarTip')}</li>}
               </ul>
             </div>
+          </div>
+          <div style={{ flex: 1, background: 'var(--ob-card, #1a1a1c)', borderRadius: '16px', border: '1px solid rgb(var(--ink) / 0.05)', overflow: 'hidden', display: 'flex', minHeight: 0 }}>
+            <div style={{ flex: 1, overflowY: 'auto', padding: '16px' }}>
+              <Settings inlineIndicatorStyle={true} />
+            </div>
+          </div>
+        </div>
+      ) : currentSlide.id === 'slide-permissions' ? (
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'safe center', padding: '24px 48px', overflowY: 'auto', minHeight: 0 }}>
+          <div style={{ width: '100%', maxWidth: '560px' }}>
+            <h1 style={{ fontSize: '28px', margin: '0 0 12px 0', fontWeight: 700, letterSpacing: '-0.02em' }}>
+              {currentSlide.title}
+            </h1>
+            <p style={{ fontSize: '15px', lineHeight: 1.6, color: 'rgb(var(--ink) / max(0.7, var(--text-alpha-floor)))', margin: '0 0 24px 0' }}>
+              {currentSlide.description}
+            </p>
             {accessibilityTrusted !== null && (
-              <div style={{ flexShrink: 0, background: '#1a1a1c', padding: '10px 20px', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.08)', marginTop: '12px' }}>
+              <div style={{ flexShrink: 0, background: 'var(--ob-card, #1a1a1c)', padding: '10px 20px', borderRadius: '12px', border: '1px solid rgb(var(--ink) / 0.08)', marginTop: '12px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
-                  <div style={{ fontSize: '13px', fontWeight: 600, color: '#fff', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                     {t('onboarding.accessibilityTitle')}
                   </div>
                   <div style={{ fontSize: '13px', fontWeight: 600, color: accessibilityTrusted ? '#43E97B' : '#FF8E53', whiteSpace: 'nowrap' }}>
@@ -202,15 +247,15 @@ export function Onboarding() {
                 </div>
                 {!accessibilityTrusted && (
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', marginTop: '6px' }}>
-                    <div style={{ fontSize: '13px', color: 'rgba(255,255,255,0.6)', lineHeight: 1.4 }}>
+                    <div style={{ fontSize: '13px', color: 'rgb(var(--ink) / max(0.6, var(--text-alpha-floor)))', lineHeight: 1.4 }}>
                       {t('onboarding.accessibilityDesc')}
                     </div>
                     <button
                       onClick={handleRequestAccessibility}
                       style={{
-                        background: '#2a2a2a',
-                        border: '1px solid #444',
-                        color: '#fff',
+                        background: 'var(--ob-btn, #2a2a2a)',
+                        border: '1px solid var(--ob-btn-line, #444)',
+                        color: 'var(--text-primary)',
                         fontSize: '13px',
                         fontWeight: 500,
                         cursor: 'pointer',
@@ -220,8 +265,8 @@ export function Onboarding() {
                         flexShrink: 0,
                         transition: 'background 0.2s'
                       }}
-                      onMouseOver={(e) => { e.currentTarget.style.background = '#333' }}
-                      onMouseOut={(e) => { e.currentTarget.style.background = '#2a2a2a' }}
+                      onMouseOver={(e) => { e.currentTarget.style.background = 'var(--ob-btn-hover, #333)' }}
+                      onMouseOut={(e) => { e.currentTarget.style.background = 'var(--ob-btn, #2a2a2a)' }}
                     >
                       {t('onboarding.accessibilityButton')}
                     </button>
@@ -229,10 +274,15 @@ export function Onboarding() {
                 )}
               </div>
             )}
-          </div>
-          <div style={{ flex: 1, background: '#1a1a1c', borderRadius: '16px', border: '1px solid rgba(255, 255, 255, 0.05)', overflow: 'hidden', display: 'flex', minHeight: 0 }}>
-            <div style={{ flex: 1, overflowY: 'auto', padding: '16px' }}>
-              <Settings inlineIndicatorStyle={true} />
+            <div style={{ background: 'var(--ob-card, #1a1a1c)', padding: '12px 20px', borderRadius: '12px', border: '1px solid rgb(var(--ink) / 0.08)', marginTop: '12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
+              <div id="onboarding-launch-at-login" style={{ fontSize: '14px', color: 'var(--text-primary)' }}>
+                {t('onboarding.launchAtLogin')}
+              </div>
+              <Toggle
+                checked={!!settings.launchAtLogin}
+                onChange={(v) => useStore.getState().setLaunchAtLogin(v)}
+                labelledBy="onboarding-launch-at-login"
+              />
             </div>
           </div>
         </div>
@@ -242,13 +292,13 @@ export function Onboarding() {
             width: '100%',
             maxWidth: '560px',
             height: '315px',
-            background: '#1a1a1c',
+            background: 'var(--ob-card, #1a1a1c)',
             borderRadius: '16px',
             overflow: 'hidden',
             position: 'relative',
-            boxShadow: '0 20px 40px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.05)',
+            boxShadow: '0 20px 40px rgba(0,0,0,0.4), inset 0 1px 0 rgb(var(--ink) / 0.05)',
             marginBottom: '36px',
-            border: '1px solid rgba(255, 255, 255, 0.05)'
+            border: '1px solid rgb(var(--ink) / 0.05)'
           }}>
             <AnimatePresence mode="wait">
               <motion.div
@@ -283,7 +333,7 @@ export function Onboarding() {
                 <h1 style={{ fontSize: '24px', margin: '0 0 12px 0', fontWeight: 700, letterSpacing: '-0.01em' }}>
                   {currentSlide.title}
                 </h1>
-                <p style={{ fontSize: '15px', lineHeight: 1.6, color: 'rgba(255,255,255,0.6)', margin: 0 }}>
+                <p style={{ fontSize: '15px', lineHeight: 1.6, color: 'rgb(var(--ink) / max(0.6, var(--text-alpha-floor)))', margin: 0 }}>
                   {currentSlide.description}
                 </p>
               </motion.div>
@@ -299,16 +349,16 @@ export function Onboarding() {
         display: 'grid',
         gridTemplateColumns: '1fr auto 1fr',
         alignItems: 'center',
-        borderTop: '1px solid #262626'
+        borderTop: '1px solid var(--ob-line, #262626)'
       }}>
         <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
           <button
             onClick={handlePrev}
             disabled={currentIndex === 0}
             style={{
-              background: '#2a2a2a',
-              border: '1px solid #444',
-              color: currentIndex === 0 ? '#555' : '#fff',
+              background: 'var(--ob-btn, #2a2a2a)',
+              border: '1px solid var(--ob-btn-line, #444)',
+              color: currentIndex === 0 ? 'var(--ob-disabled, #555)' : 'var(--text-primary)',
               fontSize: '15px',
               fontWeight: 500,
               cursor: currentIndex === 0 ? 'default' : 'pointer',
@@ -318,8 +368,8 @@ export function Onboarding() {
               opacity: currentIndex === 0 ? 0 : 1,
               pointerEvents: currentIndex === 0 ? 'none' : 'auto'
             }}
-            onMouseOver={(e) => { if (currentIndex !== 0) e.currentTarget.style.background = '#333' }}
-            onMouseOut={(e) => { if (currentIndex !== 0) e.currentTarget.style.background = '#2a2a2a' }}
+            onMouseOver={(e) => { if (currentIndex !== 0) e.currentTarget.style.background = 'var(--ob-btn-hover, #333)' }}
+            onMouseOut={(e) => { if (currentIndex !== 0) e.currentTarget.style.background = 'var(--ob-btn, #2a2a2a)' }}
           >
             {t('onboarding.back')}
           </button>
@@ -333,7 +383,7 @@ export function Onboarding() {
                 width: '8px',
                 height: '8px',
                 borderRadius: '50%',
-                background: i === currentIndex ? '#fff' : '#444',
+                background: i === currentIndex ? 'var(--surface-inverse)' : 'var(--ob-dot, #444)',
                 transition: 'background 0.3s'
               }}
             />
@@ -344,9 +394,9 @@ export function Onboarding() {
           <button
             onClick={handleNext}
             style={{
-              background: '#fff',
+              background: 'var(--surface-inverse)',
               border: 'none',
-              color: '#000',
+              color: 'var(--on-inverse)',
               fontSize: '15px',
               fontWeight: 600,
               cursor: 'pointer',

@@ -13,13 +13,15 @@
  */
 
 import type { WorkAreaRect } from './workAreaCache'
+import { BUFFER_PX, TRIGGER_PX } from '../../shared/edgeZones'
+import type { StickPosition } from '../../shared/types'
 
 export interface StickProbeInput {
   /** Global virtual-desktop cursor point (screen.getCursorScreenPoint()). */
   cursor: { x: number; y: number }
   /** Work area of the display the shelf is stuck to. */
   workArea: WorkAreaRect
-  stickPosition: 'left' | 'right' | 'top'
+  stickPosition: StickPosition
   /** Physical thickness of the hover trigger band. */
   hotZoneWidth: number
 }
@@ -58,6 +60,9 @@ export function probeStickEdge(input: StickProbeInput): StickProbeResult {
     case 'top':
       distFromEdge = clientY
       break
+    case 'bottom':
+      distFromEdge = workArea.height - clientY
+      break
   }
 
   const inEdge = !garbage && distFromEdge >= -30 && distFromEdge <= hotZoneWidth
@@ -68,6 +73,60 @@ export function probeStickEdge(input: StickProbeInput): StickProbeResult {
 /** True when this frame qualifies for fast-poll proximity (<= 450px from edge). */
 export function isNearProximity(distFromEdge: number): boolean {
   return distFromEdge <= FAST_POLL_PROXIMITY_PX
+}
+
+export const MAC_FAST_POLL_PROXIMITY_PX = 120
+const MAC_REPORT_BAND_BEFORE_PX = BUFFER_PX
+const MAC_REPORT_BAND_AFTER_PX = 25
+
+export function isPointInRect(point: { x: number; y: number }, rect: WorkAreaRect): boolean {
+  return (
+    point.x >= rect.x &&
+    point.x < rect.x + rect.width &&
+    point.y >= rect.y &&
+    point.y < rect.y + rect.height
+  )
+}
+
+export function isNearProximityMac(input: {
+  distFromEdge: number
+  cursor: { x: number; y: number }
+  displayBounds: WorkAreaRect
+}): boolean {
+  const { distFromEdge, cursor, displayBounds } = input
+  if (distFromEdge < 0 || distFromEdge > MAC_FAST_POLL_PROXIMITY_PX) return false
+  return isPointInRect(cursor, displayBounds)
+}
+
+export function isInMacReportBand(input: {
+  distFromEdge: number
+  cursor: { x: number; y: number }
+  displayBounds: WorkAreaRect
+  stickPosition: StickPosition
+  hotZoneWidth: number
+}): boolean {
+  const { distFromEdge, cursor, displayBounds, stickPosition, hotZoneWidth } = input
+  if (distFromEdge < -MAC_REPORT_BAND_BEFORE_PX) return false
+  if (distFromEdge > Math.max(hotZoneWidth, TRIGGER_PX) + MAC_REPORT_BAND_AFTER_PX) return false
+  if (stickPosition === 'top' || stickPosition === 'bottom') {
+    return cursor.x >= displayBounds.x && cursor.x < displayBounds.x + displayBounds.width
+  }
+  return cursor.y >= displayBounds.y && cursor.y < displayBounds.y + displayBounds.height
+}
+
+export function shouldSendCursorEdge(input: {
+  platform: string
+  stateChanged: boolean
+  interactive: boolean
+  nearEdge: boolean
+  inReportBand: boolean
+  wasInReportBand: boolean
+  positionChangedEnough: boolean
+}): boolean {
+  if (input.stateChanged || input.interactive) return true
+  if (input.platform !== 'darwin') return input.nearEdge && input.positionChangedEnough
+  if (input.inReportBand) return input.positionChangedEnough
+  return input.wasInReportBand
 }
 
 /* ------------------------------------------------------------------ */
@@ -129,7 +188,7 @@ export function probeSeamAware(
   input: {
     cursor: { x: number; y: number }
     workArea: WorkAreaRect
-    stickPosition: 'left' | 'right' | 'top'
+    stickPosition: StickPosition
     hotZoneWidth: number
     /** Monotonic-ish wall time for THIS sample (Date.now() in production). */
     now: number

@@ -5,32 +5,38 @@
  * renderer calls them through the typed preload bridge, so a signature mismatch
  * is a compile-time error rather than a runtime one.
  */
-import { app, ipcMain, clipboard, nativeImage, shell, net, screen, BrowserWindow, systemPreferences, Notification } from 'electron'
+import { app, ipcMain, clipboard, nativeImage, shell, net, screen, BrowserWindow, globalShortcut } from 'electron'
 import { existsSync } from 'node:fs'
 import { execFile } from 'node:child_process'
 import { psHost, getSystemPowerShellPath, getWritableCwd } from './powershell'
 import { filterValidPaths, isExistingFilePath } from './pathValidation'
-import { type InvokeMap, type InvokeChannel, type SendMap, type SendChannel } from '../../shared/ipc'
-import { getStore, loadSettings, saveSettings, pushState, addFiles, getWatcher } from './state'
-import { sendToMainWindow, setInteractive, setHeartbeatPaused, setHotZoneWidth, repositionWindow, getDisplayListOptions, popUpAndRetract, setWindowFocusable, captureExternalForeground, traceFg, resolvePasteTarget } from './window'
-import { registerGlobalHotkey } from './index'
+import { type SendMap, type SendChannel } from '../../shared/ipc'
+import { getStore, loadSettings, saveSettings, pushState, addFiles, getWatcher, writeStoredImageToPasteboard } from './state'
+import { applyMacWindowOptions, sendToMainWindow, setInteractive, setHeartbeatPaused, setHotZoneWidth, repositionWindow, getDisplayListOptions, popUpAndRetract, setWindowFocusable, captureExternalForeground, traceFg, resolvePasteTarget, isInteractive } from './window'
 import { getOnboardingWindow } from './onboardingWindow'
 import { rebuildTrayMenu } from './tray'
 import { startDragOut, resolveDragData, prestageDrag, stageDragFile } from './drag'
-import { clipboardSignature, formatTabularDataForClipboard, signatureMatchesItem, localPathFromFileUrl } from '../clipboard/formats'
-import type { ClipboardItem, DragRequest, ItemData, MergeResult } from '../../shared/types'
+import { clipboardSignature, formatTabularDataForClipboard, signatureMatchesItem, localPathFromFileUrl, writeRichTextToClipboard } from '../clipboard/formats'
+import type { ClipboardItem, DragRequest, ItemData, MergeResult, PasteOptions } from '../../shared/types'
+import { DEFAULT_PASTE_QUEUE_HOTKEY, defaultToggleHotkey } from '../../shared/types'
 import { quitAndInstallUpdate, checkForUpdatesManual, startUpdateDownload, syncAutoUpdaterState, getCachedUpdateState, triggerBackgroundCheck } from './updater'
 import { createId } from '../store/ids'
 import { isStoreBuild } from './config'
 import { applyLaunchAtLogin, refreshLaunchAtLoginFromOs } from './loginItems'
-import { PATHS, toUnpackagedFilePath, toUnpackagedFilePaths } from '../store/paths'
+import { toUnpackagedFilePath, toUnpackagedFilePaths } from '../store/paths'
 import { isPasteableEmoji } from '../../shared/emoji'
-import { pressedMouseButtons, postCommandV, mouseButtonsAvailable, canPostEvents, requestPostEvents } from './macNative'
-import { TRANSLATIONS, en } from '../../src/i18n/translations'
+import { pressedMouseButtons, mouseButtonsAvailable } from './macNative'
 import { waitForMouseRelease } from './macDrag'
 import { refreshScreenshotWatcher } from './macScreenshots'
 import { writeFileUrls, addFileUrlToCurrentItem, addImageDataToFirstItem, pasteboardChangeCount } from './macPasteboard'
-import { resolveUiLanguage } from './language'
+import { PasteQueue, type QueuePasteResult } from './pasteQueue'
+import { refreshImageTextRecognition, startImageTextRecognition, wakeImageTextRecognition } from './ocr'
+import { handle } from './ipcHandle'
+import { toast } from './toast'
+import { registerAccessibilityIpc, simulateMacPaste } from './macAccessibility'
+import { pasteQueueHotkeyRejection, registerSettingsIpc, reregisterGlobalShortcuts } from './settingsIpc'
+import { registerItemContextMenuIpc } from './itemContextMenu'
+import { registerSelectionIpc, startSelectionDrag } from './selectionOps'
 
 export { isStoreBuild }
 
@@ -64,79 +70,10 @@ function clipboardMatchesItem(item: ClipboardItem): boolean {
   return signatureMatchesItem(sig, item.data, fullText)
 }
 
-/** Fire a transient toast to the renderer (best-effort; renderer may be closed). Message is a translation key resolved renderer-side; params fill {placeholders}. */
-function toast(message: string, tone: 'info' | 'error' = 'info', params?: Record<string, string | number>): void {
-  sendToMainWindow('ui:toast', { id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, message, tone, params })
-}
-
-const ACCESSIBILITY_SETTINGS_URL = 'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility'
-let accessibilityNoticeShown = false
-const accessibilityNotifications = new Set<Notification>()
-let accessibilityPrompted = false
-
-function openAccessibilitySettings(): void {
-  shell.openExternal(ACCESSIBILITY_SETTINGS_URL).catch((err) => {
-    console.error('[Main] could not open Accessibility settings:', err)
-  })
-}
-
-function pasteAccessGranted(): boolean {
-  return systemPreferences.isTrustedAccessibilityClient(false) && canPostEvents()
-}
-
-function promptAccessibility(): boolean {
-  accessibilityPrompted = true
-  const trusted = systemPreferences.isTrustedAccessibilityClient(true)
-  const canPost = requestPostEvents()
-  return trusted && canPost
-}
-
-function accessibilityDialogText(key: keyof NonNullable<typeof en['accessibilityDialog']>): string {
-  const lang = resolveUiLanguage(loadSettings().language)
-  return TRANSLATIONS[lang]?.accessibilityDialog?.[key] || en.accessibilityDialog?.[key] || key
-}
-
-function showAccessibilityNotification(): boolean {
-  try {
-    if (!Notification.isSupported()) return false
-    const notification = new Notification({
-      title: accessibilityDialogText('title'),
-      body: accessibilityDialogText('body'),
-      icon: PATHS.icon()
-    })
-    notification.on('click', () => {
-      openAccessibilitySettings()
-    })
-    notification.on('close', () => {
-      accessibilityNotifications.delete(notification)
-    })
-    accessibilityNotifications.add(notification)
-    notification.show()
-    return true
-  } catch (err) {
-    console.error('[Main] accessibility notification failed:', err)
-    return false
-  }
-}
-
 /** Simulate pressing Ctrl+V via PowerShell after returning focus to the previous active window. */
 export function simulatePaste(): void {
   if (process.platform === 'darwin') {
-    if (!pasteAccessGranted()) {
-      toast('toast.pasteNeedsAccessibility', 'info')
-      if (accessibilityNoticeShown) return
-      accessibilityNoticeShown = true
-      promptAccessibility()
-      showAccessibilityNotification()
-      return
-    }
-    if (postCommandV()) return
-    execFile('osascript', ['-e', 'tell application "System Events" to key code 9 using command down'], (err) => {
-      if (err) {
-        console.error('[Main] simulatePaste (macOS) failed — grant Accessibility permission:', err)
-        toast('toast.pasteNeedsAccessibility', 'info')
-      }
-    })
+    simulateMacPaste()
     return
   }
   if (process.platform === 'win32') {
@@ -171,7 +108,7 @@ export function simulatePaste(): void {
  * Returns false when no valid path remained (e.g. every source file was
  * deleted since capture) so callers can surface an explicit error.
  */
-async function writeFileListToClipboard(rawPaths: string[]): Promise<boolean> {
+export async function writeFileListToClipboard(rawPaths: string[]): Promise<boolean> {
   const validPaths = toUnpackagedFilePaths(filterValidPaths(rawPaths))
   if (validPaths.length === 0) return false
   if (process.platform === 'win32') {
@@ -286,17 +223,6 @@ async function writeImageWithNamedFile(imagePath: string, namedPath: string): Pr
   }
 }
 
-/**
- * Type-checked registration helper: guarantees the handler's return matches the
- * contract declared in InvokeMap.
- */
-function handle<C extends InvokeChannel>(
-  channel: C,
-  fn: (...args: InvokeMap[C]['args']) => Promise<InvokeMap[C]['result']> | InvokeMap[C]['result']
-): void {
-  ipcMain.handle(channel, (_e, ...args) => fn(...(args as InvokeMap[C]['args'])))
-}
-
 /** Apply launch-at-login to the OS and return the state Windows actually kept. */
 export async function syncLoginItemSettings(launchAtLogin?: boolean): Promise<void> {
   const wantLaunch = launchAtLogin ?? loadSettings().launchAtLogin
@@ -305,6 +231,420 @@ export async function syncLoginItemSettings(launchAtLogin?: boolean): Promise<vo
     console.error('[IPC] launch-at-login apply did not stick. wanted=', wantLaunch, 'result=', result)
   }
 }
+
+export function deleteItem(id: string): void {
+  const item = getStore().get(id)
+  const watcher = getWatcher()
+  // Pause first: an in-flight settle timer from the copy that created this
+  // item would otherwise readClipboard() after we splice and put it back.
+  watcher.setPaused(true)
+  try {
+    // Resolve clipboard ownership BEFORE mutating the store: if this exact
+    // content still sits on the system clipboard it must be cleared first so
+    // (a) the staged-temp cleanup inside delete() can never yank a file from
+    // under a live OS clipboard reference, and (b) resyncSignature() below
+    // locks onto an EMPTY clipboard, making an immediate re-copy of the same
+    // content a detectable change instead of an invisible no-op.
+    if (item && clipboardMatchesItem(item)) {
+      clipboard.clear()
+    }
+    getStore().delete(id)
+  } finally {
+    watcher.resyncSignature()
+    watcher.setPaused(loadSettings().incognito)
+  }
+  pasteQueue.prune()
+  pushState.items()
+}
+
+export function deleteItems(ids: string[]): void {
+  if (!ids || ids.length === 0) return
+  const items = ids.map((id) => getStore().get(id)).filter((item): item is ClipboardItem => !!item)
+  const watcher = getWatcher()
+  watcher.setPaused(true)
+  try {
+    if (items.some((item) => clipboardMatchesItem(item))) {
+      clipboard.clear()
+    }
+    getStore().deleteBatch(ids)
+  } finally {
+    watcher.resyncSignature()
+    watcher.setPaused(loadSettings().incognito)
+  }
+  pasteQueue.prune()
+  pushState.items()
+}
+
+export function removeSubitem(req: DragRequest): boolean {
+  const success = getStore().removeSubitem(req)
+  if (success) pushState.items()
+  return success
+}
+
+/** macOS keeps the panel open after a paste so several items can go in a row; Windows closes it as before. */
+export function keepsPanelOpenAfterPaste(): boolean {
+  return process.platform === 'darwin'
+}
+
+/** macOS leaves a copied item where it is; Windows promotes it to the top as before. */
+export function promotesOnCopy(): boolean {
+  return process.platform !== 'darwin'
+}
+
+export function markSelfWrite(): void {
+  if (process.platform === 'darwin') getWatcher().noteSelfWrite()
+}
+
+const deferredPromotions: string[] = []
+
+/**
+ * Touch pasted items in the given order (the last one ends on top). While the
+ * macOS panel stays open the touch waits until it closes, so cards never
+ * reorder under the cursor. Returns true when the touch was deferred.
+ */
+export function promotePasted(ids: readonly string[]): boolean {
+  if (keepsPanelOpenAfterPaste() && isInteractive()) {
+    deferredPromotions.push(...ids)
+    return true
+  }
+  for (const id of ids) getStore().touch(id)
+  return false
+}
+
+/** Applies the promotions held back while the panel was open. */
+function flushPastePromotions(): void {
+  if (deferredPromotions.length === 0) return
+  for (const id of deferredPromotions.splice(0)) getStore().touch(id)
+  pushState.items({ reason: 'usage' })
+}
+
+export async function copyItem(id: string): Promise<boolean> {
+  const item = getStore().get(id)
+  console.log('[IPC] item:copy id=', id, 'found=', !!item)
+  if (!item) return false
+
+  getWatcher().setPaused(true)
+  const ok = await writeItemToClipboard(itemDataWithFullText(item), item.capturedAt, id)
+  if (!ok) {
+    // Source content (e.g. the staged image file) is unrecoverable. Do not
+    // promote a dead item to the top of history — tell the user instead.
+    console.log('[IPC] item:copy aborted — source content unavailable')
+    toast('toast.imageUnavailable', 'error')
+    settleWatcher(200)
+    return false
+  }
+  console.log('[IPC] item:copy wrote to clipboard, kind=', item.data.kind)
+  markSelfWrite()
+
+  // Promote: touch() bumps recency WITHOUT re-interpreting content.
+  // Re-adding here duplicated long texts — their stored 300-char preview
+  // signature differs from the full payload, so add() saw "new content"
+  // and created a second entry.
+  if (promotesOnCopy()) {
+    getStore().touch(id)
+    pushState.items({ reason: 'usage' })
+  }
+
+  // Unpause after a short delay to allow OS clipboard event to settle.
+  // Respect the current incognito state when unpausing.
+  settleWatcher(200)
+
+  return true
+}
+
+function itemDataWithFullText(item: ClipboardItem): ItemData {
+  const fullText = item.data.kind === 'text' ? getStore().getFullText(item.id) : undefined
+  return item.data.kind === 'text' && fullText ? { ...item.data, text: fullText } : item.data
+}
+
+export function settleWatcher(ms: number, mode?: 'resync' | 'invalidate'): void {
+  const watcher = getWatcher()
+  setTimeout(() => {
+    if (mode === 'resync') watcher.resyncSignature()
+    else if (mode === 'invalidate') watcher.invalidateSignature()
+    watcher.setPaused(loadSettings().incognito)
+  }, ms)
+}
+
+function itemOwnPaths(data: ItemData, paths: readonly string[] | undefined): string[] {
+  if (data.kind !== 'files' || !paths || paths.length === 0) return []
+  return paths.filter((p) => data.paths.includes(p))
+}
+
+export async function copySubitem(req: DragRequest): Promise<boolean> {
+  // Resolve a single sub-item (one file of a bundle, or one image of a
+  // collection) and write just that onto the clipboard — not the whole item.
+  const dto = getStore().toDto().find((d) => d.id === req.id)
+  if (!dto) return false
+
+  getWatcher().setPaused(true)
+  let wrote = false
+  const ownPaths = itemOwnPaths(dto.data, req.paths)
+  if (ownPaths.length > 0) {
+    // Write real file references so pasting into Explorer copies the file,
+    // not a path string.
+    wrote = await writeFileListToClipboard(ownPaths)
+    if (!wrote) toast('toast.fileUnavailable', 'error')
+  } else if (dto.data.kind === 'image-collection' && req.imageId) {
+    const img = dto.data.images.find((i) => i.imageId === req.imageId)
+    if (img) {
+      // Single image from a collection: write full bitmap + file reference atomically.
+      const src = getStore().resolveStoredImagePath(img.imageId, img.ext)
+      wrote = await writeImageToClipboard(src)
+      if (!wrote) toast('toast.imageUnavailable', 'error')
+    }
+  }
+
+  if (!wrote) {
+    settleWatcher(200)
+    return false
+  }
+  markSelfWrite()
+
+  // Promote the parent bundle to the top — touch() keeps content/signature
+  // intact (re-add risked duplicate long-text entries, same as item:copy).
+  if (promotesOnCopy() && getStore().get(req.id)) {
+    getStore().touch(req.id)
+    pushState.items({ reason: 'usage' })
+  }
+
+  settleWatcher(200)
+
+  return true
+}
+
+// ---------------------------------------------------------------------------
+// Paste guard — prevents double-paste from rapid/double clicks.
+// Stored at module scope so it's authoritative across all renderer invocations.
+// The renderer-side tryPaste() is a best-effort pre-filter; this is the hard gate.
+// ---------------------------------------------------------------------------
+let _lastPasteTime = 0
+const PASTE_GUARD_MS = 600
+const QUEUE_PASTE_GUARD_MS = 150
+let _pasteKeysSent: Promise<void> = Promise.resolve()
+let _lastEmojiPasteTime = 0
+const EMOJI_PASTE_GUARD_MS = 180
+
+export function takePasteSlot(guardMs = PASTE_GUARD_MS): boolean {
+  const now = Date.now()
+  if (now - _lastPasteTime < guardMs) return false
+  _lastPasteTime = now
+  return true
+}
+
+function writePlainTextToClipboard(id: string): boolean {
+  const text = getStore().getFullText(id)
+  if (!text) return false
+  clipboard.clear()
+  clipboard.writeText(text)
+  return true
+}
+
+export async function pasteItem(id: string, opts?: PasteOptions, guardMs = PASTE_GUARD_MS): Promise<QueuePasteResult> {
+  if (!takePasteSlot(guardMs)) {
+    console.log('[IPC] item:paste blocked — too soon after last paste')
+    return 'busy'
+  }
+  return serializePaste(() => pasteItemNow(id, opts))
+}
+
+async function pasteItemNow(id: string, opts?: PasteOptions): Promise<QueuePasteResult> {
+  const item = getStore().get(id)
+  console.log('[IPC] item:paste id=', id, 'found=', !!item)
+  if (!item) return 'failed'
+
+  // Fast pre-flight BEFORE any UI state changes: if the source content is
+  // unrecoverable (e.g. the staged image file vanished), abort with an
+  // explicit message while the panel is still open — never close the shelf
+  // and then silently paste nothing / a blurry thumbnail.
+  if (
+    (item.data.kind === 'image' && !getStore().resolveStoredImagePath(item.data.imageId, item.data.ext)) ||
+    (item.data.kind === 'image-collection' && !getStore().hasRecoverableCollectionImage(item.data.images))
+  ) {
+    console.log('[IPC] item:paste aborted — source image no longer available')
+    toast('toast.imageUnavailable', 'error')
+    return 'failed'
+  }
+
+  getWatcher().setPaused(true)
+
+  try {
+    // 1. Close panel immediately so Edge-Drop slides shut with 0ms UI lag
+    if (!keepsPanelOpenAfterPaste()) pushState.togglePanel(false)
+
+    // 2. Write item to system clipboard
+    const plain = process.platform === 'darwin' && opts?.plain === true && item.data.kind === 'text'
+    let ok: boolean
+    if (plain) {
+      ok = writePlainTextToClipboard(id)
+    } else {
+      ok = await writeItemToClipboard(itemDataWithFullText(item), item.capturedAt, id)
+    }
+    if (!ok) {
+      // Extremely rare race: source vanished between pre-check and write.
+      toast(plain ? 'toast.nothingToPaste' : 'toast.imageUnavailable', 'error')
+      return 'failed'
+    }
+    console.log('[IPC] item:paste wrote to clipboard, kind=', item.data.kind, 'plain=', plain)
+    markSelfWrite()
+
+    // 3. Touch item timestamp if enabled
+    const promotedNow = loadSettings().movePastedToTop !== false && !promotePasted([id])
+
+    // 4. Keys under the uniform rule: clipboard is already written, so
+    // resolve WHERE they may go. Verified target -> send after settle;
+    // unrecoverable foreground -> toast, never fire blind.
+    await sendPasteKeys()
+
+    // 5. Broadcast updated items list after panel has fully closed off-screen (250ms)
+    if (promotedNow) {
+      setTimeout(() => {
+        pushState.items()
+      }, 250)
+    }
+  } finally {
+    // Resync the watcher signature after paste so standard OS Ctrl+V does NOT
+    // increment item hitCounts or re-order items.
+    settleWatcher(350, 'resync')
+  }
+
+  return 'pasted'
+}
+
+let _pasteChain: Promise<unknown> = Promise.resolve()
+
+/**
+ * macOS runs one paste at a time, from the clipboard write to the fired ⌘V:
+ * the panel stays open, so clicks can overlap and must not overwrite each
+ * other's clipboard before the keys go out.
+ */
+export function serializePaste<T>(run: () => Promise<T>): Promise<T> {
+  if (process.platform !== 'darwin') return run()
+  const next = _pasteChain.then(run)
+  _pasteChain = next.catch(() => {})
+  return next
+}
+
+function firePasteKeys(sendDelay: number): Promise<void> {
+  _pasteKeysSent = new Promise((resolve) => {
+    setTimeout(() => {
+      try {
+        traceFg('sendKeys')
+        simulatePaste()
+        setTimeout(() => traceFg('sendKeys+400ms'), 400)
+      } finally {
+        resolve()
+      }
+    }, sendDelay)
+  })
+  return _pasteKeysSent
+}
+
+export async function sendPasteKeys(normalDelayMs = 50): Promise<void> {
+  const sendDelay = await resolvePasteTarget(normalDelayMs)
+  if (sendDelay < 0) {
+    toast('toast.pasteFallback', 'info')
+    return
+  }
+  const sent = firePasteKeys(sendDelay)
+  if (process.platform === 'darwin') await sent
+}
+
+export async function pasteItemById(id: string, opts?: PasteOptions): Promise<boolean> {
+  return (await pasteItem(id, opts)) === 'pasted'
+}
+
+async function pasteQueuedItem(id: string): Promise<QueuePasteResult> {
+  await _pasteKeysSent
+  const wait = QUEUE_PASTE_GUARD_MS - (Date.now() - _lastPasteTime)
+  if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait))
+  return pasteItem(id, { plain: loadSettings().pastePlainText === true }, QUEUE_PASTE_GUARD_MS)
+}
+
+export async function pasteSubitem(req: DragRequest): Promise<boolean> {
+  if (!takePasteSlot()) {
+    console.log('[IPC] item:paste-subitem blocked — too soon after last paste')
+    return false
+  }
+  return serializePaste(() => pasteSubitemNow(req))
+}
+
+async function pasteSubitemNow(req: DragRequest): Promise<boolean> {
+  const dto = getStore().toDto().find((d) => d.id === req.id)
+  if (!dto) return false
+
+  getWatcher().setPaused(true)
+
+  try {
+    let wrote = false
+    const ownPaths = itemOwnPaths(dto.data, req.paths)
+    if (ownPaths.length > 0) {
+      wrote = await writeFileListToClipboard(ownPaths)
+    } else if (dto.data.kind === 'image-collection' && req.imageId) {
+      const img = dto.data.images.find((i) => i.imageId === req.imageId)
+      if (img) {
+        // Single image from a collection: write full bitmap + file reference atomically.
+        const src = getStore().resolveStoredImagePath(img.imageId, img.ext)
+        wrote = await writeImageToClipboard(src)
+        if (!wrote) toast('toast.imageUnavailable', 'error')
+      }
+    }
+
+    if (!wrote) return false
+    markSelfWrite()
+
+    // DO NOT promote/bump hitCount here — same reason as item:paste.
+    // Only the watcher (genuine user Ctrl+C) should increment hitCount.
+
+    // Pass false to explicitly close and avoid toggle race conditions.
+    if (!keepsPanelOpenAfterPaste()) pushState.togglePanel(false)
+
+    // Wait for layout updates, then keys under the uniform rule.
+    await sendPasteKeys()
+  } finally {
+    settleWatcher(350, 'invalidate')
+  }
+
+  return true
+}
+
+export async function pasteEmoji(text: string): Promise<boolean> {
+  if (!isPasteableEmoji(text)) return false
+  const now = Date.now()
+  if (now - _lastEmojiPasteTime < EMOJI_PASTE_GUARD_MS) return false
+  _lastEmojiPasteTime = now
+
+  await serializePaste(async () => {
+    getWatcher().setPaused(true)
+    try {
+      // Write + paste keys only. Do NOT add() to history — picker inserts are
+      // a paste tool, not a capture. The resync (and on macOS the noted own
+      // write) keeps this write from being captured when the watcher resumes.
+      // A later copy of the same emoji from another app still lands: it gets
+      // a new clipboard sequence number (Win32 sequence, macOS change count).
+      if (process.platform === 'darwin') clipboard.clear()
+      clipboard.writeText(text.trim())
+      markSelfWrite()
+      await sendPasteKeys(40)
+    } finally {
+      settleWatcher(350, 'resync')
+    }
+  })
+  return true
+}
+
+export const pasteQueue = new PasteQueue({
+  accelerator: () => loadSettings().pasteQueueHotkey || DEFAULT_PASTE_QUEUE_HOTKEY,
+  register: (accelerator, handler) => globalShortcut.register(accelerator, handler),
+  unregister: (accelerator) => globalShortcut.unregister(accelerator),
+  isRegistered: (accelerator) => globalShortcut.isRegistered(accelerator),
+  exists: (id) => !!getStore().get(id),
+  paste: (id) => pasteQueuedItem(id),
+  publish: (ids) => {
+    sendToMainWindow('queue:state', { ids })
+  },
+  toast: (key, params) => toast(key, 'info', params)
+})
 
 export function registerIpc(): void {
   handle('state:load', () => {
@@ -361,45 +701,12 @@ export function registerIpc(): void {
   })
 
   handle('item:delete', (id) => {
-    const item = getStore().get(id)
-    const watcher = getWatcher()
-    // Pause first: an in-flight settle timer from the copy that created this
-    // item would otherwise readClipboard() after we splice and put it back.
-    watcher.setPaused(true)
-    try {
-      // Resolve clipboard ownership BEFORE mutating the store: if this exact
-      // content still sits on the system clipboard it must be cleared first so
-      // (a) the staged-temp cleanup inside delete() can never yank a file from
-      // under a live OS clipboard reference, and (b) resyncSignature() below
-      // locks onto an EMPTY clipboard, making an immediate re-copy of the same
-      // content a detectable change instead of an invisible no-op.
-      if (item && clipboardMatchesItem(item)) {
-        clipboard.clear()
-      }
-      getStore().delete(id)
-    } finally {
-      watcher.resyncSignature()
-      watcher.setPaused(loadSettings().incognito)
-    }
-    pushState.items()
+    deleteItem(id)
     return getStore().toDto()
   })
 
   handle('item:delete-batch', (ids) => {
-    if (!ids || ids.length === 0) return getStore().toDto()
-    const items = ids.map((id) => getStore().get(id)).filter((item): item is ClipboardItem => !!item)
-    const watcher = getWatcher()
-    watcher.setPaused(true)
-    try {
-      if (items.some((item) => clipboardMatchesItem(item))) {
-        clipboard.clear()
-      }
-      getStore().deleteBatch(ids)
-    } finally {
-      watcher.resyncSignature()
-      watcher.setPaused(loadSettings().incognito)
-    }
-    pushState.items()
+    deleteItems(ids)
     return getStore().toDto()
   })
 
@@ -410,6 +717,7 @@ export function registerIpc(): void {
     clipboard.clear()
     getStore().clearUnpinned()
     getWatcher().resyncSignature()
+    pasteQueue.prune()
     pushState.items()
     return getStore().toDto()
   })
@@ -418,265 +726,15 @@ export function registerIpc(): void {
     return getStore().getFullText(id)
   })
 
-  handle('item:copy', async (id) => {
-    const item = getStore().get(id)
-    console.log('[IPC] item:copy id=', id, 'found=', !!item)
-    if (!item) return false
+  handle('item:copy', (id) => copyItem(id))
 
-    const watcher = getWatcher()
-    watcher.setPaused(true)
-    const fullText = item.data.kind === 'text' ? getStore().getFullText(id) : undefined
-    const itemDataWithFullText = item.data.kind === 'text' && fullText ? { ...item.data, text: fullText } : item.data
-    const ok = await writeItemToClipboard(itemDataWithFullText, item.capturedAt)
-    if (!ok) {
-      // Source content (e.g. the staged image file) is unrecoverable. Do not
-      // promote a dead item to the top of history — tell the user instead.
-      console.log('[IPC] item:copy aborted — source content unavailable')
-      toast('toast.imageUnavailable', 'error')
-      setTimeout(() => {
-        watcher.setPaused(loadSettings().incognito)
-      }, 200)
-      return false
-    }
-    console.log('[IPC] item:copy wrote to clipboard, kind=', item.data.kind)
+  handle('item:copy-subitem', (req) => copySubitem(req))
 
-    // Promote: touch() bumps recency WITHOUT re-interpreting content.
-    // Re-adding here duplicated long texts — their stored 300-char preview
-    // signature differs from the full payload, so add() saw "new content"
-    // and created a second entry.
-    getStore().touch(id)
-    pushState.items({ reason: 'usage' })
+  handle('item:paste', (id, opts) => pasteItemById(id, opts))
 
-    // Unpause after a short delay to allow OS clipboard event to settle.
-    // Respect the current incognito state when unpausing.
-    setTimeout(() => {
-      watcher.setPaused(loadSettings().incognito)
-    }, 200)
+  handle('item:paste-subitem', (req) => pasteSubitem(req))
 
-    return true
-  })
-
-  handle('item:copy-subitem', async (req) => {
-    // Resolve a single sub-item (one file of a bundle, or one image of a
-    // collection) and write just that onto the clipboard — not the whole item.
-    const dto = getStore().toDto().find((d) => d.id === req.id)
-    if (!dto) return false
-
-    let wrote = false
-    if (dto.data.kind === 'files' && req.paths && req.paths.length > 0) {
-      // Write real file references so pasting into Explorer copies the file,
-      // not a path string.
-      wrote = await writeFileListToClipboard(req.paths)
-      if (!wrote) toast('toast.fileUnavailable', 'error')
-    } else if (dto.data.kind === 'image-collection' && req.imageId) {
-      const img = dto.data.images.find((i) => i.imageId === req.imageId)
-      if (img) {
-        // Single image from a collection: write full bitmap + file reference atomically.
-        const src = getStore().resolveStoredImagePath(img.imageId, img.ext)
-        wrote = await writeImageToClipboard(src)
-        if (!wrote) toast('toast.imageUnavailable', 'error')
-      }
-    }
-
-    if (!wrote) return false
-
-    // Promote the parent bundle to the top — touch() keeps content/signature
-    // intact (re-add risked duplicate long-text entries, same as item:copy).
-    if (getStore().get(req.id)) {
-      getStore().touch(req.id)
-      pushState.items({ reason: 'usage' })
-    }
-
-    const watcher = getWatcher()
-    watcher.setPaused(true)
-    setTimeout(() => {
-      watcher.setPaused(loadSettings().incognito)
-    }, 200)
-
-    return true
-  })
-
-  // ---------------------------------------------------------------------------
-  // Paste guard — prevents double-paste from rapid/double clicks.
-  // Stored at module scope so it's authoritative across all renderer invocations.
-  // The renderer-side tryPaste() is a best-effort pre-filter; this is the hard gate.
-  // ---------------------------------------------------------------------------
-  let _lastPasteTime = 0
-  const PASTE_GUARD_MS = 600
-  let _lastEmojiPasteTime = 0
-  const EMOJI_PASTE_GUARD_MS = 180
-
-  handle('item:paste', async (id) => {
-    const now = Date.now()
-    if (now - _lastPasteTime < PASTE_GUARD_MS) {
-      console.log('[IPC] item:paste blocked — too soon after last paste')
-      return false
-    }
-    _lastPasteTime = now
-
-    const item = getStore().get(id)
-    console.log('[IPC] item:paste id=', id, 'found=', !!item)
-    if (!item) return false
-
-    // Fast pre-flight BEFORE any UI state changes: if the source content is
-    // unrecoverable (e.g. the staged image file vanished), abort with an
-    // explicit message while the panel is still open — never close the shelf
-    // and then silently paste nothing / a blurry thumbnail.
-    if (
-      (item.data.kind === 'image' && !getStore().resolveStoredImagePath(item.data.imageId, item.data.ext)) ||
-      (item.data.kind === 'image-collection' && !getStore().hasRecoverableCollectionImage(item.data.images))
-    ) {
-      console.log('[IPC] item:paste aborted — source image no longer available')
-      toast('toast.imageUnavailable', 'error')
-      return false
-    }
-
-    const watcher = getWatcher()
-    watcher.setPaused(true)
-
-    try {
-      // 1. Close panel immediately so Edge-Drop slides shut with 0ms UI lag
-      pushState.togglePanel(false)
-
-      // 2. Write item to system clipboard
-      const fullText = item.data.kind === 'text' ? getStore().getFullText(id) : undefined
-      const itemDataWithFullText = item.data.kind === 'text' && fullText ? { ...item.data, text: fullText } : item.data
-      const ok = await writeItemToClipboard(itemDataWithFullText, item.capturedAt)
-      if (!ok) {
-        // Extremely rare race: source vanished between pre-check and write.
-        toast('toast.imageUnavailable', 'error')
-        return false
-      }
-      console.log('[IPC] item:paste wrote to clipboard, kind=', item.data.kind)
-
-      // 3. Touch item timestamp if enabled
-      const settings = loadSettings()
-      if (settings.movePastedToTop !== false) {
-        getStore().touch(id)
-      }
-
-      // 4. Keys under the uniform rule: clipboard is already written, so
-      // resolve WHERE they may go. Verified target -> send after settle;
-      // unrecoverable foreground -> toast, never fire blind.
-      const sendDelay = await resolvePasteTarget(50)
-      if (sendDelay < 0) {
-        toast('toast.pasteFallback', 'info')
-      } else {
-        setTimeout(() => {
-          traceFg('sendKeys')
-          simulatePaste()
-          setTimeout(() => traceFg('sendKeys+400ms'), 400)
-        }, sendDelay)
-      }
-
-      // 5. Broadcast updated items list after panel has fully closed off-screen (250ms)
-      if (settings.movePastedToTop !== false) {
-        setTimeout(() => {
-          pushState.items()
-        }, 250)
-      }
-    } finally {
-      // Resync the watcher signature after paste so standard OS Ctrl+V does NOT
-      // increment item hitCounts or re-order items.
-      setTimeout(() => {
-        watcher.resyncSignature()
-        watcher.setPaused(loadSettings().incognito)
-      }, 350)
-    }
-
-    return true
-  })
-
-  handle('item:paste-subitem', async (req) => {
-    const now = Date.now()
-    if (now - _lastPasteTime < PASTE_GUARD_MS) {
-      console.log('[IPC] item:paste-subitem blocked — too soon after last paste')
-      return false
-    }
-    _lastPasteTime = now
-
-    const dto = getStore().toDto().find((d) => d.id === req.id)
-    if (!dto) return false
-
-    const watcher = getWatcher()
-    watcher.setPaused(true)
-
-    try {
-      let wrote = false
-      if (dto.data.kind === 'files' && req.paths && req.paths.length > 0) {
-        wrote = await writeFileListToClipboard(req.paths)
-      } else if (dto.data.kind === 'image-collection' && req.imageId) {
-        const img = dto.data.images.find((i) => i.imageId === req.imageId)
-        if (img) {
-          // Single image from a collection: write full bitmap + file reference atomically.
-          const src = getStore().resolveStoredImagePath(img.imageId, img.ext)
-          wrote = await writeImageToClipboard(src)
-          if (!wrote) toast('toast.imageUnavailable', 'error')
-        }
-      }
-
-      if (!wrote) return false
-
-      // DO NOT promote/bump hitCount here — same reason as item:paste.
-      // Only the watcher (genuine user Ctrl+C) should increment hitCount.
-
-      // Pass false to explicitly close and avoid toggle race conditions.
-      pushState.togglePanel(false)
-
-      // Wait for layout updates, then keys under the uniform rule.
-      const subSendDelay = await resolvePasteTarget(50)
-      if (subSendDelay < 0) {
-        toast('toast.pasteFallback', 'info')
-      } else {
-        setTimeout(() => {
-          traceFg('sendKeys')
-          simulatePaste()
-          setTimeout(() => traceFg('sendKeys+400ms'), 400)
-        }, subSendDelay)
-      }
-    } finally {
-      setTimeout(() => {
-        watcher.invalidateSignature()
-        watcher.setPaused(loadSettings().incognito)
-      }, 350)
-    }
-
-    return true
-  })
-
-  handle('emoji:paste', async (text) => {
-    if (!isPasteableEmoji(text)) return false
-    const now = Date.now()
-    if (now - _lastEmojiPasteTime < EMOJI_PASTE_GUARD_MS) return false
-    _lastEmojiPasteTime = now
-
-    const watcher = getWatcher()
-    watcher.setPaused(true)
-    try {
-      // Write + Ctrl+V only. Do NOT add() to history — picker inserts are a
-      // paste tool, not a capture. resyncSignature() so this write is not
-      // seen as a new capture when the watcher resumes. A later copy of the
-      // same emoji from another app still lands: signatures include the Win32
-      // sequence number, so an outside Ctrl+C is a new seq and is recorded.
-      clipboard.writeText(text.trim())
-      const emojiSendDelay = await resolvePasteTarget(40)
-      if (emojiSendDelay < 0) {
-        toast('toast.pasteFallback', 'info')
-      } else {
-        setTimeout(() => {
-          traceFg('sendKeys')
-          simulatePaste()
-          setTimeout(() => traceFg('sendKeys+400ms'), 400)
-        }, emojiSendDelay)
-      }
-    } finally {
-      setTimeout(() => {
-        watcher.resyncSignature()
-        watcher.setPaused(loadSettings().incognito)
-      }, 350)
-    }
-    return true
-  })
+  handle('emoji:paste', (text) => pasteEmoji(text))
 
   handle('item:add-files', (paths) => {
     const result = addFiles(paths)
@@ -720,10 +778,11 @@ export function registerIpc(): void {
       try {
         let img = nativeImage.createFromDataURL(imageUrl)
         if (img.isEmpty() && /^https?:\/\//i.test(imageUrl)) {
-          const res = await net.fetch(imageUrl)
-          if (res.ok) {
-            const arrayBuf = await res.arrayBuffer()
-            img = nativeImage.createFromBuffer(Buffer.from(arrayBuf))
+          const bytes = await fetchDroppedImage(imageUrl)
+          img = bytes ? nativeImage.createFromBuffer(bytes) : img
+          if (img.isEmpty()) {
+            toast('toast.imageUnavailable', 'error')
+            return getStore().toDto()
           }
         }
         if (!img.isEmpty()) {
@@ -752,18 +811,16 @@ export function registerIpc(): void {
     // Manual drag-in import (text/URL/web image dropped onto the shelf):
     // bookkeeping, not a capture — suppress the copy indicator.
     pushState.items({ reason: 'usage' })
+    if (data.kind === 'image') wakeImageTextRecognition()
     return getStore().toDto()
   })
 
-  handle('item:remove-subitem', (req) => {
-    const success = getStore().removeSubitem(req)
-    if (success) pushState.items()
-    return success
-  })
+  handle('item:remove-subitem', (req) => removeSubitem(req))
 
   handle('item:merge', (sourceId, targetId) => {
     const result: MergeResult = getStore().merge(sourceId, targetId)
     if (result.ok) {
+      pasteQueue.prune()
       pushState.items()
     } else if (result.reason === 'full') {
       toast(result.message || 'toast.mergeIncompatible', 'info')
@@ -806,6 +863,17 @@ export function registerIpc(): void {
         }
       }
     }
+    if (enrichedPatch.pasteQueueHotkey !== undefined) {
+      const rejection = pasteQueueHotkeyRejection(
+        enrichedPatch.pasteQueueHotkey,
+        enrichedPatch.toggleHotkey || loadSettings().toggleHotkey || defaultToggleHotkey(process.platform === 'darwin')
+      )
+      if (rejection) {
+        const { pasteQueueHotkey: _rejected, ...rest } = enrichedPatch
+        enrichedPatch = rest
+        toast(rejection, 'error')
+      }
+    }
     let next = saveSettings(enrichedPatch)
     if (patch.launchAtLogin !== undefined) {
       const applied = await applyLaunchAtLogin(patch.launchAtLogin)
@@ -838,10 +906,19 @@ export function registerIpc(): void {
       } catch { /* ignore */ }
     }
     if (patch.toggleHotkey !== undefined) {
-      registerGlobalHotkey(patch.toggleHotkey)
+      reregisterGlobalShortcuts(patch.toggleHotkey)
+    }
+    if (patch.pasteQueueHotkey !== undefined) {
+      pasteQueue.syncShortcut()
     }
     if (patch.captureScreenshots !== undefined) {
       refreshScreenshotWatcher()
+    }
+    if (patch.recognizeImageText !== undefined) {
+      refreshImageTextRecognition()
+    }
+    if (patch.theme !== undefined || patch.hideFromScreenCapture !== undefined) {
+      applyMacWindowOptions(next)
     }
     pushState.settings(next)
     rebuildTrayMenu()
@@ -851,16 +928,16 @@ export function registerIpc(): void {
   handle('hotkey:pause', (paused) => {
     if (paused) {
       try {
-        const { globalShortcut } = require('electron')
         globalShortcut.unregisterAll()
       } catch { /* ignore */ }
     } else {
-      registerGlobalHotkey()
+      reregisterGlobalShortcuts()
     }
   })
 
   handle('window:set-interactive', (value) => {
     setInteractive(value)
+    if (!value) flushPastePromotions()
   })
 
   handle('window:set-preview-mode', (active) => {
@@ -895,25 +972,12 @@ export function registerIpc(): void {
     return getDisplayListOptions()
   })
 
-  handle('accessibility:status', () => {
-    if (process.platform !== 'darwin') return null
-    return pasteAccessGranted()
-  })
+  registerAccessibilityIpc()
+  registerSettingsIpc()
+  registerItemContextMenuIpc()
+  registerSelectionIpc()
 
-  handle('accessibility:request', () => {
-    if (process.platform !== 'darwin') return null
-    if (!accessibilityPrompted) {
-      const granted = promptAccessibility()
-      if (!granted) openAccessibilitySettings()
-      return granted
-    }
-    const granted = pasteAccessGranted()
-    if (!granted) {
-      requestPostEvents()
-      openAccessibilitySettings()
-    }
-    return granted
-  })
+  startImageTextRecognition()
 }
 
 /**
@@ -931,7 +995,7 @@ function on<C extends SendChannel>(
   ipcMain.on(channel, (event, ...args) => fn(event.sender, ...(args as SendMap[C]['args'])))
 }
 
-export function finishDragOut(sender: Electron.WebContents, req: DragRequest, dragStarted: boolean, isWholeItemDrag: boolean): void {
+function finishDragOut(sender: Electron.WebContents, req: DragRequest, dragStarted: boolean, isWholeItemDrag: boolean): void {
   const isMac = process.platform === 'darwin'
   console.log(isMac ? '[IPC] drag finished, sending drag-end' : '[IPC] start-drag returned, sending drag-end')
   sender.send('item:drag-end')
@@ -940,20 +1004,13 @@ export function finishDragOut(sender: Electron.WebContents, req: DragRequest, dr
   if (!isMac) setHeartbeatPaused(false)
 
   // Check if the user dropped the item back onto our window!
-  const point = screen.getCursorScreenPoint()
-  const win = BrowserWindow.fromWebContents(sender)
-  let isInside = false
-  if (win && !win.isDestroyed()) {
-    const bounds = win.getBounds()
-    isInside = point.x >= bounds.x && point.x <= bounds.x + bounds.width &&
-               point.y >= bounds.y && point.y <= bounds.y + bounds.height
-    if (isInside) {
-      console.log(`[IPC] Drag ended inside window! Triggering internal-drop at x=${point.x - bounds.x}, y=${point.y - bounds.y}`)
-      sender.send('item:internal-drop', { x: point.x - bounds.x, y: point.y - bounds.y })
-    }
+  const drop = cursorPointInSenderWindow(sender)
+  if (drop) {
+    console.log(`[IPC] Drag ended inside window! Triggering internal-drop at x=${drop.x}, y=${drop.y}`)
+    sender.send('item:internal-drop', drop)
   }
 
-  if (dragStarted && isWholeItemDrag && !isInside) {
+  if (dragStarted && isWholeItemDrag && !drop) {
     // Usage accounting parity with click-to-paste: a whole-item drag counts
     // as a use ONLY when successfully dropped outside into another application.
     // Dropping back onto the shelf or cancelling does not bump hitCount.
@@ -966,8 +1023,55 @@ export function finishDragOut(sender: Electron.WebContents, req: DragRequest, dr
   }
 }
 
+export function cursorPointInSenderWindow(sender: Electron.WebContents): { x: number; y: number } | null {
+  const point = screen.getCursorScreenPoint()
+  const win = BrowserWindow.fromWebContents(sender)
+  if (!win || win.isDestroyed()) return null
+  const bounds = win.getBounds()
+  const inside = point.x >= bounds.x && point.x <= bounds.x + bounds.width &&
+                 point.y >= bounds.y && point.y <= bounds.y + bounds.height
+  return inside ? { x: point.x - bounds.x, y: point.y - bounds.y } : null
+}
+
 let dragGeneration = 0
 let mouseBridgeWarned = false
+
+export function nextDragGeneration(): number {
+  return ++dragGeneration
+}
+
+interface MacDragEndOptions {
+  tag: string
+  verbose: boolean
+}
+
+export function awaitMacDragEnd(sender: Electron.WebContents, generation: number, finish: () => void, { tag, verbose }: MacDragEndOptions): void {
+  if (!mouseButtonsAvailable()) {
+    if (verbose && !mouseBridgeWarned) {
+      mouseBridgeWarned = true
+      console.warn(`[IPC] ${tag}: mouse button state is unavailable (ObjC bridge not loaded), sending drag-end only`)
+    }
+    sender.send('item:drag-end')
+    return
+  }
+  waitForMouseRelease(pressedMouseButtons).then((result) => {
+    if (generation !== dragGeneration || sender.isDestroyed()) return
+    if (result === 'timeout') {
+      if (verbose) console.warn(`[IPC] ${tag}: mouse release wait timed out, sending drag-end only`)
+      sender.send('item:drag-end')
+      return
+    }
+    finish()
+  }).catch((err) => {
+    console.error(`[IPC] ${tag}: drag completion failed:`, err)
+    if (generation !== dragGeneration) return
+    try {
+      if (!sender.isDestroyed()) sender.send('item:drag-end')
+    } catch (sendErr) {
+      if (verbose) console.error(`[IPC] ${tag}: could not send drag-end after failure:`, sendErr)
+    }
+  })
+}
 
 export function registerSendListeners(): void {
   on('item:start-drag', (sender, req) => {
@@ -994,42 +1098,66 @@ export function registerSendListeners(): void {
     // dragged item appear to vanish ~0.5 s into any drag gesture.
     if (!isMac) setHeartbeatPaused(true)
 
-    const generation = ++dragGeneration
+    const generation = nextDragGeneration()
     const dragStarted = startDragOut(sender, data, capturedAt, subIndex)
     if (!isMac || !dragStarted) {
       finishDragOut(sender, req, dragStarted, isWholeItemDrag)
       return
     }
-    if (!mouseButtonsAvailable()) {
-      if (!mouseBridgeWarned) {
-        mouseBridgeWarned = true
-        console.warn('[IPC] start-drag: mouse button state is unavailable (ObjC bridge not loaded), sending drag-end only')
-      }
-      sender.send('item:drag-end')
-      return
-    }
-    waitForMouseRelease(pressedMouseButtons).then((result) => {
-      if (generation !== dragGeneration || sender.isDestroyed()) return
-      if (result === 'timeout') {
-        console.warn('[IPC] start-drag: mouse release wait timed out, sending drag-end only')
-        sender.send('item:drag-end')
-        return
-      }
-      finishDragOut(sender, req, dragStarted, isWholeItemDrag)
-    }).catch((err) => {
-      console.error('[IPC] start-drag: drag completion failed:', err)
-      if (generation !== dragGeneration) return
-      try {
-        if (!sender.isDestroyed()) sender.send('item:drag-end')
-      } catch (sendErr) {
-        console.error('[IPC] start-drag: could not send drag-end after failure:', sendErr)
-      }
-    })
+    awaitMacDragEnd(sender, generation, () => finishDragOut(sender, req, dragStarted, isWholeItemDrag), { tag: 'start-drag', verbose: true })
   })
 
   on('item:prestage-drag', (_sender, req) => {
     prestageDrag(req)
   })
+
+  on('items:start-drag-multi', (sender, ids) => {
+    startSelectionDrag(sender, ids)
+  })
+}
+
+const IMAGE_URL_TIMEOUT_MS = 15_000
+const IMAGE_URL_MAX_BYTES = 25 * 1024 * 1024
+
+export async function fetchDroppedImage(url: string, fetcher: typeof net.fetch = (input, init) => net.fetch(input, init)): Promise<Buffer | null> {
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    return null
+  }
+  const allowed = process.platform === 'darwin' ? ['https:'] : ['http:', 'https:']
+  if (!allowed.includes(parsed.protocol)) return null
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), IMAGE_URL_TIMEOUT_MS)
+  try {
+    const res = await fetcher(parsed.toString(), { signal: controller.signal })
+    if (!res.ok || !res.body) return null
+    const type = (res.headers.get('content-type') || '').trim().toLowerCase()
+    if (!type.startsWith('image/')) return null
+    const declared = Number(res.headers.get('content-length'))
+    if (Number.isFinite(declared) && declared > IMAGE_URL_MAX_BYTES) return null
+    const reader = res.body.getReader()
+    const chunks: Buffer[] = []
+    let total = 0
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      total += value.byteLength
+      if (total > IMAGE_URL_MAX_BYTES) {
+        controller.abort()
+        void reader.cancel().catch(() => {})
+        return null
+      }
+      chunks.push(Buffer.from(value))
+    }
+    return Buffer.concat(chunks)
+  } catch (err) {
+    console.error('[IPC] dropped image URL fetch failed:', err)
+    return null
+  } finally {
+    clearTimeout(timer)
+  }
 }
 
 /**
@@ -1041,9 +1169,14 @@ export function registerSendListeners(): void {
  * written (e.g. every source image vanished from disk) so callers can show an
  * explicit error instead of silently degrading quality.
  */
-export async function writeItemToClipboard(data: ItemData, capturedAt?: number): Promise<boolean> {
+export async function writeItemToClipboard(data: ItemData, capturedAt?: number, itemId?: string): Promise<boolean> {
   switch (data.kind) {
     case 'text': {
+      if (process.platform === 'darwin') {
+        const rich = itemId ? getStore().getRichText(itemId) : null
+        writeRichTextToClipboard(rich ?? { text: data.text, html: data.html })
+        return true
+      }
       const formatted = formatTabularDataForClipboard(data.text, data.html)
       clipboard.clear()
       clipboard.write({ text: formatted.text, html: formatted.html })
@@ -1058,11 +1191,18 @@ export async function writeItemToClipboard(data: ItemData, capturedAt?: number):
       if (!src) return false
 
       const staged = stageDragFile(data, capturedAt)
-      if (staged?.file && existsSync(staged.file)) {
+      const named = staged?.file && existsSync(staged.file) ? toUnpackagedFilePath(staged.file) : undefined
+      if (process.platform === 'darwin') {
+        macNamedImageWrite = null
+        if (writeStoredImageToPasteboard(data, named)) {
+          if (named) macNamedImageWrite = { src: toUnpackagedFilePath(src), named }
+          return true
+        }
+      }
+      if (named) {
         // Full-res bitmap + friendly-named file reference in one atomic
         // multi-format write, so Explorer keeps "Screenshot …" naming while
         // pixel-oriented apps get CF_DIB.
-        const named = toUnpackagedFilePath(staged.file)
         if (await writeImageWithNamedFile(toUnpackagedFilePath(src), named)) return true
       }
       // Fallback: full-resolution bitmap only (no filename reference).

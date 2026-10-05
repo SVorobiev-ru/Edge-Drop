@@ -1,5 +1,6 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { DEFAULT_SETTINGS } from '../shared/types'
+import { restorePlatform, setPlatform } from './helpers/platform'
 
 const mocks = vi.hoisted(() => ({
   windows: [] as Array<Record<string, any>>,
@@ -27,9 +28,7 @@ vi.mock('../electron/main/macNative', () => ({
   weAreFrontmost: () => false
 }))
 
-vi.mock('koffi', () => ({
-  default: { load: () => ({ func: () => () => null }) }
-}))
+vi.mock('koffi', () => import('./helpers/koffiMock'))
 
 vi.mock('node:fs', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs')>()
@@ -37,56 +36,17 @@ vi.mock('node:fs', async (importOriginal) => {
   return { ...actual, existsSync, default: { ...actual, existsSync } }
 })
 
-vi.mock('electron', () => {
-  class FakeBrowserWindow {
-    setFocusable = vi.fn()
-    focus = vi.fn()
-    isDestroyed = vi.fn(() => false)
-    isVisible = vi.fn(() => true)
-    isMinimized = vi.fn(() => false)
-    showInactive = vi.fn()
-    setSkipTaskbar = vi.fn()
-    setBounds = vi.fn()
-    getBounds = vi.fn(() => ({ x: 0, y: 25, width: 384, height: 957 }))
-    getNativeWindowHandle = vi.fn(() => Buffer.alloc(8))
-    hookWindowMessage = vi.fn()
-    setVisibleOnAllWorkspaces = vi.fn()
-    setIgnoreMouseEvents = vi.fn()
-    setAlwaysOnTop = vi.fn()
-    loadFile = vi.fn()
-    loadURL = vi.fn()
-    on = vi.fn()
-    once = vi.fn()
-    options: Record<string, unknown>
-    webContents = {
-      setWindowOpenHandler: vi.fn(),
-      on: vi.fn(),
-      isDestroyed: () => false,
-      isLoadingMainFrame: () => false,
-      send: (channel: string, payload: unknown) => {
-        mocks.sent.push({ channel, payload })
-      }
-    }
-    constructor(options: Record<string, unknown>) {
-      this.options = options
-      mocks.windows.push(this as unknown as Record<string, any>)
-    }
-  }
-  ;(FakeBrowserWindow as any).getAllWindows = () => [...mocks.windows, ...mocks.extraWindows]
-  return {
-    BrowserWindow: FakeBrowserWindow,
-    app: { focus: vi.fn(), getAppPath: () => '/mock/app', getPath: () => '/mock/userData' },
+vi.mock('electron', async () => {
+  const { electronMock, fakeBrowserWindowClass, fakeEmitter } = await import('./helpers/electronMock')
+  return electronMock({
+    BrowserWindow: fakeBrowserWindowClass(mocks),
     screen: {
-      on: (event: string, handler: () => void) => {
-        mocks.screenHandlers[event] = handler
-      },
+      ...fakeEmitter(() => mocks.screenHandlers),
       getPrimaryDisplay: () => mocks.display,
       getAllDisplays: () => [mocks.display],
       getCursorScreenPoint: () => ({ ...mocks.cursor })
-    },
-    shell: { openExternal: vi.fn() },
-    powerMonitor: { on: vi.fn(), isOnBatteryPower: () => false }
-  }
+    }
+  })
 })
 
 vi.mock('../electron/main/config', () => ({
@@ -94,18 +54,8 @@ vi.mock('../electron/main/config', () => ({
   runtime: { quitting: false }
 }))
 
-vi.mock('../electron/store/paths', () => ({
-  PATHS: { icon: () => '/mock/icon.png', settingsFile: () => '/mock/userData/settings.json' }
-}))
-
-vi.mock('../electron/store/settings', () => ({
-  loadSettings: () => mocks.settings,
-  saveSettings: (patch: Record<string, unknown>) => {
-    mocks.saveSettings(patch)
-    mocks.settings = { ...mocks.settings, ...patch }
-    return mocks.settings
-  }
-}))
+vi.mock('../electron/store/paths', async () => (await import('./helpers/pathsMock')).pathsModuleMock({ PATHS: { icon: () => '/mock/icon.png', settingsFile: () => '/mock/userData/settings.json' } }))
+vi.mock('../electron/store/settings', async () => (await import('./helpers/settingsMock')).settingsModuleMock(mocks))
 
 vi.mock('../electron/main/fullscreen', () => ({
   isFullscreenAppActive: () => mocks.fullscreen,
@@ -120,12 +70,6 @@ vi.mock('../electron/main/macScreen', async (importOriginal) => {
 })
 
 type WindowModule = typeof import('../electron/main/window')
-
-const realPlatform = process.platform
-
-function setPlatform(value: string): void {
-  Object.defineProperty(process, 'platform', { value, configurable: true })
-}
 
 let win: WindowModule
 
@@ -181,11 +125,11 @@ describe('macOS window behaviour (window.ts)', () => {
     win?.stopHeartbeat()
     vi.useRealTimers()
     vi.restoreAllMocks()
-    setPlatform(realPlatform)
+    restorePlatform()
   })
 
   afterAll(() => {
-    setPlatform(realPlatform)
+    restorePlatform()
   })
 
   describe('always-on-top heartbeat', () => {
@@ -363,8 +307,8 @@ describe('macOS window behaviour (window.ts)', () => {
       win.createWindow()
       win.startCursorPoll()
 
-      expect(pollAt(700, 300).y).toBe(300)
-      const atTop = pollAt(700, 0)
+      expect(pollAt(700, 300)).toBeUndefined()
+      const atTop = pollAt(700, 0, 12)
       expect(atTop.y).toBe(0)
       expect(atTop.inEdge).toBe(true)
       expect(pollAt(700, 26).y).toBe(26)
@@ -401,8 +345,8 @@ describe('macOS window behaviour (window.ts)', () => {
       win.createWindow()
       win.startCursorPoll()
 
-      expect(pollAt(300, 500).x).toBe(230)
-      const resting = pollAt(78, 500)
+      expect(pollAt(300, 500)).toBeUndefined()
+      const resting = pollAt(78, 500, 12)
       expect(resting.inEdge).toBe(true)
       expect(resting.x).toBeLessThanOrEqual(3)
       expect(pollAt(50, 500).x).toBeGreaterThan(3)

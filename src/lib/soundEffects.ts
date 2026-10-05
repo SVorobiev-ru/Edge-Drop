@@ -4,8 +4,31 @@
  */
 
 import { useStore } from '../store/appStore'
+import { IS_MAC } from './format'
 
 let audioCtx: any = null
+let suspendTimer: ReturnType<typeof setTimeout> | null = null
+
+const IDLE_SUSPEND_MS = 4000
+const CLOSE_SUSPEND_MS = 900
+
+function scheduleSuspend(delayMs: number): void {
+  if (!IS_MAC) return
+  if (suspendTimer) clearTimeout(suspendTimer)
+  suspendTimer = setTimeout(() => {
+    suspendTimer = null
+    try {
+      if (audioCtx && audioCtx.state === 'running') {
+        audioCtx.suspend()?.catch?.(() => {})
+      }
+    } catch {}
+  }, delayMs)
+}
+
+export function suspendAudioContextSoon(): void {
+  if (!audioCtx) return
+  scheduleSuspend(CLOSE_SUSPEND_MS)
+}
 
 function isSoundEnabled(): boolean {
   const win = typeof globalThis !== 'undefined' ? (globalThis as any).window : undefined
@@ -30,6 +53,7 @@ function getAudioContext(): any | null {
   if (audioCtx && audioCtx.state === 'suspended') {
     audioCtx.resume().catch(() => {})
   }
+  if (audioCtx) scheduleSuspend(IDLE_SUSPEND_MS)
   return audioCtx
 }
 
@@ -68,6 +92,20 @@ if (win && win.addEventListener) {
   win.addEventListener('keydown', unlockAudio, true)
 }
 
+const DIAL_TICK_MIN_GAP_MS = 45
+
+export function createSoundGate(minGapMs: number, now: () => number = Date.now): () => boolean {
+  let last = Number.NEGATIVE_INFINITY
+  return () => {
+    const t = now()
+    if (t >= last && t - last < minGapMs) return false
+    last = t
+    return true
+  }
+}
+
+const dialTickGate = createSoundGate(DIAL_TICK_MIN_GAP_MS)
+
 /**
  * Plays a satisfying mechanical rotary dial tick sound.
  * Emulates a camera dial / Apple Watch Digital Crown detent click.
@@ -75,7 +113,7 @@ if (win && win.addEventListener) {
 export function playDialTickSound(): void {
   try {
     const ctx = getAudioContext()
-    if (!ctx) return
+    if (!ctx || !dialTickGate()) return
 
     const play = () => {
       const now = ctx.currentTime

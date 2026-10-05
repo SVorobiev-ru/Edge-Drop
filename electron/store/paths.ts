@@ -21,6 +21,7 @@ export const PATHS = {
   payloadsDir: () => join(root(), 'payloads'),
   /** Directory holding one PNG per captured image item. */
   imagesDir: () => join(root(), 'images'),
+  thumbnailsDir: () => join(root(), 'thumbnails'),
   /** Path to the items index JSON. */
   indexFile: () => join(root(), 'items.json'),
   /** Path to the settings JSON. */
@@ -104,7 +105,7 @@ export function toUnpackagedFilePaths(filePaths: string[]): string[] {
 
 /** Idempotently create every directory the app needs. Safe to call repeatedly. */
 export function ensureDirs(): void {
-  for (const dir of [PATHS.imagesDir(), PATHS.payloadsDir(), PATHS.tempDir()]) {
+  for (const dir of [PATHS.imagesDir(), PATHS.thumbnailsDir(), PATHS.payloadsDir(), PATHS.tempDir()]) {
     mkdirSync(dir, { recursive: true })
   }
   if (isStoreBuild()) {

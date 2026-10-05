@@ -11,10 +11,9 @@
  * never produce a focus event from a plain click, so waiting for onFocus
  * would make the box look dead.
  */
-import { useCallback, useEffect, useRef } from 'react'
+import { useRef } from 'react'
 import { useStore } from '../store/appStore'
-import { edge } from '../lib/edge'
-import { noteSearchEngaged } from '../lib/searchFocus'
+import { useInputEngagement } from '../hooks/useInputEngagement'
 import { useTranslation } from '../i18n'
 import { SearchIcon } from './icons'
 
@@ -23,48 +22,7 @@ export function ShelfSearch() {
   const query = useStore((s) => s.query)
   const setQuery = useStore((s) => s.setQuery)
   const inputRef = useRef<HTMLInputElement>(null)
-  const engagedRef = useRef(false)
-
-  const disengage = useCallback(() => {
-    if (!engagedRef.current) return
-    engagedRef.current = false
-    noteSearchEngaged(false)
-    try {
-      void edge.focusWindow(false)?.catch?.(() => {})
-    } catch { /* ignore */ }
-    try {
-      void edge.pauseHotkey(false)?.catch?.(() => {})
-    } catch { /* ignore */ }
-  }, [])
-
-  // Engage BEFORE focus can happen: pointer-down always fires, focus may not.
-  // Idempotent — the focus-event backup below reuses it safely.
-  const engage = useCallback(() => {
-    if (engagedRef.current) return
-    engagedRef.current = true
-    noteSearchEngaged(true)
-    try {
-      window.focus()
-    } catch { /* ignore */ }
-    try {
-      const p = edge.focusWindow(true) as unknown as Promise<void> | undefined
-      if (p && typeof (p as Promise<void>).then === 'function') {
-        ;(p as Promise<void>).then(() => {
-          try { inputRef.current?.focus() } catch { /* ignore */ }
-        }).catch(() => {})
-      } else {
-        try { inputRef.current?.focus() } catch { /* ignore */ }
-      }
-    } catch { /* ignore */ }
-    try {
-      void edge.pauseHotkey(true)?.catch?.(() => {})
-    } catch { /* ignore */ }
-  }, [])
-
-  // Safety: if the input unmounts mid-focus (view switch), restore state.
-  useEffect(() => () => {
-    disengage()
-  }, [disengage])
+  const { engage, disengage } = useInputEngagement(inputRef)
 
   return (
     <div className="search">
@@ -73,6 +31,7 @@ export function ShelfSearch() {
         ref={inputRef}
         type="text"
         placeholder={t('header.searchPlaceholder')}
+        aria-label={t('header.searchPlaceholder')}
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         onPointerDown={() => {
@@ -85,6 +44,7 @@ export function ShelfSearch() {
           disengage()
         }}
         onKeyDown={(e) => {
+          if (e.nativeEvent.isComposing || e.keyCode === 229) return
           if (e.key === 'Escape') {
             // Staged Escape: clear first, blur second — never close the
             // panel while typing (the window handler skips inputs as well).

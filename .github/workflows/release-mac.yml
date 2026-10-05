@@ -50,8 +50,16 @@ jobs:
             exit 1
           fi
       - run: npm ci
+      - name: Import the signing certificate
+        env:
+          MAC_SIGN_P12_BASE64: ${{ secrets.MAC_SIGN_P12_BASE64 }}
+          MAC_SIGN_P12_PASSWORD: ${{ secrets.MAC_SIGN_P12_PASSWORD }}
+        run: bash scripts/ci-import-signing-cert.sh
       - run: npm run dist:mac:${{ matrix.arch }}
       - run: bash scripts/verify-mac-dist.sh ${{ matrix.arch }}
+      - name: Remove the signing keychain
+        if: always()
+        run: bash scripts/ci-import-signing-cert.sh cleanup
       - uses: actions/upload-artifact@v4
         with:
           name: edge-drop-mac-${{ matrix.arch }}
@@ -87,6 +95,9 @@ jobs:
             ls -la artifacts >&2
             exit 1
           fi
+          (cd artifacts && sha256sum -- *.dmg *.zip > SHA256SUMS.txt)
+          cat artifacts/SHA256SUMS.txt
+          files+=(artifacts/SHA256SUMS.txt)
           if gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
             gh release upload "${GITHUB_REF_NAME}" "${files[@]}" \
               --repo "${GITHUB_REPOSITORY}" \

@@ -1,4 +1,5 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { restorePlatform, setPlatform } from './helpers/platform'
 
 const spawn = vi.hoisted(() =>
   vi.fn(() => ({
@@ -26,12 +27,6 @@ vi.mock('../electron/main/config', () => ({
   isStoreBuild: () => false
 }))
 
-const realPlatform = process.platform
-
-function setPlatform(value: string): void {
-  Object.defineProperty(process, 'platform', { value, configurable: true })
-}
-
 async function loadHost(): Promise<typeof import('../electron/main/powershell')> {
   vi.resetModules()
   return import('../electron/main/powershell')
@@ -45,11 +40,11 @@ describe('psHost.run outside Windows', () => {
 
   afterEach(() => {
     vi.useRealTimers()
-    setPlatform(realPlatform)
+    restorePlatform()
   })
 
   afterAll(() => {
-    setPlatform(realPlatform)
+    restorePlatform()
   })
 
   for (const platform of ['darwin', 'linux']) {

@@ -1,4 +1,5 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { restorePlatform, setPlatform } from './helpers/platform'
 
 type Handler = (...args: unknown[]) => void
 
@@ -29,42 +30,13 @@ const mocks = vi.hoisted(() => ({
   openSettings: vi.fn()
 }))
 
-vi.mock('electron', () => {
-  const image = {
-    isEmpty: () => true,
-    resize: () => image,
-    toPNG: () => Buffer.from('png')
-  }
-  return {
-    app: {
-      focus: (...args: unknown[]) => mocks.appFocus(...args),
-      quit: vi.fn(),
-      getPreferredSystemLanguages: () => ['en-US']
-    },
-    Tray: vi.fn().mockImplementation(function () {
-      const tray: FakeTray = {
-        handlers: {},
-        setToolTip: vi.fn(),
-        setIgnoreDoubleClickEvents: vi.fn(),
-        setImage: vi.fn(),
-        setContextMenu: vi.fn(),
-        popUpContextMenu: vi.fn(),
-        destroy: vi.fn(),
-        isDestroyed: () => false,
-        on: (event, fn) => {
-          tray.handlers[event] = fn
-        }
-      }
-      mocks.trays.push(tray)
-      return tray
-    }),
-    Menu: {
-      buildFromTemplate: (template: Array<Record<string, unknown>>) => {
-        const menu = { template }
-        mocks.menus.push(menu)
-        return menu
-      }
-    },
+vi.mock('electron', async () => {
+  const { blankImage, electronMock, fakeTrayConstructor, recordingMenu } = await import('./helpers/electronMock')
+  const image = blankImage()
+  return electronMock({
+    app: { focus: (...args: unknown[]) => mocks.appFocus(...args) },
+    Tray: fakeTrayConstructor(mocks.trays),
+    Menu: recordingMenu(mocks.menus),
     Notification: Object.assign(
       vi.fn().mockImplementation(function (opts: { title: string; body: string }) {
         mocks.notifications.push(opts)
@@ -72,14 +44,8 @@ vi.mock('electron', () => {
       }),
       { isSupported: () => mocks.notificationSupported }
     ),
-    nativeImage: {
-      createFromPath: () => image,
-      createFromBuffer: () => image,
-      createEmpty: () => image
-    },
-    nativeTheme: { shouldUseDarkColors: true, on: vi.fn() },
-    screen: { on: vi.fn() }
-  }
+    nativeImage: { createFromPath: () => image, createFromBuffer: () => image, createEmpty: () => image }
+  })
 })
 
 vi.mock('node:fs', async (importOriginal) => {
@@ -100,22 +66,9 @@ vi.mock('node:child_process', async (importOriginal) => {
   }
 })
 
-vi.mock('../electron/store/paths', () => ({
-  PATHS: {
-    indexFile: () => '/mock/index.json',
-    icon: () => '/mock/icon.png',
-    trayIcon: () => '/mock/tray.png',
-    trayDarkIcon: () => '/mock/tray-dark.png'
-  }
-}))
+vi.mock('../electron/store/paths', async () => (await import('./helpers/pathsMock')).pathsModuleMock({ PATHS: { indexFile: () => '/mock/index.json' } }))
 
-vi.mock('../electron/store/settings', () => ({
-  loadSettings: () => mocks.settings,
-  saveSettings: (patch: Record<string, unknown>) => {
-    mocks.settings = { ...mocks.settings, ...patch }
-    return mocks.settings
-  }
-}))
+vi.mock('../electron/store/settings', async () => (await import('./helpers/settingsMock')).settingsModuleMock(mocks))
 
 vi.mock('../electron/main/window', () => ({
   getMainWindow: () => ({ focus: mocks.windowFocus }),
@@ -124,24 +77,26 @@ vi.mock('../electron/main/window', () => ({
   getDisplayListOptions: () => [],
   registerWindowRepositionListener: vi.fn(),
   popUpAndRetract: vi.fn(),
-  markExplicitOpen: () => mocks.markExplicitOpen()
+  markExplicitOpen: () => mocks.markExplicitOpen(),
+  isInteractive: () => false,
+  resolvePasteTarget: async () => 50
 }))
 
 vi.mock('../electron/main/state', () => ({
   pushState: {
-    togglePanel: () => mocks.togglePanel(),
+    togglePanel: (...args: unknown[]) => mocks.togglePanel(...args),
     openSettings: () => mocks.openSettings(),
     settings: vi.fn()
-  }
+  },
+  getStore: () => ({ list: () => [] }),
+  getWatcher: () => ({ setPaused: vi.fn(), resyncSignature: vi.fn(), noteSelfWrite: vi.fn() })
+}))
+
+vi.mock('../electron/main/macAppMenu', () => ({
+  installMacAppMenu: vi.fn()
 }))
 
 import { createTray, rebuildTrayMenu } from '../electron/main/tray'
-
-const realPlatform = process.platform
-
-function setPlatform(value: string): void {
-  Object.defineProperty(process, 'platform', { value, configurable: true })
-}
 
 function lastMenu(): { template: Array<Record<string, unknown>> } {
   return mocks.menus[mocks.menus.length - 1]
@@ -166,11 +121,11 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks()
-  setPlatform(realPlatform)
+  restorePlatform()
 })
 
 afterAll(() => {
-  setPlatform(realPlatform)
+  restorePlatform()
 })
 
 describe('menu bar icon on macOS', () => {
@@ -247,13 +202,13 @@ describe('menu bar icon on macOS', () => {
     expect(tray.popUpContextMenu).toHaveBeenCalledWith(lastMenu())
   })
 
-  it('brings the app forward when Settings is chosen', () => {
+  it('opens the panel in keyboard mode when Settings is chosen', () => {
     start('darwin')
     const item = lastMenu().template[1] as { click: () => void }
     item.click()
     expect(mocks.setVisible).toHaveBeenCalledWith(true)
-    expect(mocks.appFocus).toHaveBeenCalledWith({ steal: true })
-    expect(mocks.windowFocus).toHaveBeenCalledTimes(1)
+    expect(mocks.togglePanel).toHaveBeenCalledWith(true, { source: 'menu' })
+    expect(mocks.appFocus).not.toHaveBeenCalled()
     expect(mocks.openSettings).toHaveBeenCalledTimes(1)
   })
 
@@ -296,6 +251,23 @@ describe('menu bar icon on macOS', () => {
     start('darwin')
     expect(mocks.notifications[0].body).toContain('⌃⇧X')
     expect(mocks.notifications[0].body).not.toMatch(/Alt|⌥C/)
+  })
+})
+
+function stickLabels(): unknown[] {
+  const stick = lastMenu().template.find((item) => item.label === 'Stick to') as { submenu: Array<{ label: string }> }
+  return stick.submenu.map((item) => item.label)
+}
+
+describe('edge choice in the menu', () => {
+  it('offers the bottom edge on macOS', () => {
+    start('darwin')
+    expect(stickLabels()).toEqual(['Left', 'Right', 'Top', 'Bottom'])
+  })
+
+  it('keeps three edges on Windows', () => {
+    start('win32')
+    expect(stickLabels()).toEqual(['Left', 'Right', 'Top'])
   })
 })
 

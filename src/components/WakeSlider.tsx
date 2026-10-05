@@ -45,6 +45,7 @@ export interface WakeSliderProps {
   formatValue?: (val: number) => string
   disabled?: boolean
   ariaLabel?: string
+  ariaLabelledBy?: string
   className?: string
 }
 
@@ -73,6 +74,7 @@ export function WakeSlider({
   formatValue,
   disabled = false,
   ariaLabel = 'Value',
+  ariaLabelledBy,
   className = ''
 }: WakeSliderProps) {
   const [inner, setInner] = useState(defaultValue)
@@ -259,7 +261,8 @@ export function WakeSlider({
           role="slider"
           className="wake-slider__handle"
           tabIndex={disabled ? -1 : 0}
-          aria-label={ariaLabel}
+          aria-label={ariaLabelledBy ? undefined : ariaLabel}
+          aria-labelledby={ariaLabelledBy}
           aria-valuemin={min}
           aria-valuemax={max}
           aria-valuenow={value}

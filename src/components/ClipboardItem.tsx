@@ -18,20 +18,74 @@ import { memo, useState, useCallback, useEffect, useRef, forwardRef, type ReactN
 import { motion } from 'framer-motion'
 import type { ClipboardItemDto } from '../../shared/types'
 import { MAX_STACK } from '../../shared/types'
-import type { DragRequest } from '../../shared/types'
+import type { DragRequest, ItemMenuRequest } from '../../shared/types'
 import { useStore } from '../store/appStore'
 import { useDragOut } from '../hooks/useDragOut'
 import { itemRenderKey } from '../lib/itemSignature'
-import { basename, formatBytes, previewText, relativeTime, formatImageDisplayName, fileStreamUrl as localFileStreamUrl } from '../lib/format'
+import { basename, formatBytes, previewText, relativeTime, formatImageDisplayName, imageItemDisplayName, fileStreamUrl as localFileStreamUrl } from '../lib/format'
+import { itemAccessibleLabel } from '../lib/itemLabel'
+import { ErrorBoundary, WarningGlyph } from './ErrorBoundary'
 import { getFileKind } from '../lib/fileType'
 import { playButtonClickSound, playToggleSound, playDeleteSound, playCardExpandSound } from '../lib/soundEffects'
-import { CopyIcon, FileKindIcon, FileStackPhoto, PinIcon, PinFillIcon, TrashIcon, MinusIcon, ChevronUpIcon, ChevronLeftIcon, ExpandIcon, ContractIcon, ExternalLinkIcon } from './icons'
+import { CheckIcon, CopyIcon, FileKindIcon, FileStackPhoto, PinIcon, PinFillIcon, TrashIcon, MinusIcon, ChevronUpIcon, ChevronLeftIcon, ExpandIcon, ContractIcon, ExternalLinkIcon } from './icons'
 import { LinkPreviewCard } from './LinkPreviewCard'
 import '../styles/item.css'
 import { tryPaste } from '../lib/tryPaste'
 import { parseColor } from '../lib/colorUtils'
 import { useTranslation, t } from '../i18n'
 import { useRelativeTimeTick } from '../hooks/useRelativeTimeTick'
+import { useInputEngagement } from '../hooks/useInputEngagement'
+import { edge, IS_DARWIN } from '../lib/edge'
+import { pasteOptionsFor, pastePlainFor } from '../lib/pasteOptions'
+import { getNavOrder } from '../lib/keyboardNav'
+import { SELECTION_LIMIT, allTextLike, joinTextParts, orderSelection } from '../../shared/selection'
+import { isHorizontalEdge } from '../../shared/panelPlacement'
+
+function releaseFocus(e: React.MouseEvent<HTMLElement>): void {
+  if (!IS_DARWIN) e.currentTarget.blur()
+}
+
+function openItemMenu(e: React.MouseEvent, id: string, sub?: DragRequest): void {
+  if (!IS_DARWIN) return
+  e.preventDefault()
+  e.stopPropagation()
+  const state = useStore.getState()
+  if (!sub && state.selection.ids.length > 1 && state.selectedMap[id]) {
+    const request: ItemMenuRequest = { id, selection: state.selectedIdsInOrder() }
+    state.showItemMenu(id, request)
+    return
+  }
+  state.showItemMenu(id, sub)
+}
+
+function startSelectionDrag(e: React.DragEvent): void {
+  const state = useStore.getState()
+  const ids = state.selectedIdsInOrder()
+  if (ids.length > SELECTION_LIMIT) {
+    e.preventDefault()
+    state.pushToast({ id: `selection-limit-${Date.now()}`, message: 'toast.selectionTooLarge', tone: 'error', params: { max: SELECTION_LIMIT } })
+    return
+  }
+  const items = orderSelection(state.items, ids)
+  if (IS_DARWIN && e.dataTransfer && allTextLike(items)) {
+    const joined = joinTextParts(
+      items.map((it) => {
+        const data = it.data as Extract<ClipboardItemDto['data'], { kind: 'text' }>
+        return { text: state.selectionTexts[it.id] ?? data.text, html: data.html }
+      }),
+      false
+    )
+    e.dataTransfer.setData('text/plain', joined.text)
+    if (joined.html) e.dataTransfer.setData('text/html', joined.html)
+    e.dataTransfer.effectAllowed = 'copy'
+    state.setTextDragActive(true)
+    return
+  }
+  e.preventDefault()
+  state.setInternalDragReq({ id: ids[0] })
+  useStore.setState({ selectionDragActive: true })
+  edge.startDragMulti(ids)
+}
 
 export const RelativeTime = memo(function RelativeTime({ capturedAt }: { capturedAt: number }) {
   useRelativeTimeTick()
@@ -66,20 +120,25 @@ const ClipboardItemBase = forwardRef<HTMLDivElement, Props>(({ item }, ref) => {
   const startDrag = useDragOut()
   const [copied, setCopied] = useState(false)
 
-  const settings = useStore((s) => s.settings)
-  const isHorizontal = settings.stickPosition === 'top'
+  const isHorizontal = useStore((s) => isHorizontalEdge(s.settings.stickPosition))
   const colorInfo = item.data.kind === 'text' ? parseColor(item.data.text) : null
 
   // Accordion expansion: ONE stack open at a time, coordinated store-wide
   // (expanding another stack collapses this one; Escape / outside click /
   // filter or settings switches collapse via the same store field).
-  const expandedStackId = useStore((s) => s.expandedStackId)
-  const expanded = expandedStackId === item.id
+  const expanded = useStore((s) => s.expandedStackId === item.id)
   const setExpandedFlag = useCallback((v: boolean) => {
     useStore.getState().setExpandedStackId(v ? item.id : null)
   }, [item.id])
 
-  const isPreviewing = useStore((s) => s.previewItemId) === item.id
+  const isPreviewing = useStore((s) => s.previewItemId === item.id)
+  const isActive = useStore((s) => s.activeItemId === item.id)
+  const isSelected = useStore((s) => IS_DARWIN && !!s.selectedMap[item.id])
+  const multiSelected = useStore((s) => IS_DARWIN && s.selection.ids.length > 1 && !!s.selectedMap[item.id])
+  const queueIndex = useStore((s) => s.queueIndex[item.id] ?? -1)
+  const renaming = useStore((s) => s.renamingId === item.id)
+  const fullTextRef = useRef<string | null>(null)
+  const fullTextRequestedRef = useRef(false)
   const isBundle = (item.data.kind === 'files' && item.data.paths.length > 1) || item.data.kind === 'image-collection'
 
   const bundleCount = item.data.kind === 'image-collection'
@@ -136,8 +195,9 @@ const ClipboardItemBase = forwardRef<HTMLDivElement, Props>(({ item }, ref) => {
     if (useStore.getState().previewItemId === item.id) {
       return
     }
-    tryPaste(() => paste(item.id))
-  }, [paste, item.id])
+    const opts = pasteOptionsFor(item, useStore.getState().settings, !!e?.altKey, edge.platform)
+    tryPaste(() => paste(item.id, opts))
+  }, [paste, item])
 
   const onExpand = useCallback((e?: React.MouseEvent) => {
     e?.stopPropagation()
@@ -158,9 +218,18 @@ const ClipboardItemBase = forwardRef<HTMLDivElement, Props>(({ item }, ref) => {
 
   const handleDragStart = useCallback((e: React.DragEvent, req: DragRequest) => {
     if (item.data.kind === 'text') {
-      // We no longer support dragging text/links.
-      // Prevent the default browser drag behavior (e.g. text selection dragging) entirely.
-      e.preventDefault()
+      if (!IS_DARWIN || !e.dataTransfer) {
+        // We no longer support dragging text/links.
+        // Prevent the default browser drag behavior (e.g. text selection dragging) entirely.
+        e.preventDefault()
+        return
+      }
+      const text = fullTextRef.current ?? item.data.text
+      e.dataTransfer.setData('text/plain', text)
+      if (item.data.isUrl) e.dataTransfer.setData('text/uri-list', text.trim())
+      if (item.data.html) e.dataTransfer.setData('text/html', item.data.html)
+      e.dataTransfer.effectAllowed = 'copy'
+      useStore.getState().setTextDragActive(true)
       return
     } else {
       // Images and files need OS-level file handles via Electron's startDrag.
@@ -177,8 +246,22 @@ const ClipboardItemBase = forwardRef<HTMLDivElement, Props>(({ item }, ref) => {
   const handlePrestage = useCallback(() => {
     if (item.data.kind !== 'text' && !isPreviewing) {
       window.edge.prestageDrag({ id: item.id })
+    } else if (IS_DARWIN && item.data.kind === 'text' && item.data.hasFullPayload && !fullTextRequestedRef.current) {
+      fullTextRequestedRef.current = true
+      try {
+        void Promise.resolve(edge.getFullText(item.id))
+          .then((full) => {
+            if (typeof full === 'string' && full) fullTextRef.current = full
+            else fullTextRequestedRef.current = false
+          })
+          .catch(() => {
+            fullTextRequestedRef.current = false
+          })
+      } catch {
+        fullTextRequestedRef.current = false
+      }
     }
-  }, [item.data.kind, isPreviewing, item.id])
+  }, [item.data, isPreviewing, item.id])
 
   const pointerStartRef = useRef<{ x: number; y: number; moved: boolean } | null>(null)
   const wasPreviewingRef = useRef(false)
@@ -209,6 +292,16 @@ const ClipboardItemBase = forwardRef<HTMLDivElement, Props>(({ item }, ref) => {
     }
     pointerStartRef.current = null
 
+    if (IS_DARWIN && (e.shiftKey || e.metaKey)) {
+      e.stopPropagation()
+      e.preventDefault()
+      wasPreviewingRef.current = false
+      const state = useStore.getState()
+      if (e.shiftKey) state.selectRangeTo(item.id, getNavOrder())
+      else state.toggleSelected(item.id)
+      return
+    }
+
     // In that particular scenario only:
     // When this card is open in preview flyout (blurred), clicking it only
     // minimizes the preview flyout and does NOT paste
@@ -227,6 +320,18 @@ const ClipboardItemBase = forwardRef<HTMLDivElement, Props>(({ item }, ref) => {
     // Dismiss the other card's preview and proceed with pasting this card
     if (currentPreviewId && currentPreviewId !== item.id) {
       useStore.getState().setPreviewItemId(null)
+    }
+
+    const selectionState = useStore.getState()
+    if (IS_DARWIN && selectionState.selection.ids.length > 0) {
+      e.stopPropagation()
+      if (selectionState.selectedMap[item.id]) {
+        const plain = pastePlainFor(selectionState.settings, e.altKey, edge.platform)
+        tryPaste(() => { void selectionState.pasteSelection(plain).catch(() => {}) })
+        return
+      }
+      selectionState.clearSelection()
+      return
     }
 
     if (isBundle && !expanded) {
@@ -263,29 +368,51 @@ const ClipboardItemBase = forwardRef<HTMLDivElement, Props>(({ item }, ref) => {
             borderRadius: 16,
             background: colorInfo?.isLight
               ? 'radial-gradient(circle at center, rgba(0, 0, 0, 0.25) 0%, rgba(0, 0, 0, 0.06) 45%, transparent 75%)'
-              : 'radial-gradient(circle at center, rgba(255, 255, 255, 0.3) 0%, rgba(255, 255, 255, 0.08) 45%, transparent 75%)',
+              : colorInfo
+                ? 'radial-gradient(circle at center, rgba(255, 255, 255, 0.3) 0%, rgba(255, 255, 255, 0.08) 45%, transparent 75%)'
+                : 'radial-gradient(circle at center, rgb(var(--ink) / 0.3) 0%, rgb(var(--ink) / 0.08) 45%, transparent 75%)',
             pointerEvents: 'none',
             zIndex: 15
           }}
         />
       )}
       <div
-        className={`item-main${isPreviewing ? ' force-actions previewing' : ''}`}
+        className={`item-main${isPreviewing ? ' force-actions previewing' : ''}${isActive ? ' kb-active' : ''}${isSelected ? ' is-selected' : ''}`}
         data-id={item.id}
-        draggable={!isPreviewing && item.data.kind !== 'text' && (!isBundle || !expanded)}
+        role={IS_DARWIN ? 'button' : undefined}
+        tabIndex={IS_DARWIN ? 0 : undefined}
+        aria-label={itemAccessibleLabel(item)}
+        aria-expanded={isBundle ? expanded : undefined}
+        onKeyDown={(e) => {
+          if (e.target !== e.currentTarget) return
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault()
+            e.currentTarget.click()
+          }
+        }}
+        draggable={!isPreviewing && !renaming && (item.data.kind !== 'text' || IS_DARWIN) && (!isBundle || !expanded)}
+        onContextMenu={(e) => openItemMenu(e, item.id)}
         onMouseEnter={handlePrestage}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onDragStart={(e) => {
           if (pointerStartRef.current) pointerStartRef.current.moved = true
+          if (multiSelected) {
+            startSelectionDrag(e)
+            return
+          }
           handleDragStart(e, { id: item.id })
         }}
         onDragEnd={() => {
           setInternalDragReq(null)
+          useStore.getState().setTextDragActive(false)
         }}
         onDragOver={(e) => {
           const activeDrag = useStore.getState().internalDragReq
-          if (activeDrag && activeDrag.id !== item.id) {
+          if (activeDrag && useStore.getState().selectionDragActive) {
+            e.preventDefault()
+            e.stopPropagation()
+          } else if (activeDrag && activeDrag.id !== item.id) {
             e.preventDefault()
           } else if (activeDrag && activeDrag.id === item.id) {
             e.preventDefault()
@@ -294,7 +421,11 @@ const ClipboardItemBase = forwardRef<HTMLDivElement, Props>(({ item }, ref) => {
         }}
         onDrop={(e) => {
           const activeDrag = useStore.getState().internalDragReq
-          if (activeDrag && activeDrag.id !== item.id) {
+          if (activeDrag && useStore.getState().selectionDragActive) {
+            e.preventDefault()
+            e.stopPropagation()
+            setInternalDragReq(null)
+          } else if (activeDrag && activeDrag.id !== item.id) {
             e.preventDefault()
             e.stopPropagation()
             window.edge.mergeItems(activeDrag.id, item.id)
@@ -307,8 +438,23 @@ const ClipboardItemBase = forwardRef<HTMLDivElement, Props>(({ item }, ref) => {
         }}
         onClick={handleCardClick}
       >
+        {isSelected && (
+          <span className="select-check" aria-hidden="true">
+            <CheckIcon width={11} height={11} />
+          </span>
+        )}
+        {queueIndex >= 0 && (
+          <span className="queue-badge" aria-hidden="true">
+            {queueIndex + 1}
+          </span>
+        )}
         <div className="body">
-          <div className="item-content">
+          <div className={`item-content${item.title || renaming ? ' has-title' : ''}`}>
+            {renaming ? (
+              <TitleEditor item={item} />
+            ) : item.title && (!isBundle || !expanded) ? (
+              <div className="item-title" dir="auto" title={item.title}>{item.title}</div>
+            ) : null}
             {isBundle ? (
                 <BundleFluidPreview 
                   item={item} 
@@ -321,6 +467,9 @@ const ClipboardItemBase = forwardRef<HTMLDivElement, Props>(({ item }, ref) => {
                 />
             ) : (
               <Preview item={item} />
+            )}
+            {item.sourceApp?.bundleId && (!isBundle || !expanded) && (
+              <SourceAppLine bundleId={item.sourceApp.bundleId} name={item.sourceApp.name} />
             )}
           </div>
           {(!isBundle || !expanded) && (
@@ -351,10 +500,11 @@ const ClipboardItemBase = forwardRef<HTMLDivElement, Props>(({ item }, ref) => {
           <button
             className={`act${item.pinned ? ' active' : ''}`}
             title={item.pinned ? t('item.unpin') : t('item.pin')}
+            aria-label={item.pinned ? t('item.unpin') : t('item.pin')}
             onClick={(e) => {
               e.stopPropagation()
               e.preventDefault()
-              e.currentTarget.blur()
+              releaseFocus(e)
               playToggleSound(!item.pinned)
               togglePin(item.id, !item.pinned)
             }}
@@ -364,10 +514,11 @@ const ClipboardItemBase = forwardRef<HTMLDivElement, Props>(({ item }, ref) => {
           <button
             className={`act${isPreviewing ? ' preview-contract active' : ' preview-expand'}`}
             title={isPreviewing ? t('header.close') : t('item.expand')}
+            aria-label={isPreviewing ? t('header.close') : t('item.expand')}
             onClick={(e) => {
               e.stopPropagation()
               e.preventDefault()
-              e.currentTarget.blur()
+              releaseFocus(e)
               playCardExpandSound(!isPreviewing)
               const rect = e.currentTarget.closest('.item-main')?.getBoundingClientRect()
               const rectData = rect ? { x: rect.x, y: rect.y, width: rect.width, height: rect.height } : undefined
@@ -379,10 +530,11 @@ const ClipboardItemBase = forwardRef<HTMLDivElement, Props>(({ item }, ref) => {
           <button 
             className="act" 
             title={t('item.copy')} 
+            aria-label={t('item.copy')}
             onClick={(e) => {
               e.stopPropagation()
               e.preventDefault()
-              e.currentTarget.blur()
+              releaseFocus(e)
               onCopy(e)
             }}
           >
@@ -392,10 +544,11 @@ const ClipboardItemBase = forwardRef<HTMLDivElement, Props>(({ item }, ref) => {
             <button
               className="act"
               title={t('flyout.openLink')}
+              aria-label={t('flyout.openLink')}
               onClick={(e) => {
                 e.stopPropagation()
                 e.preventDefault()
-                e.currentTarget.blur()
+                releaseFocus(e)
                 playButtonClickSound()
                 window.open((item.data as any).text, '_blank')
               }}
@@ -407,10 +560,11 @@ const ClipboardItemBase = forwardRef<HTMLDivElement, Props>(({ item }, ref) => {
           <button
             className="act danger"
             title={t('item.delete')}
+            aria-label={t('item.delete')}
             onClick={(e) => {
               e.stopPropagation()
               e.preventDefault()
-              e.currentTarget.blur()
+              releaseFocus(e)
               playDeleteSound()
               remove(item.id)
             }}
@@ -543,9 +697,10 @@ function BundleToolbar({
         type="button"
         className="bundle-collapse-hit"
         title={t('item.collapsePinned')}
+        aria-label={t('item.collapsePinned')}
         onClick={(e) => {
           e.stopPropagation()
-          e.currentTarget.blur()
+          releaseFocus(e)
           onCollapse(e)
         }}
       >
@@ -561,9 +716,10 @@ function BundleToolbar({
           <button
             className={`act${pinned ? ' active' : ''}`}
             title={pinned ? t('item.unpin') : t('item.pin')}
+            aria-label={pinned ? t('item.unpin') : t('item.pin')}
             onClick={(e) => {
               e.stopPropagation()
-              e.currentTarget.blur()
+              releaseFocus(e)
               onTogglePin()
             }}
           >
@@ -576,14 +732,16 @@ function BundleToolbar({
         <button
           className="act"
           title={t('item.copy')}
-          onClick={(e) => { e.stopPropagation(); e.currentTarget.blur(); onCopy(e) }}
+          aria-label={t('item.copy')}
+          onClick={(e) => { e.stopPropagation(); releaseFocus(e); onCopy(e) }}
         >
           <CopyIcon />
         </button>
         <button
           className="act danger"
           title={t('item.delete')}
-          onClick={(e) => { e.stopPropagation(); e.currentTarget.blur(); onRemove() }}
+          aria-label={t('item.delete')}
+          onClick={(e) => { e.stopPropagation(); releaseFocus(e); onRemove() }}
         >
           <TrashIcon />
         </button>
@@ -627,9 +785,10 @@ function HorizontalBundleExpanded({
           type="button"
           className="bundle-collapse-hit"
           title={t('item.collapsePinned')}
+          aria-label={t('item.collapsePinned')}
           onClick={(e) => {
             e.stopPropagation()
-            e.currentTarget.blur()
+            releaseFocus(e)
             onCollapse(e)
           }}
         >
@@ -639,14 +798,16 @@ function HorizontalBundleExpanded({
           <button
             className="act"
             title={t('item.copy')}
-            onClick={(e) => { e.stopPropagation(); e.currentTarget.blur(); onCopy(e) }}
+            aria-label={t('item.copy')}
+            onClick={(e) => { e.stopPropagation(); releaseFocus(e); onCopy(e) }}
           >
             <CopyIcon />
           </button>
           <button
             className="act danger"
             title={t('item.delete')}
-            onClick={(e) => { e.stopPropagation(); e.currentTarget.blur(); onRemove() }}
+            aria-label={t('item.delete')}
+            onClick={(e) => { e.stopPropagation(); releaseFocus(e); onRemove() }}
           >
             <TrashIcon />
           </button>
@@ -665,14 +826,16 @@ function HorizontalBundleExpanded({
             onPointerDown={() => window.edge.prestageDrag({ id: item.id, imageId: img.imageId })}
             onDragStartCapture={(e: any) => { e.stopPropagation(); onDragStart(e, { id: item.id, imageId: img.imageId }) }}
             onClick={(e) => { e.stopPropagation(); tryPaste(() => window.edge.pasteSubitem({ id: item.id, imageId: img.imageId })) }}
+            onContextMenu={(e) => openItemMenu(e, item.id, { id: item.id, imageId: img.imageId })}
           >
             <div className="horizontal-subitem-actions">
               <button
                 className="act subitem-copy-btn"
                 title={t('item.copy')}
+                aria-label={t('item.copy')}
                 onClick={(e) => {
                   e.stopPropagation()
-                  e.currentTarget.blur()
+                  releaseFocus(e)
                   useStore.getState().copySubitem({ id: item.id, imageId: img.imageId })
                 }}
               >
@@ -681,9 +844,10 @@ function HorizontalBundleExpanded({
               <button
                 className="act subitem-delete-btn"
                 title={t('item.ungroup')}
+                aria-label={t('item.ungroup')}
                 onClick={(e) => {
                   e.stopPropagation()
-                  e.currentTarget.blur()
+                  releaseFocus(e)
                   window.edge.splitItem({ id: item.id, imageId: img.imageId, splitPlacement: 'after' })
                 }}
               >
@@ -702,7 +866,7 @@ function HorizontalBundleExpanded({
             </div>
             <div className="horizontal-subitem-meta">
               <span className="horizontal-subitem-name">{img.width}×{img.height}</span>
-              <span className="horizontal-subitem-sub">{formatBytes(img.bytes)}</span>
+              <span className="horizontal-subitem-sub">{formatBytes(img.fileBytes || img.bytes)}</span>
             </div>
           </motion.div>
         ))}
@@ -723,14 +887,16 @@ function HorizontalBundleExpanded({
               onPointerDown={() => window.edge.prestageDrag({ id: item.id, paths: [filePath] })}
               onDragStartCapture={(e: any) => { e.stopPropagation(); onDragStart(e, { id: item.id, paths: [filePath] }) }}
               onClick={(e) => { e.stopPropagation(); tryPaste(() => window.edge.pasteSubitem({ id: item.id, paths: [filePath] })) }}
+              onContextMenu={(e) => openItemMenu(e, item.id, { id: item.id, paths: [filePath] })}
             >
               <div className="horizontal-subitem-actions">
                 <button
                   className="act subitem-copy-btn"
                   title={t('item.copyFilePath')}
+                  aria-label={t('item.copyFilePath')}
                   onClick={(e) => {
                     e.stopPropagation()
-                    e.currentTarget.blur()
+                    releaseFocus(e)
                     useStore.getState().copySubitem({ id: item.id, paths: [filePath] })
                   }}
                 >
@@ -739,9 +905,10 @@ function HorizontalBundleExpanded({
                 <button
                   className="act subitem-delete-btn"
                   title={t('item.ungroup')}
+                  aria-label={t('item.ungroup')}
                   onClick={(e) => {
                     e.stopPropagation()
-                    e.currentTarget.blur()
+                    releaseFocus(e)
                     window.edge.splitItem({ id: item.id, paths: [filePath], splitPlacement: 'after' })
                   }}
                 >
@@ -865,6 +1032,7 @@ function BundleFluidPreview({
                 onPointerDown={() => window.edge.prestageDrag({ id: item.id, imageId: img.imageId })}
                 onDragStartCapture={(e: any) => { e.stopPropagation(); onDragStart(e, { id: item.id, imageId: img.imageId }) }}
                 onClick={(e) => { e.stopPropagation(); tryPaste(() => window.edge.pasteSubitem({ id: item.id, imageId: img.imageId })) }}
+                onContextMenu={(e) => openItemMenu(e, item.id, { id: item.id, imageId: img.imageId })}
               >
                 <div className="fluid-row-icon">
                   <img
@@ -878,13 +1046,14 @@ function BundleFluidPreview({
                 </div>
                 <div className="fluid-row-content">
                   <div className="fluid-row-name">{t('item.imageItem')} · {img.width} × {img.height}</div>
-                  <div className="fluid-row-sub">{formatBytes(img.bytes)}</div>
+                  <div className="fluid-row-sub">{formatBytes(img.fileBytes || img.bytes)}</div>
                 </div>
                 <div className="fluid-row-actions">
                   <button
                     className="act subitem-delete-btn"
                     title={t('item.ungroup')}
-                    onClick={(e) => { e.stopPropagation(); e.currentTarget.blur(); window.edge.splitItem({ id: item.id, imageId: img.imageId, splitPlacement: 'after' }); }}
+                    aria-label={t('item.ungroup')}
+                    onClick={(e) => { e.stopPropagation(); releaseFocus(e); window.edge.splitItem({ id: item.id, imageId: img.imageId, splitPlacement: 'after' }); }}
                   >
                     <MinusIcon width={12} height={12} />
                   </button>
@@ -980,6 +1149,7 @@ function BundleFluidPreview({
                   onPointerDown={() => window.edge.prestageDrag({ id: item.id, paths: [filePath] })}
                   onDragStartCapture={(e: any) => { e.stopPropagation(); onDragStart(e, { id: item.id, paths: [filePath] }) }}
                   onClick={(e) => { e.stopPropagation(); tryPaste(() => window.edge.pasteSubitem({ id: item.id, paths: [filePath] })) }}
+                  onContextMenu={(e) => openItemMenu(e, item.id, { id: item.id, paths: [filePath] })}
                 >
                   <div className="fluid-row-icon">
                     {entry?.isImage && entry.preview ? (
@@ -998,14 +1168,16 @@ function BundleFluidPreview({
                     <button
                       className="act subitem-copy-btn"
                       title={t('item.copyFilePath')}
-                      onClick={(e) => { e.stopPropagation(); e.currentTarget.blur(); useStore.getState().copySubitem({ id: item.id, paths: [filePath] }); }}
+                      aria-label={t('item.copyFilePath')}
+                      onClick={(e) => { e.stopPropagation(); releaseFocus(e); useStore.getState().copySubitem({ id: item.id, paths: [filePath] }); }}
                     >
                       <CopyIcon width={12} height={12} />
                     </button>
                     <button
                       className="act subitem-delete-btn"
                       title={t('item.ungroup')}
-                      onClick={(e) => { e.stopPropagation(); e.currentTarget.blur(); window.edge.splitItem({ id: item.id, paths: [filePath], splitPlacement: 'after' }); }}
+                      aria-label={t('item.ungroup')}
+                      onClick={(e) => { e.stopPropagation(); releaseFocus(e); window.edge.splitItem({ id: item.id, paths: [filePath], splitPlacement: 'after' }); }}
                     >
                       <MinusIcon width={12} height={12} />
                     </button>
@@ -1039,7 +1211,7 @@ function Preview({ item }: { item: ClipboardItemDto }) {
           </div>
         )
       }
-      return <div className="preview">{previewText(item.data.text)}</div>
+      return <div className="preview" dir="auto">{previewText(item.data.text)}</div>
     }
 
     case 'image':
@@ -1049,7 +1221,7 @@ function Preview({ item }: { item: ClipboardItemDto }) {
             <img
               className="thumb"
               src={item.data.preview}
-              alt=""
+              alt={imageItemDisplayName(item.data, item.capturedAt)}
               loading="lazy"
               decoding="async"
               draggable={false}
@@ -1083,7 +1255,7 @@ function Preview({ item }: { item: ClipboardItemDto }) {
                       e.currentTarget.src = fallback
                     }
                   }}
-                  alt=""
+                  alt={displayName}
                   loading="lazy"
                   decoding="async"
                   draggable={false}
@@ -1118,6 +1290,91 @@ function Preview({ item }: { item: ClipboardItemDto }) {
   }
 }
 
+const SourceAppLine = memo(function SourceAppLine({ bundleId, name }: { bundleId: string; name?: string }) {
+  const { t } = useTranslation()
+  const ref = useRef<HTMLDivElement>(null)
+  const icon = useStore((s) => s.appIcons[bundleId])
+  useEffect(() => {
+    if (!IS_DARWIN || icon !== undefined) return
+    const el = ref.current
+    if (!el) return
+    if (typeof IntersectionObserver !== 'function') {
+      useStore.getState().requestAppIcon(bundleId)
+      return
+    }
+    const observer = new IntersectionObserver((entries) => {
+      if (!entries.some((entry) => entry.isIntersecting)) return
+      observer.disconnect()
+      useStore.getState().requestAppIcon(bundleId)
+    }, { rootMargin: '120px' })
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [bundleId, icon])
+  const label = t('item.sourceApp', { app: name || bundleId })
+  return (
+    <div ref={ref} className="item-source" title={label}>
+      {icon ? <img className="item-source-icon" src={icon} alt="" draggable={false} /> : null}
+      <span className="item-source-name">{label}</span>
+    </div>
+  )
+})
+
+function TitleEditor({ item }: { item: ClipboardItemDto }) {
+  const { t } = useTranslation()
+  const inputRef = useRef<HTMLInputElement>(null)
+  const [value, setValue] = useState(item.title ?? '')
+  const doneRef = useRef(false)
+  const { engage, disengage } = useInputEngagement(inputRef)
+
+  useEffect(() => {
+    engage()
+    const raf = window.requestAnimationFrame(() => {
+      const input = inputRef.current
+      if (!input) return
+      input.focus()
+      input.select()
+      try { input.scrollIntoView({ block: 'nearest', inline: 'nearest' }) } catch { /* ignore */ }
+    })
+    return () => window.cancelAnimationFrame(raf)
+  }, [engage])
+
+  const finish = (save: boolean) => {
+    if (doneRef.current) return
+    doneRef.current = true
+    disengage()
+    const state = useStore.getState()
+    if (save && value.trim() !== (item.title ?? '')) void state.renameItem(item.id, value)
+    else state.setRenamingId(null)
+  }
+
+  return (
+    <input
+      ref={inputRef}
+      className="item-title-input"
+      type="text"
+      value={value}
+      placeholder={t('item.untitled')}
+      aria-label={t('menu.rename')}
+      spellCheck={false}
+      onChange={(e) => setValue(e.target.value)}
+      onPointerDown={(e) => e.stopPropagation()}
+      onClick={(e) => e.stopPropagation()}
+      onKeyDown={(e) => {
+        e.stopPropagation()
+        if (e.nativeEvent.isComposing || e.keyCode === 229) return
+        if (e.key === 'Enter') {
+          e.preventDefault()
+          finish(true)
+        } else if (e.key === 'Escape') {
+          e.preventDefault()
+          finish(false)
+        }
+      }}
+      onBlur={() => finish(true)}
+    />
+  )
+}
+
 /* ------------------------------------------------------------------ */
 /* Kind badge                                                          */
 /* ------------------------------------------------------------------ */
@@ -1128,12 +1385,12 @@ function KindBadge({ item }: { item: ClipboardItemDto }) {
       if (item.data.isUrl)
         return <span className="kind-badge url">{t('filters.links').toLowerCase()}</span>
       if (item.data.isColor || parseColor(item.data.text))
-        return <span className="kind-badge color">color</span>
+        return <span className="kind-badge color">{t('item.colorItem')}</span>
       return <span className="kind-badge">{t('filters.text').toLowerCase()}</span>
     case 'image':
       return (
         <span className="kind-badge">
-          {t('filters.images').toLowerCase().slice(0, -1) || t('filters.images').toLowerCase()}
+          {t('item.imageItem').toLowerCase()}
         </span>
       )
     case 'image-collection':
@@ -1151,7 +1408,7 @@ function KindBadge({ item }: { item: ClipboardItemDto }) {
       if (isImage) {
         return (
           <span className="kind-badge">
-            {t('filters.images').toLowerCase().slice(0, -1) || t('filters.images').toLowerCase()}
+            {t('item.imageItem').toLowerCase()}
           </span>
         )
       }
@@ -1192,7 +1449,7 @@ function ItemDetails({ item }: { item: ClipboardItemDto }) {
 
     case 'image': {
       const dims = item.data.width && item.data.height ? `${item.data.width}×${item.data.height}` : ''
-      const size = item.data.bytes ? formatBytes(item.data.bytes) : ''
+      const size = item.data.fileBytes || item.data.bytes ? formatBytes(item.data.fileBytes || item.data.bytes) : ''
       return (
         <>
           {dims && <span className="meta-detail">· {dims}</span>}
@@ -1202,7 +1459,7 @@ function ItemDetails({ item }: { item: ClipboardItemDto }) {
     }
 
     case 'image-collection': {
-      const totalBytes = item.data.images?.reduce((acc, img) => acc + (img.bytes || 0), 0) || 0
+      const totalBytes = item.data.images?.reduce((acc, img) => acc + (img.fileBytes || img.bytes || 0), 0) || 0
       return totalBytes > 0 ? <span className="meta-detail">· {formatBytes(totalBytes)}</span> : null
     }
 
@@ -1225,8 +1482,36 @@ function ItemDetails({ item }: { item: ClipboardItemDto }) {
  * previewing) and local state (copied/expanded) are unaffected — memo only
  * gates prop-driven renders.
  */
+function BrokenItemTile({ item }: { item: ClipboardItemDto }) {
+  const { t } = useTranslation()
+  return (
+    <div className="item item-broken">
+      <WarningGlyph size={16} />
+      <span className="item-broken-text">{t('item.renderFailed')}</span>
+      <button
+        type="button"
+        className="act danger"
+        title={t('item.delete')}
+        aria-label={t('item.delete')}
+        onClick={() => {
+          playDeleteSound()
+          void useStore.getState().remove(item.id)
+        }}
+      >
+        <TrashIcon />
+      </button>
+    </div>
+  )
+}
+
+const GuardedClipboardItem = forwardRef<HTMLDivElement, Props>(({ item }, ref) => (
+  <ErrorBoundary label={`item ${item.id}`} resetKey={item} fallback={() => <BrokenItemTile item={item} />}>
+    <ClipboardItemBase ref={ref} item={item} />
+  </ErrorBoundary>
+))
+
 export const ClipboardItemCard = memo(
-  ClipboardItemBase,
+  GuardedClipboardItem,
   (prevProps, nextProps) => {
     const prev = prevProps.item
     const next = nextProps.item
@@ -1235,6 +1520,9 @@ export const ClipboardItemCard = memo(
       prev.pinned === next.pinned &&
       prev.hitCount === next.hitCount &&
       prev.capturedAt === next.capturedAt &&
+      prev.title === next.title &&
+      prev.sourceApp?.bundleId === next.sourceApp?.bundleId &&
+      prev.sourceApp?.name === next.sourceApp?.name &&
       itemRenderKey(prev) === itemRenderKey(next)
     )
   }

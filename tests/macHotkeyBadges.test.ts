@@ -10,10 +10,6 @@ vi.mock('../src/components/icons', () => ({
   CloseIcon: () => null
 }))
 
-vi.mock('../src/lib/edge', () => ({
-  edge: {}
-}))
-
 vi.mock('../src/i18n', () => ({
   useTranslation: () => ({ t: (key: string) => key })
 }))
@@ -22,7 +18,7 @@ type Badges = typeof import('../src/components/HotkeyRecorder').parseKeyBadges
 
 async function loadParseKeyBadges(platform: string): Promise<Badges> {
   vi.resetModules()
-  vi.stubGlobal('navigator', { platform, userAgent: '' })
+  vi.stubGlobal('window', { edge: { platform } })
   const mod = await import('../src/components/HotkeyRecorder')
   return mod.parseKeyBadges
 }
@@ -31,7 +27,7 @@ describe('parseKeyBadges on macOS', () => {
   let parseKeyBadges: Badges
 
   beforeEach(async () => {
-    parseKeyBadges = await loadParseKeyBadges('MacIntel')
+    parseKeyBadges = await loadParseKeyBadges('darwin')
   })
 
   afterEach(() => {
@@ -75,7 +71,7 @@ describe('parseKeyBadges on other platforms', () => {
   let parseKeyBadges: Badges
 
   beforeEach(async () => {
-    parseKeyBadges = await loadParseKeyBadges('Win32')
+    parseKeyBadges = await loadParseKeyBadges('win32')
   })
 
   afterEach(() => {
@@ -110,16 +106,16 @@ describe('parseKeyBadges platform detection', () => {
     vi.unstubAllGlobals()
   })
 
-  it('detects macOS from the user agent when navigator.platform is empty', async () => {
+  it('detects macOS from the bridge platform', async () => {
     vi.resetModules()
-    vi.stubGlobal('navigator', { platform: '', userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)' })
+    vi.stubGlobal('window', { edge: { platform: 'darwin' } })
     const { parseKeyBadges } = await import('../src/components/HotkeyRecorder')
     expect(parseKeyBadges('Alt+C')).toEqual(['⌥', 'C'])
   })
 
-  it('treats a missing navigator as not macOS', async () => {
+  it('treats a missing bridge as not macOS', async () => {
     vi.resetModules()
-    vi.stubGlobal('navigator', undefined)
+    vi.stubGlobal('window', undefined)
     const { parseKeyBadges } = await import('../src/components/HotkeyRecorder')
     expect(parseKeyBadges('Alt+C')).toEqual(['Alt', 'C'])
   })

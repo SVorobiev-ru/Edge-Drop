@@ -10,24 +10,34 @@
  */
 import { useEffect, useRef } from 'react'
 import { Panel } from './components/Panel'
-import { useStore } from './store/appStore'
-import { edge } from './lib/edge'
-import { applyReduceMotion } from './lib/theme'
+import { useStore, selectReduceMotion } from './store/appStore'
+import { edge, IS_DARWIN } from './lib/edge'
+import { applyReduceMotion, applyTheme, resolveTheme } from './lib/theme'
+import { suspendAudioContextSoon } from './lib/soundEffects'
+import { closeShelf, openItemPreview, openShelf } from './lib/shelf'
 import { useEdgeHover } from './hooks/useEdgeHover'
+import { useSystemDark } from './hooks/useSystemDark'
+import { focusSearchField, useKeyboardNav } from './hooks/useKeyboardNav'
+import { resolveToggle } from './lib/keyboardNav'
 
 export default function App() {
   const hydrate = useStore((s) => s.hydrate)
   const setItems = useStore((s) => s.setItems)
   const setSettings = useStore((s) => s.setSettings)
   const pushToast = useStore((s) => s.pushToast)
-  const settings = useStore((s) => s.settings)
+  const fontSizeScale = useStore((s) => s.settings.fontSizeScale)
+  const reduceMotion = useStore(selectReduceMotion)
   const hydrated = useStore((s) => s.hydrated)
   const panelOpen = useStore((s) => s.open)
+  const themeMode = useStore((s) => s.settings.theme)
+  const vibrancy = useStore((s) => s.settings.vibrancy)
+  const systemDark = useSystemDark(true)
   const warmupDone = useRef(false)
   const audioWarmed = useRef(false)
 
   // Drive the edge open/close behavior.
   useEdgeHover()
+  useKeyboardNav()
 
   // Cold-start warmup (no visual / feature change).
   // The first shelf open and first emoji open jank because one-time init
@@ -70,7 +80,7 @@ export default function App() {
         void Promise.all([import('./lib/emoji/load'), import('./lib/emoji/catalog')])
           .then(([loadMod, catalogMod]) =>
             loadMod.loadEmojiCatalog().then((catalog) => {
-              if (cancelled || !catalog) return
+              if (cancelled || !catalog || IS_DARWIN) return
               try {
                 const smileys = catalogMod.CATEGORY_ORDER.find((c) => c.id === 'smileys')
                 const sources = (smileys as { sources?: readonly string[] } | undefined)?.sources ?? []
@@ -223,40 +233,31 @@ export default function App() {
     const offItems = edge.onItems((items, meta) => setItems(items, meta))
     const offSettings = edge.onSettings((next) => setSettings(next))
     const offToast = edge.onToast((t) => pushToast(t))
-    const offToggle = edge.onToggle((forceOpen) => {
-      const next = forceOpen !== undefined ? forceOpen : !useStore.getState().open
-      if (!next) {
-        const state = useStore.getState()
-        // If the indicator style flyout is open, let its exit spring play first
-        // before collapsing the main panel — same sequencing as useEdgeHover's
-        // closePanel(). Without this, both animate simultaneously and it looks broken.
-        if (state.styleFlyoutOpen) {
-          state.setStyleFlyoutOpen(false)
-          window.setTimeout(() => {
-            const s = useStore.getState()
-            if (s.previewItemId) {
-              s.setPreviewItemId(null)
-              edge.setInteractive(false)
-              window.setTimeout(() => { useStore.getState().setOpen(false) }, 240)
-            } else {
-              s.setOpen(false)
-              edge.setInteractive(false)
-            }
-          }, 300)
-        } else if (state.previewItemId) {
-          state.setPreviewItemId(null)
-          edge.setInteractive(false)
-          window.setTimeout(() => {
-            useStore.getState().setOpen(false)
-          }, 240)
-        } else {
-          state.setOpen(false)
-          edge.setInteractive(false)
-        }
-      } else {
-        useStore.getState().setOpen(next)
-        edge.setInteractive(next)
+    const offToggle = edge.onToggle((forceOpen, meta) => {
+      const decision = resolveToggle(forceOpen, meta?.source, useStore.getState().open, IS_DARWIN)
+      if (decision === 'close') {
+        closeShelf()
+        return
       }
+      if (decision === 'open') openShelf()
+      if (IS_DARWIN && meta?.source) useStore.getState().enterKeyboardMode()
+    })
+    const offSearch = edge.onSearch((query) => {
+      const state = useStore.getState()
+      if (state.settingsOpen) state.setSettingsOpen(false)
+      if (state.emojiOpen) state.setEmojiOpen(false)
+      state.setQuery('')
+      if (!state.open) openShelf()
+      if (IS_DARWIN) useStore.getState().enterKeyboardMode()
+      focusSearchField(typeof query === 'string' ? query : '')
+    })
+    const offItemMenu = edge.onItemMenuAction((req) => {
+      if (!req || typeof req.id !== 'string') return
+      if (req.action === 'preview') openItemPreview(req.id)
+      else if (req.action === 'rename') useStore.getState().setRenamingId(req.id)
+    })
+    const offQueue = edge.onQueueState((state) => {
+      useStore.getState().setQueueIds(Array.isArray(state?.ids) ? state.ids : [])
     })
     const offOpenSettings = edge.onOpenSettings(() => {
       useStore.getState().setOpen(true)
@@ -297,6 +298,9 @@ export default function App() {
       offSettings()
       offToast()
       offToggle()
+      offSearch()
+      offItemMenu()
+      offQueue()
       offOpenSettings()
       offTutorialStep()
       offUpdateAvailable()
@@ -306,12 +310,29 @@ export default function App() {
     }
   }, [hydrate, setItems, setSettings, pushToast])
 
+  useEffect(() => {
+    if (!IS_DARWIN || typeof window.matchMedia !== 'function') return
+    const query = window.matchMedia('(prefers-reduced-motion: reduce)')
+    const sync = () => useStore.getState().setSystemReduceMotion(query.matches)
+    sync()
+    query.addEventListener('change', sync)
+    return () => query.removeEventListener('change', sync)
+  }, [])
+
+  useEffect(() => {
+    if (!panelOpen) suspendAudioContextSoon()
+  }, [panelOpen])
+
+  useEffect(() => {
+    applyTheme(resolveTheme(themeMode, systemDark, edge.platform), IS_DARWIN && !!vibrancy)
+  }, [themeMode, systemDark, vibrancy])
+
   // Apply theme whenever settings change.
   useEffect(() => {
-    applyReduceMotion(settings.reduceMotion)
-    const scale = settings.fontSizeScale ?? 1.0
+    applyReduceMotion(reduceMotion)
+    const scale = fontSizeScale ?? 1.0
     document.documentElement.style.setProperty('--font-scale', String(scale))
-  }, [settings.reduceMotion, settings.fontSizeScale])
+  }, [reduceMotion, fontSizeScale])
 
   if (!hydrated) {
     return <div className="root" />

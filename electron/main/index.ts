@@ -10,25 +10,56 @@
  */
 import { app, BrowserWindow, protocol, session } from 'electron'
 import { APP_CONFIG, runtime } from './config'
-import { ensureDirs, PATHS } from '../store/paths'
-import { createWindow, getMainWindow, setInteractive, markExplicitOpen, setVisible, startCursorPoll, stopCursorPoll, stopHeartbeat, setHotZoneWidth, registerTaskbarCreatedListener } from './window'
-import { createTray, registerIncognitoApplier, refreshTray } from './tray'
+import { ensureDirs, PATHS, getUnpackagedTempDir } from '../store/paths'
+import { createWindow, getMainWindow, setInteractive, markExplicitOpen, setVisible, startCursorPoll, stopCursorPoll, stopHeartbeat, setHotZoneWidth, registerTaskbarCreatedListener, registerMacLockScreenHooks, syncMacEscapeCapture, registerPanelStateIpc, registerPanelDragIpc } from './window'
+import { createTray, registerIncognitoApplier, refreshTray, openPanelFromShell } from './tray'
 import { registerIpc, registerSendListeners } from './ipc'
 import { reconcileLaunchAtLoginOnStartup } from './loginItems'
 import { isStoreBuild, shouldStartHidden } from './config'
 import { prewarmDragIcons } from './drag'
-import { initState, getWatcher, loadSettings, saveSettings, pushState, stopStateTimers, getStore, addScreenshotToHistory } from './state'
-import { initAutoUpdater } from './updater'
+import { initState, getWatcher, loadSettings, saveSettings, pushState, stopStateTimers, getStore, addScreenshotToHistory, setImageAddedListener } from './state'
+import { initAutoUpdater, shutdownMacUpdates } from './updater'
+import { URL_SCHEME, parseEdgeDropUrl, type UrlCommand } from './urlScheme'
 import { startScreenshotWatcher, stopScreenshotWatcher } from './macScreenshots'
 import { createOnboardingWindow } from './onboardingWindow'
 import { installMacAppMenu } from './macAppMenu'
 import { startFullscreenMonitor, stopFullscreenMonitor, triggerFullscreenCheck } from './fullscreen'
 import { flushStagedTempRegistry } from './stagedTemp'
-import { extname, normalize } from 'node:path'
-import { existsSync, createReadStream } from 'node:fs'
+import { stopImageTextRecognition, wakeImageTextRecognition } from './ocr'
+import { closeQuickLook } from './quickLook'
+import { defaultToggleHotkey } from '../../shared/types'
+import { extname, normalize, join } from 'node:path'
+import { existsSync, createReadStream, mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import koffi from 'koffi'
+import { pasteboardChangeCount } from './macPasteboard'
+import { collectItemFilePaths, isServableLocalPath } from './edgelocalAccess'
 import { createHash } from 'node:crypto'
 import { resolveStoredImage, resolveEmojiAsset, emojiAssetDir } from './imageProtocol'
 import { getThumbnailPayloadAsync, thumbnailCacheControl, isMacHeicPath, getHeicPreviewPng } from './thumbnailCache'
+
+const smokeTestRun = process.platform === 'darwin' && process.argv.includes('--smoke-test')
+
+function runSmokeTest(): void {
+  let exitCode = 1
+  let profileDir: string | null = null
+  try {
+    profileDir = mkdtempSync(join(tmpdir(), 'edge-drop-smoke-'))
+    app.setPath('userData', profileDir)
+    const changeCount = pasteboardChangeCount()
+    const ok = Number.isInteger(changeCount) && changeCount >= 0
+    process.stdout.write(`${JSON.stringify({ smokeTest: true, ok, changeCount, koffi: koffi.version, arch: process.arch, version: app.getVersion() })}\n`)
+    exitCode = ok ? 0 : 1
+  } catch (err) {
+    process.stdout.write(`${JSON.stringify({ smokeTest: true, ok: false, error: err instanceof Error ? err.message : String(err) })}\n`)
+  }
+  if (profileDir) {
+    try { rmSync(profileDir, { recursive: true, force: true }) } catch { /* ignore */ }
+  }
+  app.exit(exitCode)
+}
+
+if (smokeTestRun) runSmokeTest()
 
 // Edge-Drop renders a small, mostly static transparent panel. Chromium's GPU
 // process costs substantially more memory (~150–250 MB) than the iGPU compositing
@@ -48,17 +79,62 @@ app.enableSandbox()
 app.commandLine.appendSwitch('js-flags', '--max-old-space-size=512 --expose-gc')
 
 // ---- single instance -------------------------------------------------------
-const gotLock = app.requestSingleInstanceLock()
+const gotLock = smokeTestRun || app.requestSingleInstanceLock()
 if (!gotLock) {
   app.quit()
 } else {
   app.on('second-instance', () => {
     // If a second copy launches, just reveal the existing panel.
+    if (process.platform === 'darwin') {
+      openPanelFromShell()
+      return
+    }
     setVisible(true)
     getMainWindow()?.focus()
   })
   app.on('browser-window-blur', () => {
     triggerFullscreenCheck()
+  })
+}
+
+let pendingUrlCommand: UrlCommand | null = null
+let urlCommandsReady = false
+
+function runUrlCommand(command: UrlCommand): void {
+  if (runtime.quitting) return
+  console.log(`[Main] URL command ${command.action}`)
+  switch (command.action) {
+    case 'toggle':
+      setVisible(true)
+      markExplicitOpen()
+      pushState.togglePanel(undefined, { source: 'url' })
+      return
+    case 'open':
+      openPanelFromShell('url')
+      return
+    case 'search':
+      openPanelFromShell('url')
+      pushState.search(command.query)
+  }
+}
+
+function markUrlCommandsReady(): void {
+  urlCommandsReady = true
+  const command = pendingUrlCommand
+  pendingUrlCommand = null
+  if (command) setTimeout(() => runUrlCommand(command), 300)
+}
+
+if (process.platform === 'darwin' && !smokeTestRun) {
+  app.on('open-url', (event, url) => {
+    event.preventDefault()
+    const command = parseEdgeDropUrl(url)
+    if (!command) {
+      console.warn('[Main] Ignored an unsupported edgedrop:// URL')
+      return
+    }
+    if (urlCommandsReady) runUrlCommand(command)
+    else pendingUrlCommand = command
   })
 }
 
@@ -73,6 +149,9 @@ protocol.registerSchemesAsPrivileged([
 ])
 
 // ---- app lifecycle ---------------------------------------------------------
+const MAC_QUIT_WATCHDOG_MS = 3_000
+let quitWatchdog: ReturnType<typeof setTimeout> | null = null
+
 app.on('before-quit', () => {
   runtime.quitting = true
   stopCursorPoll()
@@ -87,13 +166,23 @@ app.on('before-quit', () => {
   try {
     flushStagedTempRegistry()
   } catch { /* ignore */ }
+  if (process.platform === 'darwin') {
+    shutdownMacUpdates()
+    stopImageTextRecognition()
+    closeQuickLook()
+  }
   try {
     const { globalShortcut } = require('electron')
     globalShortcut.unregisterAll()
   } catch { /* ignore */ }
+  if (process.platform === 'darwin' && !quitWatchdog) {
+    quitWatchdog = setTimeout(() => app.exit(0), MAC_QUIT_WATCHDOG_MS)
+    quitWatchdog.unref()
+  }
 })
 
 app.whenReady().then(() => {
+  if (smokeTestRun) return
   if (process.platform === 'darwin') { try { app.dock?.hide() } catch { /* ignore */ } }
   installMacAppMenu()
   // GitHub NSIS needs an explicit AUMID. Store packages already have one from
@@ -123,8 +212,11 @@ app.whenReady().then(() => {
   // Register global shortcut to toggle panel
   registerGlobalHotkey()
   registerIpc()
+  registerPanelStateIpc()
+  registerPanelDragIpc()
   registerSendListeners()
   initState()
+  registerMacLockScreenHooks()
   prewarmDragIcons()
 
   // Reflect settings immediately.
@@ -154,6 +246,19 @@ app.whenReady().then(() => {
   pushState.settings(settings)
   initAutoUpdater()
   if (process.platform === 'darwin') startScreenshotWatcher(addScreenshotToHistory, () => loadSettings().captureScreenshots !== false)
+  if (process.platform === 'darwin') setImageAddedListener(wakeImageTextRecognition)
+  if (process.platform === 'darwin') {
+    if (app.isPackaged && app.isInApplicationsFolder()) {
+      try {
+        app.setAsDefaultProtocolClient(URL_SCHEME)
+      } catch (err) {
+        console.error('[Main] Failed to register the edgedrop:// URL scheme:', err)
+      }
+    }
+    const contents = getMainWindow()?.webContents
+    if (contents && !contents.isDestroyed() && contents.isLoadingMainFrame()) contents.once('did-finish-load', markUrlCommandsReady)
+    else markUrlCommandsReady()
+  }
 
   // Keep the tray checkmarks in sync after settings change from the UI.
   // (Tray menu is rebuilt on each open, so no extra wiring is needed here.)
@@ -164,8 +269,21 @@ app.on('window-all-closed', () => {
 })
 
 app.on('activate', () => {
-  if (BrowserWindow.getAllWindows().length === 0) createWindow()
+  if (smokeTestRun) return
+  if (BrowserWindow.getAllWindows().length === 0) {
+    createWindow()
+    return
+  }
+  if (process.platform === 'darwin') openPanelFromShell()
 })
+
+function canServeLocalPath(filePath: string): boolean {
+  if (process.platform !== 'darwin') return true
+  return isServableLocalPath(filePath, {
+    itemPaths: collectItemFilePaths(getStore().list()),
+    roots: [PATHS.imagesDir(), PATHS.thumbnailsDir(), PATHS.tempDir(), getUnpackagedTempDir()]
+  })
+}
 
 // ---- image protocol handler ------------------------------------------------
 function registerImageProtocol(): void {
@@ -201,6 +319,7 @@ function registerImageProtocol(): void {
           ? normalize(decodeURIComponent(rawTarget.slice('file/'.length)))
           : resolveStoredImage(PATHS.imagesDir(), rawTarget)?.filePath
 
+        if (isFileThumb && filePath && !canServeLocalPath(filePath)) return new Response('Forbidden', { status: 403 })
         if (!filePath || !existsSync(filePath)) return new Response('Not found', { status: 404 })
         return createThumbnailResponse(filePath, !isFileThumb, request)
       }
@@ -209,6 +328,7 @@ function registerImageProtocol(): void {
       if (request.url.startsWith(`${APP_CONFIG.imageProtocol}://file/`)) {
         const rawPath = request.url.slice(`${APP_CONFIG.imageProtocol}://file/`.length)
         const filePath = normalize(decodeURIComponent(rawPath))
+        if (!canServeLocalPath(filePath)) return new Response('Forbidden', { status: 403 })
         if (existsSync(filePath)) {
           if (isMacHeicPath(filePath)) {
             const png = await getHeicPreviewPng(filePath)
@@ -311,36 +431,49 @@ async function createThumbnailResponse(filePath: string, isStoredCapture: boolea
 void setInteractive
 
 let _lastHotkeyToggleTime = 0
+let _registeredToggleHotkey: string | null = null
+
+export function onToggleHotkey(): void {
+  if (runtime.quitting) return
+  const now = Date.now()
+  if (now - _lastHotkeyToggleTime < 500) return
+  _lastHotkeyToggleTime = now
+  markExplicitOpen()
+  pushState.togglePanel(undefined, { source: 'hotkey' })
+}
 
 export function registerGlobalHotkey(targetHotkey?: string): boolean {
   try {
     const { globalShortcut } = require('electron')
-    globalShortcut.unregisterAll()
     const settings = loadSettings()
-    const hotkey = targetHotkey || settings.toggleHotkey || 'Alt+C'
+    const fallback = defaultToggleHotkey(process.platform === 'darwin')
+    const hotkey = targetHotkey || settings.toggleHotkey || fallback
+    if (process.platform === 'darwin') {
+      for (const accelerator of new Set([_registeredToggleHotkey, hotkey])) {
+        if (!accelerator) continue
+        try {
+          if (globalShortcut.isRegistered(accelerator)) globalShortcut.unregister(accelerator)
+        } catch { /* ignore */ }
+      }
+    } else {
+      globalShortcut.unregisterAll()
+    }
+    _registeredToggleHotkey = null
 
-    const success = globalShortcut.register(hotkey, () => {
-      if (runtime.quitting) return
-      const now = Date.now()
-      if (now - _lastHotkeyToggleTime < 500) return
-      _lastHotkeyToggleTime = now
-      markExplicitOpen()
-      pushState.togglePanel()
-    })
+    const success = globalShortcut.register(hotkey, onToggleHotkey)
+    if (success) _registeredToggleHotkey = hotkey
 
     console.log(`[Main] global hotkey ${hotkey} registered=${success}`)
-    if (!success && hotkey !== 'Alt+C') {
-      console.warn(`[Main] Failed to register global shortcut ${hotkey}, falling back to Alt+C`)
-      globalShortcut.register('Alt+C', () => {
-        if (runtime.quitting) return
-        const now = Date.now()
-        if (now - _lastHotkeyToggleTime < 500) return
-        _lastHotkeyToggleTime = now
-        markExplicitOpen()
-        pushState.togglePanel()
-      })
+    if (!success && hotkey !== fallback) {
+      console.warn(`[Main] Failed to register global shortcut ${hotkey}, falling back to ${fallback}`)
+      try {
+        if (globalShortcut.isRegistered(fallback)) globalShortcut.unregister(fallback)
+      } catch { /* ignore */ }
+      if (globalShortcut.register(fallback, onToggleHotkey)) _registeredToggleHotkey = fallback
+      syncMacEscapeCapture()
       return false
     }
+    syncMacEscapeCapture()
     return success
   } catch (err) {
     console.error('[Main] Failed to register global shortcut:', err)

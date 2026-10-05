@@ -1,4 +1,4 @@
-import { useStore } from '../store/appStore'
+import { useStore, selectReduceMotion } from '../store/appStore'
 import RubberSegment from './RubberSegment'
 import { GearIcon, CloseIcon, InfoIcon, ClockIcon, TypeIcon, LinkIcon, ImageIcon, FilesIcon, PaletteIcon, EmojiSmileIcon } from './icons'
 import { playButtonClickSound } from '../lib/soundEffects'
@@ -9,7 +9,11 @@ import { EmojiCategoryBar } from './EmojiCategoryBar'
 
 import { useTranslation } from '../i18n'
 import { ClearMenu } from './ClearMenu'
+import { QueueChip } from './QueueChip'
+import { SelectionBar } from './SelectionBar'
 import type { ClipboardItemDto, TypeFilter } from '../../shared/types'
+import { IS_DARWIN } from '../lib/edge'
+import { usePanelDragHandle } from '../hooks/usePanelDrag'
 
 export interface HeaderProps {
   isHorizontal?: boolean
@@ -51,6 +55,7 @@ export function Header({ isHorizontal = false, itemCount, clearProps }: HeaderPr
   const setTypeFilter = useStore((s) => s.setTypeFilter)
   const emojiOpen = useStore((s) => s.emojiOpen)
   const setEmojiOpen = useStore((s) => s.setEmojiOpen)
+  const selecting = useStore((s) => IS_DARWIN && s.selection.ids.length > 0) && !settingsOpen && !emojiOpen
 
   const FILTERS: {
     id: import('../../shared/types').TypeFilter | 'emoji'
@@ -70,12 +75,14 @@ export function Header({ isHorizontal = false, itemCount, clearProps }: HeaderPr
   const filterSlotSize = isHorizontal ? 26 : 24
   const filterTrackHeight = isHorizontal ? 30 : 28
   const filterIconSize = isHorizontal ? 14 : 13
-  const reduceMotion = !!settings.reduceMotion
-  const headerFade = `opacity ${reduceMotion ? '0.01s' : '0.16s'} ease`
+  const reduceMotion = useStore(selectReduceMotion)
+  const headerFade = IS_DARWIN ? 'none' : `opacity ${reduceMotion ? '0.01s' : '0.16s'} ease`
+  const onPanelDragPointerDown = usePanelDragHandle()
 
   return (
     <div
       className={`header${isHorizontal ? ' header-horizontal' : ''}`}
+      onPointerDown={onPanelDragPointerDown}
       style={{
         display: 'flex',
         justifyContent: 'space-between',
@@ -91,7 +98,7 @@ export function Header({ isHorizontal = false, itemCount, clearProps }: HeaderPr
       <div
         style={{
           display: 'grid',
-          gridTemplate: '1fr / 1fr',
+          gridTemplate: '1fr / minmax(0, 1fr)',
           alignItems: 'center',
           minWidth: 0,
           flex: 1,
@@ -101,7 +108,7 @@ export function Header({ isHorizontal = false, itemCount, clearProps }: HeaderPr
       >
         <div
           className="filter-segmented-track"
-          aria-hidden={settingsOpen}
+          aria-hidden={settingsOpen || selecting}
           style={{
             gridArea: '1 / 1 / 2 / 2',
             position: 'relative',
@@ -111,15 +118,17 @@ export function Header({ isHorizontal = false, itemCount, clearProps }: HeaderPr
             border: 'none',
             borderRadius: 999,
             padding: 0,
-            marginLeft: 0,
+            marginInlineStart: 0,
             maxWidth: '100%',
             overflow: 'visible',
-            opacity: settingsOpen ? 0 : 1,
-            pointerEvents: settingsOpen ? 'none' : 'auto',
+            '--filter-slots': FILTERS.length,
+            opacity: settingsOpen || selecting ? 0 : 1,
+            pointerEvents: settingsOpen || selecting ? 'none' : 'auto',
             transition: headerFade
-          }}
+          } as React.CSSProperties}
         >
           <RubberSegment
+            className="header-filters"
             items={FILTERS.map((f) => ({
               value: f.id,
               label: f.label,
@@ -135,10 +144,10 @@ export function Header({ isHorizontal = false, itemCount, clearProps }: HeaderPr
             onHoverItem={(val) => {
               if (val === 'emoji') void loadEmojiCatalog()
             }}
-            trackColor="#141414"
-            thumbColor="#ffffff"
-            textColor="rgba(255, 255, 255, 0.72)"
-            activeTextColor="#000000"
+            trackColor="var(--bg-2)"
+            thumbColor="var(--surface-inverse)"
+            textColor="rgb(var(--ink) / max(0.72, var(--text-alpha-floor)))"
+            activeTextColor="var(--on-inverse)"
             size="custom"
             height={filterTrackHeight}
             minWidth={filterSlotSize}
@@ -149,10 +158,15 @@ export function Header({ isHorizontal = false, itemCount, clearProps }: HeaderPr
             squash={2}
             glide={60}
             draggable={true}
-            tabIndex={settingsOpen ? -1 : undefined}
+            tabIndex={settingsOpen || selecting ? -1 : undefined}
             aria-label={t('filters.title') || 'Filters'}
           />
         </div>
+        {selecting && (
+          <div style={{ gridArea: '1 / 1 / 2 / 2', minWidth: 0, display: 'flex', alignItems: 'center' }}>
+            <SelectionBar isHorizontal={isHorizontal} />
+          </div>
+        )}
         {isHorizontal ? (
           <div
             aria-hidden={!settingsOpen}
@@ -170,10 +184,10 @@ export function Header({ isHorizontal = false, itemCount, clearProps }: HeaderPr
               style={{
                 fontSize: 12,
                 fontWeight: 700,
-                color: '#ffffff',
+                color: 'var(--text-primary)',
                 letterSpacing: '0.04em',
                 textTransform: 'uppercase',
-                marginRight: 2
+                marginInlineEnd: 2
               }}
             >
               {t('header.settings')}
@@ -208,9 +222,9 @@ export function Header({ isHorizontal = false, itemCount, clearProps }: HeaderPr
               gridArea: '1 / 1 / 2 / 2',
               fontSize: 13,
               fontWeight: 600,
-              color: '#8e8e93',
+              color: 'var(--text-muted)',
               letterSpacing: '0.01em',
-              paddingLeft: 0,
+              paddingInlineStart: 0,
               whiteSpace: 'nowrap',
               overflow: 'hidden',
               textOverflow: 'ellipsis',
@@ -236,9 +250,10 @@ export function Header({ isHorizontal = false, itemCount, clearProps }: HeaderPr
           <EmojiCategoryBar isHorizontal={true} />
         </div>
       )}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, paddingRight: 2, position: 'relative', zIndex: 260 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, paddingInlineEnd: 2, position: 'relative', zIndex: 260 }}>
+        {!settingsOpen && <QueueChip compact={!isHorizontal} />}
         {isHorizontal && !settingsOpen && itemCount != null && (
-          <div className="footer-capsule" style={{ marginRight: 2 }}>
+          <div className="footer-capsule" style={{ marginInlineEnd: 2 }}>
             <span className="footer-capsule-count" title={`${itemCount}`}>
               {itemCount}
             </span>
@@ -252,12 +267,13 @@ export function Header({ isHorizontal = false, itemCount, clearProps }: HeaderPr
             type="button"
             className="icon-btn"
             title={t('header.whatsNew')}
+            aria-label={t('header.whatsNew')}
             onClick={() => {
               playButtonClickSound()
               handleOpenChangelog()
             }}
             style={{
-              color: 'rgba(255, 255, 255, 0.75)',
+              color: 'rgb(var(--ink) / max(0.75, var(--text-alpha-floor)))',
               background: 'transparent',
               border: 'none',
               boxShadow: 'none',
@@ -278,13 +294,13 @@ export function Header({ isHorizontal = false, itemCount, clearProps }: HeaderPr
                 style={{
                   position: 'absolute',
                   top: 6,
-                  right: 6,
+                  insetInlineEnd: 6,
                   width: 6,
                   height: 6,
                   borderRadius: '50%',
-                  backgroundColor: '#ffffff',
-                  boxShadow: '0 0 6px rgba(255, 255, 255, 0.6)',
-                  border: '1.5px solid #000000',
+                  backgroundColor: 'var(--text-primary)',
+                  boxShadow: '0 0 6px rgb(var(--ink) / 0.6)',
+                  border: '1.5px solid var(--badge-ring)',
                   pointerEvents: 'none'
                 }}
               />
@@ -296,6 +312,7 @@ export function Header({ isHorizontal = false, itemCount, clearProps }: HeaderPr
           type="button"
           className={`icon-btn${settingsOpen ? ' active' : ''}`}
           title={settingsOpen ? t('header.close') : t('header.settings')}
+          aria-label={settingsOpen ? t('header.close') : t('header.settings')}
           onClick={() => {
             playButtonClickSound()
             if (settingsOpen) {
@@ -315,7 +332,7 @@ export function Header({ isHorizontal = false, itemCount, clearProps }: HeaderPr
             }
           }}
           style={{
-            color: '#ffffff',
+            color: 'var(--text-primary)',
             background: 'transparent',
             border: 'none',
             boxShadow: 'none',
@@ -361,12 +378,12 @@ export function Header({ isHorizontal = false, itemCount, clearProps }: HeaderPr
               style={{
                 position: 'absolute',
                 top: 6,
-                right: 6,
+                insetInlineEnd: 6,
                 width: 6,
                 height: 6,
                 borderRadius: '50%',
                 backgroundColor: '#30d158',
-                border: '1.5px solid #000000',
+                border: '1.5px solid var(--badge-ring)',
                 boxShadow: '0 0 8px rgba(48, 209, 88, 0.7)',
                 pointerEvents: 'none'
               }}

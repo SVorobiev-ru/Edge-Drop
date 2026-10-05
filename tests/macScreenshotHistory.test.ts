@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import type { ItemData } from '../shared/types'
+import { restorePlatform, setPlatform } from './helpers/platform'
 
 type CaptureHandler = (data: ItemData, png?: Buffer) => void
 
@@ -17,12 +18,8 @@ const mocks = vi.hoisted(() => ({
   nativeChangeCount: false
 }))
 
-vi.mock('electron', () => ({
-  app: {
-    isPackaged: false,
-    getAppPath: () => join(mocks.userData, 'app'),
-    getPath: (name: string) => (name === 'userData' ? mocks.userData : join(mocks.userData, name))
-  },
+vi.mock('electron', async () => ({
+  app: (await import('./helpers/electronMock')).userDataApp(() => mocks.userData),
   BrowserWindow: {
     getAllWindows: () => [
       { isDestroyed: () => false, webContents: { isDestroyed: () => false, send: (...args: unknown[]) => mocks.send(...args) } }
@@ -36,7 +33,7 @@ vi.mock('electron', () => ({
     clear: () => mocks.clipboardClear(),
     writeImage: (img: unknown) => mocks.clipboardWriteImage(img)
   },
-  powerMonitor: { on: vi.fn(), removeAllListeners: vi.fn() },
+  powerMonitor: { on: vi.fn(), removeListener: vi.fn() },
   safeStorage: { isEncryptionAvailable: () => false }
 }))
 
@@ -73,12 +70,6 @@ vi.mock('../electron/clipboard/ClipboardWatcher', async (importOriginal) => {
   return { ...actual, ClipboardWatcher: RecordingWatcher }
 })
 
-const realPlatform = process.platform
-
-function setPlatform(value: string): void {
-  Object.defineProperty(process, 'platform', { value, configurable: true })
-}
-
 async function loadState(platform: string): Promise<typeof import('../electron/main/state')> {
   setPlatform(platform)
   vi.resetModules()
@@ -109,12 +100,12 @@ describe('addScreenshotToHistory', () => {
     state?.stopStateTimers()
     state = null
     vi.restoreAllMocks()
-    setPlatform(realPlatform)
+    restorePlatform()
     rmSync(mocks.userData, { recursive: true, force: true })
   })
 
   afterAll(() => {
-    setPlatform(realPlatform)
+    restorePlatform()
   })
 
   it('adds the screenshot to history as a screenshot image and pushes the list', async () => {
@@ -206,7 +197,7 @@ describe('addScreenshotToHistory', () => {
 
 describe('clipboard poll interval', () => {
   afterEach(() => {
-    setPlatform(realPlatform)
+    restorePlatform()
   })
 
   beforeEach(() => {

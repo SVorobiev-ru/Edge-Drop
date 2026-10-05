@@ -1,6 +1,8 @@
 import { motion, AnimatePresence } from 'framer-motion'
 import { useEffect, useRef, useState, type CSSProperties } from 'react'
+import { createPortal } from 'react-dom'
 import { TrashIcon } from './icons'
+import { useAnchoredMenu, useMenuDismiss } from '../hooks/useAnchoredMenu'
 import { playButtonClickSound } from '../lib/soundEffects'
 import { useTranslation } from '../i18n'
 import type { ClipboardItemDto } from '../../shared/types'
@@ -32,12 +34,12 @@ const menuItemStyle: CSSProperties = {
   padding: '7px 10px',
   borderRadius: 7,
   background: 'transparent',
-  color: 'rgba(255, 255, 255, 0.85)',
+  color: 'rgb(var(--ink) / max(0.85, var(--text-alpha-floor)))',
   fontSize: 12,
   fontWeight: 400,
   border: 'none',
   cursor: 'pointer',
-  textAlign: 'left',
+  textAlign: 'start',
   transition: 'background 0.12s ease'
 }
 
@@ -53,6 +55,7 @@ export function ClearMenu({
   const [open, setOpen] = useState(false)
   const [confirmAll, setConfirmAll] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
 
   // Force-close menu when panel slides closed
   useEffect(() => {
@@ -62,15 +65,7 @@ export function ClearMenu({
     }
   }, [panelOpen])
 
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) {
-        setOpen(false)
-      }
-    }
-    if (open) window.addEventListener('mousedown', handleClickOutside)
-    return () => window.removeEventListener('mousedown', handleClickOutside)
-  }, [open])
+  useMenuDismiss(open, [ref, menuRef], () => setOpen(false))
 
   // Re-arm "Clear all" confirmation whenever menu closes
   useEffect(() => {
@@ -97,10 +92,15 @@ export function ClearMenu({
     onClearAll()
   }
 
-  const isMenuDown = menuDirection === 'down'
+  const { style: placedStyle, direction, width: placedWidth } = useAnchoredMenu(open, ref, menuRef, {
+    prefer: menuDirection,
+    align: 'end',
+    onLost: () => setOpen(false)
+  })
+  const isMenuDown = direction === 'down'
 
   return (
-    <div ref={ref} style={{ position: 'relative', zIndex: open ? 350 : 'auto' }}>
+    <div ref={ref} style={{ position: 'relative' }}>
       <button
         className={`text-btn${open ? ' active' : ''}`}
         onClick={() => {
@@ -116,25 +116,25 @@ export function ClearMenu({
         <span>{t('item.clear')}</span>
       </button>
 
-      <AnimatePresence>
+      {createPortal(<AnimatePresence>
         {open && (
           <motion.div
+            ref={menuRef}
             initial={{ opacity: 0, y: isMenuDown ? -6 : 6, scale: 0.98 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: isMenuDown ? -6 : 6, scale: 0.98 }}
             transition={{ duration: 0.15, ease: 'easeOut' }}
             style={{
-              position: 'absolute',
-              top: isMenuDown ? 'calc(100% + 6px)' : undefined,
-              bottom: isMenuDown ? undefined : 'calc(100% + 6px)',
-              right: 0,
-              minWidth: 190,
-              background: '#141414',
-              border: '1px solid rgba(255, 255, 255, 0.08)',
+              ...placedStyle,
+              minWidth: Math.min(190, placedWidth ?? 190),
+              boxSizing: 'border-box',
+              background: 'var(--bg-flyout)',
+              border: '1px solid rgb(var(--ink) / 0.08)',
               borderRadius: 16,
               padding: 4,
               boxShadow: '0 12px 32px rgba(0, 0, 0, 0.75), 0 0 0 1px rgba(0, 0, 0, 0.5)',
-              zIndex: 350
+              zIndex: 10000,
+              scrollbarWidth: 'none'
             }}
           >
             {WINDOWS.map((w) => (
@@ -143,31 +143,31 @@ export function ClearMenu({
                 type="button"
                 onClick={() => clearWindow(w.hours)}
                 style={menuItemStyle}
-                onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255, 255, 255, 0.07)' }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = 'rgb(var(--ink) / 0.07)' }}
                 onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
               >
                 {t(`item.clearLast${w.key}` as any)}
               </button>
             ))}
 
-            <div style={{ height: 1, background: 'rgba(255, 255, 255, 0.1)', margin: '4px 2px' }} />
+            <div style={{ height: 1, background: 'rgb(var(--ink) / 0.1)', margin: '4px 2px' }} />
 
             <button
               type="button"
               onClick={handleAllClick}
               style={{
                 ...menuItemStyle,
-                color: confirmAll ? '#ff5252' : 'rgba(255, 255, 255, 0.85)',
+                color: confirmAll ? '#ff5252' : 'rgb(var(--ink) / max(0.85, var(--text-alpha-floor)))',
                 fontWeight: confirmAll ? 600 : 400
               }}
-              onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255, 255, 255, 0.07)' }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = 'rgb(var(--ink) / 0.07)' }}
               onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
             >
               {confirmAll ? t('item.clearAllConfirm') : t('item.clearAll')}
             </button>
           </motion.div>
         )}
-      </AnimatePresence>
+      </AnimatePresence>, document.body)}
     </div>
   )
 }

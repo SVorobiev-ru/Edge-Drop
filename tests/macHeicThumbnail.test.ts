@@ -1,4 +1,5 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { restorePlatform, setPlatform } from './helpers/platform'
 
 type ExecCallback = (err: Error | null) => void
 
@@ -40,12 +41,7 @@ vi.mock('../electron/store/paths', () => ({
 
 import { clearThumbnailCache, getHeicPreviewPng, getThumbnailPayload, getThumbnailPayloadAsync, isMacHeicPath } from '../electron/main/thumbnailCache'
 
-const realPlatform = process.platform
 const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47])
-
-function setPlatform(value: string): void {
-  Object.defineProperty(process, 'platform', { value, configurable: true })
-}
 
 function sipsCalls(): unknown[][] {
   return mocks.execFile.mock.calls.filter((c) => c[0] === 'sips')
@@ -77,11 +73,11 @@ describe('HEIC thumbnails', () => {
 
   afterEach(() => {
     vi.restoreAllMocks()
-    setPlatform(realPlatform)
+    restorePlatform()
   })
 
   afterAll(() => {
-    setPlatform(realPlatform)
+    restorePlatform()
   })
 
   it('nativeImage alone cannot produce a HEIC thumbnail', () => {

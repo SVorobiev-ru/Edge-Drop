@@ -1,10 +1,12 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { restorePlatform, setPlatform } from './helpers/platform'
 
 const mocks = vi.hoisted(() => ({
   setLoginItemSettings: vi.fn(),
   getLoginItemSettings: vi.fn(),
   execFileSync: vi.fn(),
-  execFile: vi.fn()
+  execFile: vi.fn(),
+  release: '25.5.0'
 }))
 
 vi.mock('electron', () => ({
@@ -22,6 +24,11 @@ vi.mock('../electron/store/settings', () => ({
   saveSettings: (patch: Record<string, unknown>) => ({ launchAtLogin: true, ...patch })
 }))
 
+vi.mock('node:os', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:os')>()
+  return { ...actual, release: () => mocks.release, default: { ...actual, release: () => mocks.release } }
+})
+
 vi.mock('node:child_process', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:child_process')>()
   return {
@@ -31,17 +38,12 @@ vi.mock('node:child_process', async (importOriginal) => {
   }
 })
 
-import { applyGithubLaunchAtLogin, applyLaunchAtLogin, readGithubLaunchAtLogin } from '../electron/main/loginItems'
-
-const realPlatform = process.platform
-
-function setPlatform(value: string): void {
-  Object.defineProperty(process, 'platform', { value, configurable: true })
-}
+import { applyGithubLaunchAtLogin, applyLaunchAtLogin, macSupportsMainAppService, readGithubLaunchAtLogin } from '../electron/main/loginItems'
 
 describe('macOS launch-at-login (SMAppService)', () => {
   beforeEach(() => {
     setPlatform('darwin')
+    mocks.release = '25.5.0'
     mocks.setLoginItemSettings.mockReset()
     mocks.getLoginItemSettings.mockReset()
     mocks.getLoginItemSettings.mockReturnValue({ openAtLogin: false })
@@ -52,11 +54,11 @@ describe('macOS launch-at-login (SMAppService)', () => {
 
   afterEach(() => {
     vi.restoreAllMocks()
-    setPlatform(realPlatform)
+    restorePlatform()
   })
 
   afterAll(() => {
-    setPlatform(realPlatform)
+    restorePlatform()
   })
 
   describe('readGithubLaunchAtLogin', () => {
@@ -130,6 +132,13 @@ describe('macOS launch-at-login (SMAppService)', () => {
       })
       applyGithubLaunchAtLogin(true)
       expect(order).toEqual(['set', 'get'])
+    })
+
+    it('reads back through the main app service on macOS 13+', () => {
+      mocks.getLoginItemSettings.mockReturnValue({ openAtLogin: true, status: 'enabled' })
+      applyGithubLaunchAtLogin(true)
+      expect(mocks.getLoginItemSettings).toHaveBeenCalledTimes(1)
+      expect(mocks.getLoginItemSettings).toHaveBeenCalledWith({ type: 'mainAppService' })
     })
 
     it('is ok when the read-back state matches enable', () => {
@@ -210,6 +219,60 @@ describe('macOS launch-at-login (SMAppService)', () => {
     it('reports ok:true through applyLaunchAtLogin when disabling is confirmed', async () => {
       mocks.getLoginItemSettings.mockReturnValue({ openAtLogin: false, status: 'not-registered' })
       expect(await applyLaunchAtLogin(false)).toEqual({ enabled: false, blockedByUser: false, ok: true })
+    })
+  })
+
+  describe('login item API by macOS version', () => {
+    it.each([
+      ['20.6.0', false],
+      ['21.6.0', false],
+      ['22.0.0', true],
+      ['23.4.0', true],
+      ['25.5.0', true],
+      ['', false],
+      ['garbage', false]
+    ])('Darwin %s supports SMAppService: %s', (osRelease, expected) => {
+      expect(macSupportsMainAppService(osRelease)).toBe(expected)
+    })
+
+    it('reads the running system by default', () => {
+      mocks.release = '21.6.0'
+      expect(macSupportsMainAppService()).toBe(false)
+      mocks.release = '24.1.0'
+      expect(macSupportsMainAppService()).toBe(true)
+    })
+
+    it('uses the legacy login item on macOS 12', () => {
+      mocks.release = '21.6.0'
+      mocks.getLoginItemSettings.mockReturnValue({ openAtLogin: true })
+      const result = applyGithubLaunchAtLogin(true)
+
+      expect(mocks.setLoginItemSettings).toHaveBeenCalledWith({ openAtLogin: true })
+      expect(mocks.getLoginItemSettings).toHaveBeenCalledWith()
+      expect(result).toEqual({ enabled: true, blockedByUser: false, ok: true })
+    })
+
+    it('turns the legacy login item off on macOS 11', () => {
+      mocks.release = '20.6.0'
+      mocks.getLoginItemSettings.mockReturnValue({ openAtLogin: false })
+      const result = applyGithubLaunchAtLogin(false)
+
+      expect(mocks.setLoginItemSettings).toHaveBeenCalledWith({ openAtLogin: false })
+      expect(result).toEqual({ enabled: false, blockedByUser: false, ok: true })
+    })
+
+    it('never reports a legacy item as blocked, even if a status leaks through', () => {
+      mocks.release = '21.6.0'
+      mocks.getLoginItemSettings.mockReturnValue({ openAtLogin: false, status: 'requires-approval' })
+      expect(readGithubLaunchAtLogin()).toEqual({ enabled: false, blockedByUser: false, ok: true })
+    })
+
+    it('reports a failed read on the legacy path', () => {
+      mocks.release = '21.6.0'
+      mocks.getLoginItemSettings.mockImplementation(() => {
+        throw new Error('boom')
+      })
+      expect(readGithubLaunchAtLogin()).toEqual({ enabled: false, blockedByUser: false, ok: false })
     })
   })
 

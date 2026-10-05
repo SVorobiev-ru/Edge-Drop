@@ -3,7 +3,7 @@ import { computeStickBounds } from '../electron/main/geometry'
 import { probeSeamAware, REST_FRAMES_REQUIRED, type SeamTickState } from '../electron/main/stickProbe'
 import { macTriggerZone, macReportedPoint, MAC_DOCK_EDGE_BAND_PX } from '../electron/main/macScreen'
 
-type Position = 'left' | 'right' | 'top'
+type Position = 'left' | 'right' | 'top' | 'bottom'
 type Rect = { x: number; y: number; width: number; height: number }
 
 const BOUNDS: Rect = { x: 0, y: 0, width: 1512, height: 982 }
@@ -26,8 +26,10 @@ function workArea(opts: { menu?: number; left?: number; right?: number; bottom?:
   }
 }
 
-function rendererWouldOpen(position: Position, point: { x: number; y: number }, displayWidth: number, hot = HOT): boolean {
+function rendererWouldOpen(position: Position, point: { x: number; y: number }, display: { width: number; height: number }, hot = HOT): boolean {
   if (position === 'top') return point.y >= -30 && point.y <= Math.max(hot, 1)
+  if (position === 'bottom') return display.height - point.y >= -30 && display.height - point.y <= Math.max(hot, 1)
+  const displayWidth = display.width
   const dist = position === 'right' ? displayWidth - point.x : point.x
   return dist >= -30 && dist <= 3
 }
@@ -66,7 +68,7 @@ class Sim {
       expanded: this.expanded,
       hotZoneWidth: this.hot
     })
-    return { seam, point, opens: rendererWouldOpen(this.position, point, this.wa.width, this.hot) }
+    return { seam, point, opens: rendererWouldOpen(this.position, point, this.wa, this.hot) }
   }
 
   rest(cursor: { x: number; y: number }, frames = REST_FRAMES_REQUIRED + 2) {
@@ -364,6 +366,41 @@ describe('left/right trigger next to a visible Dock', () => {
     let opened = false
     for (let x = rightEdge - 400; x <= BOUNDS.width - 20; x += 40) opened = sim.tick({ x, y: 500 }).opens || opened
     opened = sim.rest({ x: BOUNDS.width - 20, y: 500 }).opens || opened
+    expect(opened).toBe(false)
+  })
+})
+
+describe('bottom trigger above the Dock', () => {
+  const plainWa = workArea({ menu: MENU, left: DOCK })
+  const dockWa = workArea({ menu: MENU, bottom: DOCK })
+  const dockTop = BOUNDS.height - DOCK
+
+  it('opens at the physical bottom when the Dock is elsewhere', () => {
+    const hit = new Sim(BOUNDS, plainWa, 'bottom').rest({ x: 700, y: BOUNDS.height - 1 })
+    expect(hit.seam.armedInEdge).toBe(true)
+    expect(hit.point).toEqual({ x: 700 - DOCK, y: BOUNDS.height - 1 - MENU })
+    expect(hit.opens).toBe(true)
+    expect(new Sim(BOUNDS, plainWa, 'bottom').rest({ x: 700, y: BOUNDS.height - 10 }).opens).toBe(false)
+  })
+
+  it('widens the band above a bottom Dock and opens when resting in it', () => {
+    const zone = macTriggerZone({ bounds: BOUNDS, workArea: dockWa, stickPosition: 'bottom', hotZoneWidth: HOT })
+    expect(zone).toMatchObject({ probeArea: dockWa, dockOnEdge: true, hotZoneWidth: MAC_DOCK_EDGE_BAND_PX })
+    for (const above of [1, 5, MAC_DOCK_EDGE_BAND_PX]) {
+      const hit = new Sim(BOUNDS, dockWa, 'bottom').rest({ x: 700, y: dockTop - above })
+      expect(hit.seam.armedInEdge).toBe(true)
+      expect(hit.opens).toBe(true)
+    }
+    expect(new Sim(BOUNDS, dockWa, 'bottom').rest({ x: 700, y: dockTop - MAC_DOCK_EDGE_BAND_PX - 2 }).opens).toBe(false)
+  })
+
+  it('does not open over the Dock or on a fast pass into it', () => {
+    for (const y of [dockTop + 1, dockTop + 30, BOUNDS.height - 1]) {
+      expect(new Sim(BOUNDS, dockWa, 'bottom').rest({ x: 700, y }).opens).toBe(false)
+    }
+    const sim = new Sim(BOUNDS, dockWa, 'bottom')
+    let opened = false
+    for (let y = dockTop - 400; y <= BOUNDS.height - 1; y += 40) opened = sim.tick({ x: 700, y }).opens || opened
     expect(opened).toBe(false)
   })
 })

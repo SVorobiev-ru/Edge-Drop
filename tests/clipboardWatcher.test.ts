@@ -9,7 +9,10 @@ describe('ClipboardWatcher Re-Copy Detection & Flare Flow', () => {
   let mockItem: { kind: 'text'; text: string } | { kind: 'files'; paths: string[] } = { kind: 'text', text: 'Hello' }
   let hasFileNameW = false
 
+  const realPlatform = process.platform
+
   beforeEach(() => {
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true })
     vi.useFakeTimers()
     mockSeq = 100
     mockText = 'Hello'
@@ -31,6 +34,7 @@ describe('ClipboardWatcher Re-Copy Detection & Flare Flow', () => {
     if (watcher) watcher.stop()
     vi.useRealTimers()
     vi.restoreAllMocks()
+    Object.defineProperty(process, 'platform', { value: realPlatform, configurable: true })
   })
 
   async function startWatcher(onNew = vi.fn(), onHint = vi.fn()) {
@@ -196,6 +200,63 @@ describe('ClipboardWatcher Re-Copy Detection & Flare Flow', () => {
     expect(onNew).toHaveBeenLastCalledWith({ kind: 'files', paths: ['C:\\c.png'] })
   })
 
+  it('on darwin promotes a repeated copy of the same file once the coalesce window has passed', async () => {
+    Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true })
+    mockSeq = 1200
+    mockItem = { kind: 'files', paths: ['/Users/t/a.png'] }
+    hasFileNameW = true
+    const { onNew } = await startWatcher()
+
+    mockSeq = 1201
+    await copyAndSettle()
+    expect(onNew).toHaveBeenCalledTimes(1)
+
+    mockSeq = 1202
+    await copyAndSettle()
+    expect(onNew).toHaveBeenCalledTimes(1)
+
+    await vi.advanceTimersByTimeAsync(5000)
+    mockSeq = 1203
+    await copyAndSettle()
+    expect(onNew).toHaveBeenCalledTimes(2)
+    expect(onNew).toHaveBeenLastCalledWith({ kind: 'files', paths: ['/Users/t/a.png'] })
+  })
+
+  it('on darwin captures the same file again right after its card was deleted', async () => {
+    Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true })
+    mockSeq = 1300
+    mockItem = { kind: 'files', paths: ['/Users/t/a.png'] }
+    hasFileNameW = true
+    const { onNew } = await startWatcher()
+
+    mockSeq = 1301
+    await copyAndSettle()
+    expect(onNew).toHaveBeenCalledTimes(1)
+
+    watcher.resyncSignature()
+    await vi.advanceTimersByTimeAsync(100)
+    expect(onNew).toHaveBeenCalledTimes(1)
+
+    mockSeq = 1302
+    await copyAndSettle()
+    expect(onNew).toHaveBeenCalledTimes(2)
+  })
+
+  it('on win32 keeps the last captured file list across resyncSignature', async () => {
+    mockSeq = 1400
+    mockItem = { kind: 'files', paths: ['C:\\a.png'] }
+    hasFileNameW = true
+    const { onNew } = await startWatcher()
+
+    mockSeq = 1401
+    await copyAndSettle()
+    watcher.resyncSignature()
+    await vi.advanceTimersByTimeAsync(5000)
+    mockSeq = 1402
+    await copyAndSettle()
+    expect(onNew).toHaveBeenCalledTimes(1)
+  })
+
   it('still captures a different copy that lands inside the coalesce window', async () => {
     mockSeq = 700
     mockText = 'Alpha'
@@ -278,5 +339,39 @@ describe('ClipboardWatcher Re-Copy Detection & Flare Flow', () => {
     await vi.advanceTimersByTimeAsync(400)
 
     expect(onNew).not.toHaveBeenCalled()
+  })
+
+  it('never captures its own marked write, even after an early resume or an invalidated signature', async () => {
+    mockSeq = 1000
+    mockText = 'Copied from the shelf'
+    mockItem = { kind: 'text', text: 'Copied from the shelf' }
+    const { onNew, onHint } = await startWatcher()
+
+    mockSeq = 1001
+    watcher.noteSelfWrite()
+    await copyAndSettle()
+    expect(onNew).not.toHaveBeenCalled()
+    expect(onHint).not.toHaveBeenCalled()
+
+    watcher.invalidateSignature()
+    await copyAndSettle()
+    expect(onNew).not.toHaveBeenCalled()
+  })
+
+  it('captures a later genuine copy of the same content after a marked own write', async () => {
+    mockSeq = 1100
+    mockText = 'Same text'
+    mockItem = { kind: 'text', text: 'Same text' }
+    const { onNew } = await startWatcher()
+
+    mockSeq = 1101
+    watcher.noteSelfWrite()
+    await copyAndSettle()
+    expect(onNew).not.toHaveBeenCalled()
+
+    mockSeq = 1102
+    await copyAndSettle()
+    expect(onNew).toHaveBeenCalledTimes(1)
+    expect(onNew).toHaveBeenCalledWith({ kind: 'text', text: 'Same text' })
   })
 })

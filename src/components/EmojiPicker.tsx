@@ -1,6 +1,5 @@
 /**
  * Unicode emoji library. Glyphs are Twemoji; paste is the character itself.
- * No text field — categories + click — so the shelf never takes OS focus.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
@@ -8,6 +7,7 @@ import {
   entriesForCategory,
   hasSkinTones,
   pushRecent,
+  searchEmoji,
   skinChoices,
   unifiedToNative,
   type EmojiCatalog,
@@ -20,13 +20,16 @@ import { useStore } from '../store/appStore'
 import { playButtonClickSound } from '../lib/soundEffects'
 import { useTranslation } from '../i18n'
 import { EmojiCategoryBar } from './EmojiCategoryBar'
-import { TrashIcon } from './icons'
+import { SearchIcon, TrashIcon } from './icons'
+import { IS_DARWIN } from '../lib/edge'
+import { useInputEngagement } from '../hooks/useInputEngagement'
 
 const COLS = 7
 const ROW_H = 36
 const PASTE_GAP_MS = 180
 const TONE_POP_W = 216
 const TONE_POP_H = 44
+const NATIVE_GLYPHS = IS_DARWIN
 
 interface TonePopup {
   entry: EmojiEntry
@@ -35,7 +38,18 @@ interface TonePopup {
   place: 'above' | 'below'
 }
 
-function Glyph({ file, size = 22 }: { file: string; size?: number }) {
+function Glyph({ file, unified, size = 22 }: { file: string; unified: string; size?: number }) {
+  if (NATIVE_GLYPHS) {
+    return (
+      <span
+        className="emoji-glyph emoji-native"
+        aria-hidden="true"
+        style={{ width: size, height: size, fontSize: Math.round(size * 0.86), lineHeight: `${size}px` }}
+      >
+        {unifiedToNative(unified)}
+      </span>
+    )
+  }
   return (
     <img
       className="emoji-glyph"
@@ -70,6 +84,10 @@ export function EmojiPicker({
   const [viewW, setViewW] = useState(0)
   const [viewH, setViewH] = useState(320)
   const [tonePop, setTonePop] = useState<TonePopup | null>(null)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchIndex, setSearchIndex] = useState(0)
+  const searchRef = useRef<HTMLInputElement>(null)
+  const { engage: engageSearch, disengage: disengageSearch } = useInputEngagement(searchRef)
   const scrollerRef = useRef<HTMLDivElement>(null)
   const pickerRef = useRef<HTMLDivElement>(null)
   const lastPasteAt = useRef(0)
@@ -110,6 +128,7 @@ export function EmojiPicker({
 
   useEffect(() => {
     setTonePop(null)
+    setSearchQuery('')
     if (scrollerRef.current) scrollerRef.current.scrollTop = 0
   }, [category])
 
@@ -121,6 +140,7 @@ export function EmojiPicker({
     wasActive.current = active
     if (!justOpened) return
     setTonePop(null)
+    setSearchQuery('')
     setScrollTop(0)
     setRowBudget(3)
     if (scrollerRef.current) scrollerRef.current.scrollTop = 0
@@ -157,9 +177,11 @@ export function EmojiPicker({
     return () => ro.disconnect()
   }, [catalog, active])
 
+  const searching = searchQuery.trim().length > 0
   const items = useMemo(() => {
+    if (searching) return searchEmoji(catalog, searchQuery)
     return entriesForCategory(catalog, category, recents)
-  }, [catalog, category, recents])
+  }, [catalog, category, recents, searching, searchQuery])
 
   // Hover-intent preload: while the user aims at a category button (no
   // animation running), decode its first screen into the image cache so the
@@ -169,7 +191,7 @@ export function EmojiPicker({
   const warmedCats = useRef<Set<string>>(new Set())
   const preloadCategory = useCallback(
     (id: EmojiCategoryId) => {
-      if (id === category || !catalog) return
+      if (NATIVE_GLYPHS || id === category || !catalog) return
       if (warmedCats.current.has(id)) return
       warmedCats.current.add(id)
       try {
@@ -236,6 +258,31 @@ export function EmojiPicker({
   }, [catalog, windowRows, rowBudget])
   const effEndRow = Math.min(endRow, startRow + rowBudget)
 
+  const seenQuery = useRef(searchQuery)
+  if (seenQuery.current !== searchQuery) {
+    seenQuery.current = searchQuery
+    setSearchIndex(0)
+    setRowBudget(3)
+    setScrollTop(0)
+  }
+  useEffect(() => {
+    if (scrollerRef.current) scrollerRef.current.scrollTop = 0
+  }, [searchQuery])
+
+  const activeKey = searching ? items[Math.min(searchIndex, items.length - 1)]?.key : undefined
+
+  const moveSearchIndex = (delta: number) => {
+    if (items.length === 0) return
+    const next = Math.max(0, Math.min(items.length - 1, searchIndex + delta))
+    setSearchIndex(next)
+    const el = scrollerRef.current
+    if (!el) return
+    const row = Math.floor(next / cols)
+    const top = row * rowH
+    if (top < el.scrollTop) el.scrollTop = top
+    else if (top + rowH > el.scrollTop + el.clientHeight) el.scrollTop = top + rowH - el.clientHeight
+  }
+
   const onPaste = useCallback(
     (unified: string) => {
       const now = Date.now()
@@ -275,6 +322,52 @@ export function EmojiPicker({
     >
       {!isHorizontal && <EmojiCategoryBar isHorizontal={false} onHoverCategory={preloadCategory} />}
 
+      {IS_DARWIN && (
+        <div className="search emoji-search">
+          <SearchIcon className="search-icon" width={14} height={14} />
+          <input
+            ref={searchRef}
+            type="text"
+            value={searchQuery}
+            placeholder={t('emoji.searchPlaceholder')}
+            aria-label={t('emoji.searchPlaceholder')}
+            spellCheck={false}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            onPointerDown={engageSearch}
+            onFocus={engageSearch}
+            onBlur={disengageSearch}
+            onKeyDown={(e) => {
+              if (e.nativeEvent.isComposing || e.keyCode === 229) return
+              const rtl = document.documentElement.dir === 'rtl'
+              if (e.key === 'Escape') {
+                e.stopPropagation()
+                e.preventDefault()
+                if (searchQuery) setSearchQuery('')
+                else searchRef.current?.blur()
+                return
+              }
+              if (!searching) return
+              let delta = 0
+              if (e.key === 'ArrowRight') delta = rtl ? -1 : 1
+              else if (e.key === 'ArrowLeft') delta = rtl ? 1 : -1
+              else if (e.key === 'ArrowDown') delta = cols
+              else if (e.key === 'ArrowUp') delta = -cols
+              if (delta !== 0) {
+                e.preventDefault()
+                e.stopPropagation()
+                moveSearchIndex(delta)
+                return
+              }
+              if (e.key === 'Enter' && activeKey) {
+                e.preventDefault()
+                e.stopPropagation()
+                onPaste(activeKey)
+              }
+            }}
+          />
+        </div>
+      )}
+
       {failed ? (
         <div className="emoji-status">{t('emoji.loadFailed')}</div>
       ) : !catalog ? (
@@ -288,7 +381,7 @@ export function EmojiPicker({
           ))}
         </div>
       ) : items.length === 0 ? (
-        <div className="emoji-empty">{t('emoji.emptyRecents')}</div>
+        <div className="emoji-empty">{searching ? t('emptyState.noResultsFound') : t('emoji.emptyRecents')}</div>
       ) : (
         <div
           ref={scrollerRef}
@@ -320,9 +413,9 @@ export function EmojiPicker({
                       key={item.key}
                       type="button"
                       tabIndex={-1}
-                      className="emoji-cell"
+                      className={`emoji-cell${item.key === activeKey ? ' is-active' : ''}`}
                       data-has-skins={skinnable ? '' : undefined}
-                      title={unifiedToNative(item.key)}
+                      title={searching && item.entry.name ? item.entry.name : unifiedToNative(item.key)}
                       onClick={(e) => {
                         e.currentTarget.blur()
                         if (skinnable) {
@@ -337,7 +430,7 @@ export function EmojiPicker({
                         onPaste(item.key)
                       }}
                     >
-                      <Glyph file={item.file} size={glyphSize} />
+                      <Glyph file={item.file} unified={item.key} size={glyphSize} />
                     </button>
                   )
                 })}
@@ -348,7 +441,7 @@ export function EmojiPicker({
         </div>
       )}
 
-      {category === 'recents' && recents.length > 0 && (
+      {!searching && category === 'recents' && recents.length > 0 && (
         <div className="emoji-recents-footer">
           <button
             type="button"
@@ -387,7 +480,7 @@ export function EmojiPicker({
                 onPaste(choice.unified)
               }}
             >
-              <Glyph file={choice.file} size={24} />
+              <Glyph file={choice.file} unified={choice.unified} size={24} />
             </button>
           ))}
         </div>

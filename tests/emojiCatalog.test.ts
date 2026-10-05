@@ -7,6 +7,7 @@ import {
   isPasteableEmoji,
   pushRecent,
   resolveGlyph,
+  searchEmoji,
   skinChoices,
   unifiedToNative,
   type EmojiSourceEntry
@@ -166,5 +167,58 @@ describe('horizontal emoji picker layout calculations', () => {
     expect(calcCols(1000, true)).toBe(27)
     expect(calcCols(720, true)).toBe(19)
     expect(calcCols(1440, true)).toBe(39)
+  })
+})
+
+const searchSample: EmojiSourceEntry[] = [
+  { unified: '1F44D', name: 'THUMBS UP SIGN', short_name: '+1', short_names: ['+1', 'thumbsup'], category: 'People & Body', sort_order: 3, has_img_twitter: true, has_img_apple: true },
+  { unified: '1F600', name: 'GRINNING FACE', short_name: 'grinning', short_names: ['grinning'], category: 'Smileys & Emotion', sort_order: 1, has_img_twitter: true, has_img_apple: true },
+  { unified: '1F601', name: 'GRINNING FACE WITH SMILING EYES', short_name: 'grin', short_names: ['grin'], category: 'Smileys & Emotion', sort_order: 2, has_img_twitter: true, has_img_apple: true },
+  { unified: '1F431', name: 'CAT FACE', short_name: 'cat', short_names: ['cat'], category: 'Animals & Nature', sort_order: 4, has_img_twitter: true, has_img_apple: true },
+  { unified: '1FAE8', name: 'SHAKING FACE', short_name: 'shaking_face', short_names: ['shaking_face'], category: 'Smileys & Emotion', sort_order: 5, has_img_twitter: false, has_img_apple: true },
+  { unified: '1F977', name: 'NINJA', short_name: 'ninja', short_names: ['ninja'], category: 'People & Body', sort_order: 6, has_img_twitter: true, has_img_apple: false }
+]
+
+const keys = (list: ReturnType<typeof searchEmoji>) => list.map((it) => it.key)
+
+describe('emoji search', () => {
+  const catalog = buildCatalog(searchSample)
+
+  it('ranks an exact short name first', () => {
+    expect(keys(searchEmoji(catalog, 'grin'))).toEqual(['1F601', '1F600'])
+  })
+
+  it('matches any short name, with or without colons', () => {
+    expect(keys(searchEmoji(catalog, 'thumbsup'))).toEqual(['1F44D'])
+    expect(keys(searchEmoji(catalog, ':+1:'))).toEqual(['1F44D'])
+  })
+
+  it('matches words of the full name in any order', () => {
+    expect(keys(searchEmoji(catalog, 'face cat'))).toEqual(['1F431'])
+    expect(keys(searchEmoji(catalog, 'smiling eyes'))).toEqual(['1F601'])
+  })
+
+  it('returns nothing for an empty query or a missing catalog', () => {
+    expect(searchEmoji(catalog, '  ')).toEqual([])
+    expect(searchEmoji(null, 'cat')).toEqual([])
+    expect(searchEmoji(catalog, 'zebra')).toEqual([])
+  })
+
+  it('respects the limit', () => {
+    expect(searchEmoji(catalog, 'face', 1)).toHaveLength(1)
+  })
+})
+
+describe('glyph set per platform', () => {
+  it('uses Twemoji availability by default', () => {
+    const catalog = buildCatalog(searchSample)
+    expect(catalog.byUnified.has('1FAE8')).toBe(false)
+    expect(catalog.byUnified.has('1F977')).toBe(true)
+  })
+
+  it('uses Apple availability for native glyphs', () => {
+    const catalog = buildCatalog(searchSample, { native: true })
+    expect(catalog.byUnified.has('1FAE8')).toBe(true)
+    expect(catalog.byUnified.has('1F977')).toBe(false)
   })
 })

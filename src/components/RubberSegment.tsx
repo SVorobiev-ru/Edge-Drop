@@ -18,6 +18,8 @@ import {
   useTransform,
   type MotionValue
 } from 'framer-motion'
+import { stretchedEdges } from '../lib/rubberStretch'
+import { IS_DARWIN } from '../lib/edge'
 
 import '../styles/RubberSegment.css'
 
@@ -113,10 +115,10 @@ export default function RubberSegment<T extends string = string>({
   defaultValue,
   onChange,
   onHoverItem,
-  trackColor = '#141414',
-  thumbColor = '#ffffff',
-  textColor = 'rgba(255, 255, 255, 0.72)',
-  activeTextColor = '#000000',
+  trackColor = 'var(--bg-2)',
+  thumbColor = 'var(--surface-inverse)',
+  textColor = 'rgb(var(--ink) / max(0.72, var(--text-alpha-floor)))',
+  activeTextColor = 'var(--on-inverse)',
   size = 'md',
   height,
   minWidth,
@@ -297,10 +299,10 @@ export default function RubberSegment<T extends string = string>({
       edgeR.set(b.r)
       return
     }
-    const u = stretch / 100
     const tween = { duration: t(DILATE), ease: EASE_OUT }
-    animate(edgeL, b.l + (Math.min(a.l, b.l) - b.l) * u, tween)
-    animate(edgeR, b.r + (Math.max(a.r, b.r) - b.r) * u, tween)
+    const peak = stretchedEdges(a, b, stretch, IS_DARWIN ? undefined : Infinity)
+    animate(edgeL, peak.l, tween)
+    animate(edgeR, peak.r, tween)
     handoff.current = window.setTimeout(() => land(to, null, false, true), t(HANDOFF) * 1000)
   }
 

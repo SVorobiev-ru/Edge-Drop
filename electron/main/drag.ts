@@ -15,13 +15,27 @@
  */
 import { app, nativeImage, type WebContents } from 'electron'
 import { Resvg } from '@resvg/resvg-js'
-import { copyFileSync, mkdirSync, writeFileSync, existsSync, statSync } from 'node:fs'
+import { copyFileSync, mkdirSync, writeFileSync, existsSync, statSync, readFileSync } from 'node:fs'
 import { join, extname } from 'node:path'
+import { createHash } from 'node:crypto'
 import { getUnpackagedTempDir, toUnpackagedFilePaths } from '../store/paths'
-import type { DragRequest, ItemData } from '../../shared/types'
+import type { ClipboardItem, DragRequest, ItemData } from '../../shared/types'
 import { getStore } from './state'
 import { getFileKind } from '../../src/lib/fileType'
 import { recordStagedFiles } from './stagedTemp'
+
+// Arial Unicode covers CJK, Arabic, Hebrew, Thai and Devanagari; Resvg cannot
+// draw Apple Color Emoji.
+const MAC_RESVG_FONT = {
+  loadSystemFonts: false,
+  fontFiles: ['/System/Library/Fonts/Helvetica.ttc', '/System/Library/Fonts/Supplemental/Arial Unicode.ttf'].filter((file) => existsSync(file)),
+  defaultFontFamily: 'Helvetica',
+  sansSerifFamily: 'Helvetica',
+}
+
+function resvgFontOptions(): { font?: typeof MAC_RESVG_FONT } {
+  return process.platform === 'darwin' ? { font: MAC_RESVG_FONT } : {}
+}
 
 function stampForFilename(capturedAt?: number): string {
   const d = capturedAt ? new Date(capturedAt) : new Date()
@@ -64,6 +78,8 @@ export function formatClipboardImageFilename(
 export function formatScreenshotFilename(capturedAt?: number, ext = 'png', indexSuffix?: number): string {
   return formatClipboardImageFilename(capturedAt, ext, { source: 'screenshot', indexSuffix })
 }
+
+const textOwners = new WeakMap<ItemData, string>()
 
 function isMacAppBundle(p: string): boolean {
   return process.platform === 'darwin' && /\.app\/*$/i.test(p)
@@ -124,6 +140,7 @@ export function resolveDragData(req: DragRequest): { data: ItemData; capturedAt?
     console.warn('[Drag] imageId requested for non-collection item; aborting drag. id=', req.id)
     return null
   }
+  if (item.data.kind === 'text') textOwners.set(item.data, item.id)
   return { data: item.data, capturedAt: item.capturedAt }
 }
 
@@ -138,6 +155,114 @@ export function startDragOut(sender: WebContents, data: ItemData, capturedAt?: n
   }
   sender.startDrag(item)
   return true
+}
+
+export type SelectionStage =
+  | { ok: true; paths: string[]; iconPaths: string[] }
+  | { ok: false; error: 'toast.imageUnavailable' | 'toast.fileUnavailable' }
+
+export function stageSelectionFiles(items: readonly ClipboardItem[]): SelectionStage {
+  const paths: string[] = []
+  const iconPaths: string[] = []
+  for (const item of items) {
+    const data = item.data
+    if (data.kind === 'text') {
+      const file = stageTextSnippet(item.id, data)
+      if (!file) return { ok: false, error: 'toast.fileUnavailable' }
+      paths.push(file)
+      iconPaths.push(file)
+      continue
+    }
+    const staged = stageDragFile(data, item.capturedAt)
+    const files = staged ? staged.files ?? [staged.file] : []
+    if (files.length === 0) {
+      return { ok: false, error: data.kind === 'files' ? 'toast.fileUnavailable' : 'toast.imageUnavailable' }
+    }
+    paths.push(...files)
+    iconPaths.push(...(data.kind === 'files' ? files : files.map(() => 'image.png')))
+  }
+  const seen = new Set<string>()
+  const unique: string[] = []
+  const uniqueIcons: string[] = []
+  paths.forEach((p, i) => {
+    if (seen.has(p)) return
+    seen.add(p)
+    unique.push(p)
+    uniqueIcons.push(iconPaths[i])
+  })
+  return { ok: true, paths: unique, iconPaths: uniqueIcons }
+}
+
+export function startMultiDragOut(sender: WebContents, paths: string[], iconPaths: string[]): boolean {
+  if (paths.length === 0) return false
+  sender.startDrag({ file: paths[0], files: paths, icon: createFileStackDragIcon(iconPaths) })
+  return true
+}
+
+const WINDOWS_RESERVED_NAME = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i
+
+export function snippetFileName(text: string): string {
+  const words = text.replace(/\s+/g, ' ').trim().split(' ').slice(0, 6).join(' ')
+  const cleaned = words.replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_').replace(/^\.+/, '').trim()
+  const cut = (cleaned.length > 40 ? cleaned.slice(0, 40) : cleaned).replace(/[. ]+$/, '')
+  const safe = WINDOWS_RESERVED_NAME.test(cut.split('.')[0].trim()) ? `_${cut}` : cut
+  return `${safe || 'Snippet'}.txt`
+}
+
+const snippetCache = new Map<string, string>()
+
+function textDigest(text: string): string {
+  return createHash('sha256').update(text, 'utf8').digest('hex')
+}
+
+function sameFileText(path: string, text: string): boolean {
+  try {
+    if (statSync(path).size !== Buffer.byteLength(text, 'utf8')) return false
+    return readFileSync(path, 'utf8') === text
+  } catch {
+    return false
+  }
+}
+
+function stageTextSnippet(ownerId: string, data: Extract<ItemData, { kind: 'text' }>): string | null {
+  const text = fullTextFor(ownerId, data)
+  const digest = textDigest(text)
+  const key = `${ownerId}:${digest}`
+  const cached = snippetCache.get(key)
+  if (cached && existsSync(cached)) return cached
+
+  const temp = getUnpackagedTempDir()
+  try {
+    mkdirSync(temp, { recursive: true })
+  } catch {
+    return null
+  }
+  const base = snippetFileName(text).replace(/\.txt$/, '')
+  let dest = join(temp, `${base}.txt`)
+  let n = 2
+  while (existsSync(dest) && !sameFileText(dest, text) && n < 1000) {
+    dest = join(temp, `${base} (${n}).txt`)
+    n++
+  }
+  try {
+    if (existsSync(dest) && !sameFileText(dest, text)) {
+      dest = join(temp, `Snippet_${digest.slice(0, 16)}.txt`)
+      writeFileSync(dest, text, 'utf8')
+    } else if (!existsSync(dest)) {
+      writeFileSync(dest, text, 'utf8')
+    }
+  } catch {
+    return null
+  }
+  snippetCache.set(key, dest)
+  if (snippetCache.size > STAGED_CACHE_MAX) {
+    const first = snippetCache.keys().next().value
+    if (first) snippetCache.delete(first)
+  }
+  try {
+    recordStagedFiles(data, [dest])
+  } catch { /* ignore */ }
+  return dest
 }
 
 /* ------------------------------------------------------------------ */
@@ -160,9 +285,16 @@ function getStagedCacheKey(data: ItemData, capturedAt?: number): string {
       return `img:${data.imageId}:${data.ext || 'png'}:${capturedAt || 0}`
     case 'image-collection':
       return `imgs:${data.images.map((i) => i.imageId).join('|')}:${capturedAt || 0}`
-    case 'text':
-      return `text:${data.text.slice(0, 100)}`
+    case 'text': {
+      const ownerId = textOwners.get(data)
+      const digest = textDigest(fullTextFor(ownerId, data))
+      return ownerId ? `text:${ownerId}:${digest}` : `text:sha256:${digest}`
+    }
   }
+}
+
+function fullTextFor(ownerId: string | undefined, data: Extract<ItemData, { kind: 'text' }>): string {
+  return ownerId && data.hasFullPayload ? getStore().getFullText(ownerId) || data.text : data.text
 }
 
 /** Pre-stage a drag request in the background so drag initiation is 0ms. */
@@ -278,8 +410,9 @@ export function stageDragFile(
     case 'text': {
       const id = `${Date.now().toString(36)}`
       const dest = join(temp, `Snippet_${id}.txt`)
+      const text = fullTextFor(textOwners.get(data), data)
       try {
-        writeFileSync(dest, data.text, 'utf8')
+        writeFileSync(dest, text, 'utf8')
       } catch {
         return null
       }
@@ -410,7 +543,7 @@ function createFileStackDragIcon(paths: string[], entries?: Array<{ isDirectory?
   const svg = buildFileDragSvg(kinds, count)
 
   try {
-    const resvg = new Resvg(svg, { fitTo: { mode: 'zoom', value: 2 } })
+    const resvg = new Resvg(svg, { fitTo: { mode: 'zoom', value: 2 }, ...resvgFontOptions() })
     const pngData = resvg.render().asPng()
     const img = nativeImage.createFromBuffer(pngData, { scaleFactor: 2 })
     if (!img.isEmpty()) {
@@ -486,7 +619,7 @@ function createTextDragIcon(text: string): Electron.NativeImage {
   </svg>`
 
   try {
-    const resvg = new Resvg(svg, { fitTo: { mode: 'zoom', value: 2 } })
+    const resvg = new Resvg(svg, { fitTo: { mode: 'zoom', value: 2 }, ...resvgFontOptions() })
     const pngData = resvg.render().asPng()
     const img = nativeImage.createFromBuffer(pngData, { scaleFactor: 2 })
     if (!img.isEmpty()) return img

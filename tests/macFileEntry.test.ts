@@ -2,17 +2,14 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vites
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { restorePlatform, setPlatform } from './helpers/platform'
 
 const fsRoots = vi.hoisted(() => ({
   userData: ''
 }))
 
-vi.mock('electron', () => ({
-  app: {
-    isPackaged: false,
-    getAppPath: () => join(fsRoots.userData, 'app'),
-    getPath: (name: string) => (name === 'userData' ? fsRoots.userData : join(fsRoots.userData, name))
-  },
+vi.mock('electron', async () => ({
+  app: (await import('./helpers/electronMock')).userDataApp(() => fsRoots.userData),
   nativeImage: {
     createFromPath: () => ({ isEmpty: () => true })
   },
@@ -21,17 +18,9 @@ vi.mock('electron', () => ({
   }
 }))
 
-vi.mock('koffi', () => ({
-  default: { load: () => ({ func: () => () => null }) }
-}))
+vi.mock('koffi', () => import('./helpers/koffiMock'))
 
 import { ItemStore } from '../electron/store/ItemStore'
-
-const realPlatform = process.platform
-
-function setPlatform(value: string): void {
-  Object.defineProperty(process, 'platform', { value, configurable: true })
-}
 
 describe('file entries for macOS app bundles', () => {
   let work = ''
@@ -45,13 +34,13 @@ describe('file entries for macOS app bundles', () => {
   })
 
   afterEach(() => {
-    setPlatform(realPlatform)
+    restorePlatform()
     rmSync(fsRoots.userData, { recursive: true, force: true })
     rmSync(work, { recursive: true, force: true })
   })
 
   afterAll(() => {
-    setPlatform(realPlatform)
+    restorePlatform()
   })
 
   function entriesFor(paths: string[]) {

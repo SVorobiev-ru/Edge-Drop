@@ -16,11 +16,13 @@
  *
  * Keys include mtime+size so externally replaced files are never served stale.
  */
-import { readFileSync, rmSync, statSync } from 'node:fs'
-import { extname } from 'node:path'
+import { mkdirSync, readFileSync, rmSync, statSync } from 'node:fs'
+import { basename, dirname, extname, join } from 'node:path'
 import { createHash } from 'node:crypto'
 import { nativeImage } from 'electron'
 import { convertHeicToPng } from './macHeic'
+import { PATHS } from '../store/paths'
+import { writeFileAtomicSync } from '../store/atomicWrite'
 
 const MAX_THUMBNAIL_EDGE_PX = 240
 const LRU_MAX_ENTRIES = 64
@@ -90,7 +92,76 @@ export function getThumbnailPayload(filePath: string): ThumbnailPayload | null {
   const cached = lruGet(key)
   if (cached) return cached
 
-  return encodeThumbnail(filePath, key)
+  const imageId = process.platform === 'darwin' ? storedImageId(filePath) : null
+  if (!imageId) return encodeThumbnail(filePath, key)
+
+  const persisted = readPersistedThumbnail(imageId, facts)
+  if (persisted) {
+    const payload: ThumbnailPayload = { etag: etagFor(key), contentType: 'image/png', body: persisted }
+    lruPut(key, payload)
+    return payload
+  }
+
+  const payload = encodeThumbnail(filePath, key)
+  if (payload) writePersistedThumbnail(imageId, payload.body)
+  return payload
+}
+
+function etagFor(key: string): string {
+  return `"${createHash('sha256').update(key).digest('hex')}"`
+}
+
+function storedImageId(filePath: string): string | null {
+  try {
+    const dir = dirname(filePath)
+    const imagesDir = PATHS.imagesDir()
+    const same = process.platform === 'win32' ? dir.toLowerCase() === imagesDir.toLowerCase() : dir === imagesDir
+    if (!same) return null
+    return basename(filePath).split('.')[0] || null
+  } catch {
+    return null
+  }
+}
+
+function persistedThumbnailPath(imageId: string): string {
+  return join(PATHS.thumbnailsDir(), `${imageId}.png`)
+}
+
+function readPersistedThumbnail(imageId: string, source: FileFacts): Buffer | null {
+  try {
+    const thumbPath = persistedThumbnailPath(imageId)
+    const st = statSync(thumbPath)
+    if (!st.isFile() || st.size === 0 || Math.floor(st.mtimeMs) < source.mtimeMs) return null
+    return readFileSync(thumbPath)
+  } catch {
+    return null
+  }
+}
+
+function writePersistedThumbnail(imageId: string, body: Buffer): void {
+  try {
+    mkdirSync(PATHS.thumbnailsDir(), { recursive: true })
+    writeFileAtomicSync(persistedThumbnailPath(imageId), body)
+  } catch {}
+}
+
+function scaleToThumbnail(img: Electron.NativeImage): Electron.NativeImage {
+  const { width, height } = img.getSize()
+  const scale = Math.min(1, MAX_THUMBNAIL_EDGE_PX / Math.max(width, height))
+  return scale < 1
+    ? img.resize({
+        width: Math.max(1, Math.round(width * scale)),
+        height: Math.max(1, Math.round(height * scale)),
+        quality: 'good'
+      })
+    : img
+}
+
+export function persistStoredThumbnail(imageId: string, img: Electron.NativeImage): void {
+  try {
+    if (process.platform !== 'darwin' || !imageId || img.isEmpty()) return
+    writePersistedThumbnail(imageId, scaleToThumbnail(img).toPNG())
+  } catch {}
 }
 
 function encodeThumbnail(sourcePath: string, key: string): ThumbnailPayload | null {
@@ -98,22 +169,11 @@ function encodeThumbnail(sourcePath: string, key: string): ThumbnailPayload | nu
     const img = nativeImage.createFromPath(sourcePath)
     if (img.isEmpty()) return null
 
-    const { width, height } = img.getSize()
-    const scale = Math.min(1, MAX_THUMBNAIL_EDGE_PX / Math.max(width, height))
-    const thumb =
-      scale < 1
-        ? img.resize({
-            width: Math.max(1, Math.round(width * scale)),
-            height: Math.max(1, Math.round(height * scale)),
-            quality: 'good'
-          })
-        : img
-
-    const body = thumb.toPNG()
+    const body = scaleToThumbnail(img).toPNG()
     const payload: ThumbnailPayload = {
       // Content-fingerprint validator: any change to the source file flips
       // mtime/size, producing a fresh key AND a fresh etag together.
-      etag: `"${createHash('sha256').update(key).digest('hex')}"`,
+      etag: etagFor(key),
       contentType: 'image/png',
       body
     }

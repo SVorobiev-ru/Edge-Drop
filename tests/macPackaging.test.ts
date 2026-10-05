@@ -1,22 +1,26 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { createRequire } from 'node:module'
 
 const root = process.cwd()
+const require = createRequire(import.meta.url)
 
 function read(rel: string): string {
-  return readFileSync(join(root, rel), 'utf8')
+  return readFileSync(join(root, rel), 'utf8').replace(/\r\n/g, '\n')
 }
 
 const pkg = JSON.parse(read('package.json')) as {
   version: string
   macRevision: number
   scripts: Record<string, string>
+  dependencies: Record<string, string>
   build: {
     publish: unknown
     afterPack: unknown
+    files: string[]
+    asarUnpack: string[]
     win: Record<string, unknown>
     nsis: Record<string, unknown>
     appx: Record<string, unknown>
@@ -27,14 +31,24 @@ const pkg = JSON.parse(read('package.json')) as {
       hardenedRuntime: unknown
       notarize: unknown
       files: string[]
+      electronLanguages: string[]
       publish: unknown
       extendInfo: Record<string, unknown>
     }
   }
 }
+const lock = JSON.parse(read('package-lock.json')) as { packages: Record<string, { dependencies?: Record<string, string> }> }
 const info = pkg.build.mac.extendInfo
 const MAC_VERSION_STEP = 'MAC_VERSION=$(node scripts/mac-version.cjs)'
 const MAC_VERSION_FLAG = '-c.extraMetadata.version=$MAC_VERSION'
+
+function closure(name: string, seen = new Set<string>()): Set<string> {
+  const entry = lock.packages[`node_modules/${name}`]
+  if (!entry || seen.has(name)) return seen
+  seen.add(name)
+  for (const dep of Object.keys(entry.dependencies ?? {})) closure(dep, seen)
+  return seen
+}
 
 describe('macOS Info.plist configuration', () => {
   it('stays a menu bar app', () => {
@@ -66,6 +80,9 @@ describe('macOS Info.plist configuration', () => {
     }
   })
 
+  it('declares the edgedrop:// URL scheme', () => {
+    expect(info.CFBundleURLTypes).toEqual([{ CFBundleURLName: 'com.edgedrop.app', CFBundleURLSchemes: ['edgedrop'] }])
+  })
 })
 
 describe('macOS distribution build', () => {
@@ -150,10 +167,8 @@ describe('macOS distribution build', () => {
   })
 
   it('packs only the native binaries of the target architecture', () => {
-    expect(mac.files).toEqual([
-      '!**/node_modules/@koromix/koffi-!(darwin-${arch})/**',
-      '!**/node_modules/@resvg/resvg-js-!(darwin-${arch})/**'
-    ])
+    expect(mac.files).toContain('!**/node_modules/@koromix/koffi-!(darwin-${arch})/**')
+    expect(mac.files).toContain('!**/node_modules/@resvg/resvg-js-!(darwin-${arch})/**')
   })
 
   it('publishes mac builds to the fork and leaves the Windows source alone', () => {
@@ -280,8 +295,19 @@ describe('GitHub workflows', () => {
     expect(release).toContain('--prerelease=false')
     expect(release).toContain('--latest')
     expect(release.split('contents: write')).toHaveLength(2)
-    expect(release.match(/secrets\.[A-Z_]+/g)).toEqual(['secrets.GITHUB_TOKEN'])
+    expect(release.match(/secrets\.[A-Z0-9_]+/g)).toEqual(['secrets.MAC_SIGN_P12_BASE64', 'secrets.MAC_SIGN_P12_PASSWORD', 'secrets.GITHUB_TOKEN'])
     expect(release).not.toMatch(/CSC_LINK|CSC_KEY_PASSWORD|APPLE_ID|APPLE_API_KEY|--win|nsis|appx/)
+  })
+
+  it('publishes SHA256SUMS.txt for the in-app updater next to the artifacts', () => {
+    const count = release.indexOf('Expected 4 artifacts')
+    const sums = release.indexOf('(cd artifacts && sha256sum -- *.dmg *.zip > SHA256SUMS.txt)')
+    const added = release.indexOf('files+=(artifacts/SHA256SUMS.txt)')
+    const upload = release.indexOf('gh release view')
+    expect(count).toBeGreaterThan(-1)
+    expect(count).toBeLessThan(sums)
+    expect(sums).toBeLessThan(added)
+    expect(added).toBeLessThan(upload)
   })
 
   it('pins actions by major version', () => {
@@ -344,9 +370,9 @@ describe('Settings links', () => {
   const header = read('src/components/Header.tsx')
 
   it('point at the fork on macOS and at the original elsewhere', () => {
-    expect(links).toContain("export const REPO_URL = IS_MAC ? 'https://github.com/SVorobiev-ru/Edge-Drop' : 'https://github.com/Deepender25/Edge-Drop'")
-    expect(links).toContain("export const CHANGELOG_URL = IS_MAC ? `${REPO_URL}/releases` : 'https://www.edgedrop.app/changelog'")
-    expect(src).toContain("import { REPO_URL, CHANGELOG_URL } from '../lib/links'")
+    expect(links).toContain("export const REPO_URL = IS_DARWIN ? 'https://github.com/SVorobiev-ru/Edge-Drop' : 'https://github.com/Deepender25/Edge-Drop'")
+    expect(links).toContain("export const CHANGELOG_URL = IS_DARWIN ? `${REPO_URL}/releases` : 'https://www.edgedrop.app/changelog'")
+    expect(src).toContain("import { REPO_URL, CHANGELOG_URL, SUPPORT_URL } from '../lib/links'")
     expect(src).not.toMatch(/const (REPO_URL|CHANGELOG_URL) =/)
     expect(src.split("window.open(`${REPO_URL}/issues/new/choose`, '_blank')")).toHaveLength(3)
     expect(src.split("window.open(REPO_URL, '_blank')")).toHaveLength(3)
@@ -375,18 +401,338 @@ describe('Settings links', () => {
 describe('macOS update block in Settings', () => {
   const src = read('src/components/Settings.tsx')
 
-  it('labels the action as opening the release page', () => {
-    expect(src.split("IS_MAC ? t('behaviour.openReleasePage') : (t('behaviour.update') || 'Update')")).toHaveLength(3)
+  it('offers download and install with the release page as the secondary action', () => {
+    const promoted = src.slice(src.indexOf('const renderPromotedUpdateCard'), src.indexOf('const renderManualUpdateCard'))
+    expect(promoted).toContain("{t('behaviour.installUpdate')}")
+    expect(promoted).toContain("{t('behaviour.openReleasePage')}")
+    expect(promoted).toContain('onClick={handleOpenChangelog}')
   })
 
-  it('never enters the downloading state', () => {
-    expect(src).toContain('const isDownloading = !IS_MAC && (')
-    expect(src).toMatch(/if \(IS_MAC\) \{\s*void window\.edge\.startUpdateDownload\(\)\s*return\s*\}/)
+  it('downloads through the shared update flow', () => {
+    expect(src).toMatch(/const handleStartDownload = \(\) => \{\s*void useStore\.getState\(\)\.startManualDownload\(\)\s*\}/)
+    expect(src).toContain('const shownUpdateMode = displayedUpdateMode(updateMode, IS_DARWIN)')
   })
 
   it('main process starts the release check on every platform', () => {
     const index = read('electron/main/index.ts')
     expect(index).toMatch(/^\s*initAutoUpdater\(\)$/m)
     expect(index).toContain('installMacAppMenu()')
+  })
+})
+
+describe('mac app.asar contents', () => {
+  const mac = pkg.build.mac
+
+  it('repeats the top-level whitelist, because a mac files list replaces it', () => {
+    expect(mac.files.slice(0, pkg.build.files.length)).toEqual(pkg.build.files)
+    expect(mac.files.some((p) => !p.startsWith('!'))).toBe(true)
+  })
+
+  it('adds only exclusions after the whitelist', () => {
+    for (const pattern of mac.files.slice(pkg.build.files.length)) expect(pattern.startsWith('!')).toBe(true)
+  })
+
+  it('leaves electron-updater and everything only it needs out of the mac build', () => {
+    const updater = closure('electron-updater')
+    const others = new Set<string>()
+    for (const name of Object.keys(pkg.dependencies)) {
+      if (name !== 'electron-updater') closure(name, others)
+    }
+    for (const name of updater) {
+      const excluded = mac.files.includes(`!**/node_modules/${name}/**`)
+      expect(excluded, name).toBe(!others.has(name))
+    }
+  })
+
+  it('does not exclude the runtime dependencies the mac build needs', () => {
+    for (const name of ['koffi', '@resvg/resvg-js', 'react', 'zustand']) {
+      expect(mac.files).not.toContain(`!**/node_modules/${name}/**`)
+    }
+  })
+
+  it('leaves the top-level files list and the Windows sections alone', () => {
+    expect(pkg.build.files).not.toContain('!**/node_modules/electron-updater/**')
+    expect('files' in pkg.build.win).toBe(false)
+    expect('files' in pkg.build.nsis).toBe(false)
+    expect('files' in pkg.build.appx).toBe(false)
+    expect('electronLanguages' in pkg.build.win).toBe(false)
+  })
+})
+
+describe('Electron languages on macOS', () => {
+  const languages = pkg.build.mac.electronLanguages
+  const translations = readdirSync(join(root, 'edge-drop-translations'))
+    .filter((f) => f.endsWith('.json'))
+    .map((f) => f.replace(/\.json$/, ''))
+
+  const toLproj: Record<string, string[]> = {
+    no: ['nb'],
+    pt: ['pt_BR', 'pt_PT'],
+    'zh-CN': ['zh_CN'],
+    'zh-TW': ['zh_TW']
+  }
+
+  it('keeps one Electron locale for every UI translation', () => {
+    for (const code of translations) {
+      for (const lproj of toLproj[code] ?? [code]) expect(languages, code).toContain(lproj)
+    }
+  })
+
+  it('keeps nothing else', () => {
+    const expected = translations.flatMap((code) => toLproj[code] ?? [code])
+    expect([...languages].sort()).toEqual([...expected].sort())
+  })
+
+  it('uses the lproj names of Electron Framework', () => {
+    for (const language of languages) expect(language).toMatch(/^[a-z]{2,3}(_[A-Z0-9]{2,3})?$/)
+  })
+})
+
+describe('production CSP', () => {
+  const { stripDevCsp } = require('../scripts/strip-dev-csp.cjs') as { stripDevCsp: (html: string) => string }
+  const html = read('index.html')
+
+  it('the source page keeps ws: for the dev server', () => {
+    expect(html).toMatch(/connect-src 'self' ws:/)
+  })
+
+  it('the build step drops ws: and leaves the rest of the policy as is', () => {
+    const out = stripDevCsp(html)
+    expect(out).toContain("connect-src 'self';")
+    expect(out).not.toMatch(/\bwss?:/)
+    expect(out.replace("connect-src 'self';", "connect-src 'self' ws:;")).toBe(html)
+  })
+
+  it('also drops wss: and keeps other sources of connect-src', () => {
+    const page = '<meta http-equiv="Content-Security-Policy" content="default-src \'self\'; connect-src \'self\' ws: wss: https://api.github.com; img-src \'self\'" />'
+    expect(stripDevCsp(page)).toBe('<meta http-equiv="Content-Security-Policy" content="default-src \'self\'; connect-src \'self\' https://api.github.com; img-src \'self\'" />')
+  })
+
+  it('allows data urls for images in the renderer policy', () => {
+    expect(html).toMatch(/img-src 'self' data:/)
+  })
+
+  it('runs after every electron-vite build, so all targets get it', () => {
+    expect(pkg.scripts.build).toBe('electron-vite build && node scripts/strip-dev-csp.cjs')
+    expect(pkg.scripts.dev).toBe('electron-vite dev')
+    for (const name of ['build:github', 'build:store', 'build:mac', 'dist:mac', 'dist:mac:arm64', 'dist:mac:x64']) {
+      expect(pkg.scripts[name].startsWith('npm run build && '), name).toBe(true)
+    }
+  })
+})
+
+describe('app.asar allow-list check', () => {
+  const { checkAsarEntries, topLevelEntries, ALLOWED_TOP_LEVEL } = require('../scripts/check-mac-asar.cjs') as {
+    checkAsarEntries: (files: string[]) => string[]
+    topLevelEntries: (files: string[]) => string[]
+    ALLOWED_TOP_LEVEL: string[]
+  }
+
+  const good = [
+    '/package.json',
+    '/out',
+    '/out/main/index.js',
+    '/resources',
+    '/resources/icon.png',
+    '/node_modules',
+    '/node_modules/koffi/index.js'
+  ]
+
+  it('allows only the app output, its resources, package.json and node_modules', () => {
+    expect(ALLOWED_TOP_LEVEL).toEqual(['node_modules', 'out', 'package.json', 'resources'])
+    expect(topLevelEntries(good)).toEqual(['node_modules', 'out', 'package.json', 'resources'])
+    expect(checkAsarEntries(good)).toEqual([])
+  })
+
+  it.each(['/src/main.tsx', '/tests/a.test.ts', '/scratch/x', '/new icons/a.png', '/README.md', '/.claude/settings.json', '/edge-drop-translations/en.json'])(
+    'fails on %s',
+    (extra) => {
+      expect(checkAsarEntries([...good, extra]).length).toBeGreaterThan(0)
+    }
+  )
+
+  it('fails when electron-updater slipped in', () => {
+    expect(checkAsarEntries([...good, '/node_modules/electron-updater/out/main.js'])).toEqual([
+      'module must not be packed on macOS: electron-updater'
+    ])
+  })
+
+  it('fails when the app itself is missing', () => {
+    expect(checkAsarEntries(['/node_modules/koffi/index.js'])).toEqual([
+      'missing top-level entry: out',
+      'missing top-level entry: package.json',
+      'missing top-level entry: resources'
+    ])
+  })
+
+  it('verify-mac-dist.sh runs the check on the DMG and the ZIP', () => {
+    const verify = read('scripts/verify-mac-dist.sh')
+    expect(verify).toContain('node scripts/check-mac-asar.cjs "$app" || fail')
+    expect(verify.indexOf('check-mac-asar')).toBeLessThan(verify.indexOf('check_app "${MOUNT}'))
+  })
+})
+
+describe('signing hook', () => {
+  const childProcess = require('node:child_process') as typeof import('node:child_process')
+  const hookPath = require.resolve('../scripts/mac-adhoc-sign.cjs')
+  const app = join(root, 'dist', 'mac-arm64', 'Edge-Drop.app')
+  const context = { electronPlatformName: 'darwin', appOutDir: join(root, 'dist', 'mac-arm64'), packager: { appInfo: { productFilename: 'Edge-Drop' } } }
+  let codesign: ReturnType<typeof vi.fn>
+  let hook: (context: unknown) => Promise<void>
+  const saved = process.env.EDGE_DROP_SIGN_IDENTITY
+
+  beforeEach(() => {
+    codesign = vi.fn()
+    vi.spyOn(childProcess, 'execFileSync').mockImplementation(((...args: unknown[]) => codesign(...args)) as never)
+    delete require.cache[hookPath]
+    hook = require(hookPath) as (context: unknown) => Promise<void>
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+    delete require.cache[hookPath]
+    if (saved === undefined) delete process.env.EDGE_DROP_SIGN_IDENTITY
+    else process.env.EDGE_DROP_SIGN_IDENTITY = saved
+  })
+
+  it('signs with the identity from EDGE_DROP_SIGN_IDENTITY', async () => {
+    process.env.EDGE_DROP_SIGN_IDENTITY = 'Edge-Drop Self-Signed'
+    await hook(context)
+    expect(codesign.mock.calls[0]).toEqual(['codesign', ['--force', '--deep', '-s', 'Edge-Drop Self-Signed', app], { stdio: 'inherit' }])
+    expect(codesign.mock.calls[1][1]).toEqual(['--verify', '--deep', '--strict', app])
+  })
+
+  it('signs with a SHA-1 identity hash as well', async () => {
+    process.env.EDGE_DROP_SIGN_IDENTITY = ' 0123456789ABCDEF0123456789ABCDEF01234567 '
+    await hook(context)
+    expect(codesign.mock.calls[0][1]).toEqual(['--force', '--deep', '-s', '0123456789ABCDEF0123456789ABCDEF01234567', app])
+  })
+
+  it('falls back to ad-hoc when the variable is empty or unset', async () => {
+    process.env.EDGE_DROP_SIGN_IDENTITY = '  '
+    await hook(context)
+    delete process.env.EDGE_DROP_SIGN_IDENTITY
+    await hook(context)
+    expect(codesign.mock.calls.filter((c) => c[1][0] === '--force').map((c) => c[1][3])).toEqual(['-', '-'])
+  })
+})
+
+describe('release signing in CI', () => {
+  const release = read('.github/workflows/release-mac.yml')
+  const importer = read('scripts/ci-import-signing-cert.sh')
+
+  it('imports the certificate before the build and deletes the keychain afterwards', () => {
+    const importStep = release.indexOf('run: bash scripts/ci-import-signing-cert.sh\n')
+    const build = release.indexOf('run: npm run dist:mac:${{ matrix.arch }}')
+    const verify = release.indexOf('run: bash scripts/verify-mac-dist.sh ${{ matrix.arch }}')
+    const cleanup = release.indexOf('run: bash scripts/ci-import-signing-cert.sh cleanup')
+    expect(importStep).toBeGreaterThan(-1)
+    expect(importStep).toBeLessThan(build)
+    expect(build).toBeLessThan(verify)
+    expect(verify).toBeLessThan(cleanup)
+    expect(release).toMatch(/- name: Remove the signing keychain\n\s+if: always\(\)/)
+  })
+
+  it('passes the secrets only to the import step', () => {
+    expect(release).toMatch(/MAC_SIGN_P12_BASE64: \$\{\{ secrets\.MAC_SIGN_P12_BASE64 \}\}\n\s+MAC_SIGN_P12_PASSWORD: \$\{\{ secrets\.MAC_SIGN_P12_PASSWORD \}\}\n\s+run: bash scripts\/ci-import-signing-cert\.sh\n/)
+  })
+
+  it('stays ad-hoc without the secrets', () => {
+    expect(importer).toMatch(/if \[\[ -z "\$\{MAC_SIGN_P12_BASE64:-\}" \|\| -z "\$\{MAC_SIGN_P12_PASSWORD:-\}" \]\]; then\n\s+echo "Signing secrets are not set: the build is signed ad-hoc"\n\s+exit 0/)
+  })
+
+  it('hands the identity to later steps and keeps codesign able to find it', () => {
+    expect(importer).toContain('>> "${GITHUB_ENV:?GITHUB_ENV is not set}"')
+    expect(importer).toContain('EDGE_DROP_SIGN_IDENTITY=${IDENTITY}')
+    expect(importer).toContain('EDGE_DROP_SIGN_NAME=${IDENTITY_NAME}')
+    expect(importer).toContain("trap 'rm -f \"$P12\"' EXIT")
+    expect(importer).toContain('security set-key-partition-list -S apple-tool:,apple:,codesign:')
+    expect(importer).toContain('security list-keychains -d user -s "$KEYCHAIN"')
+    expect(importer).toContain('rm -f "$P12"')
+  })
+
+  it('verify-mac-dist.sh checks the certificate signature when an identity is set', () => {
+    const verify = read('scripts/verify-mac-dist.sh')
+    expect(verify).toContain('SIGN_IDENTITY="${EDGE_DROP_SIGN_NAME:-${EDGE_DROP_SIGN_IDENTITY:-}}"')
+    expect(verify).toContain('grep -qxF "Authority=${SIGN_IDENTITY}"')
+    expect(verify).toContain("grep -q '^Signature=adhoc$' || fail \"signature is not ad-hoc\"")
+  })
+
+  it('the certificate script makes a 10 year code-signing certificate and only prints the gh commands', () => {
+    const script = read('scripts/make-signing-cert.sh')
+    expect(script).toContain('DAYS=3650')
+    expect(script).toContain('extendedKeyUsage = critical, codeSigning')
+    expect(script).toContain('echo "  gh secret set MAC_SIGN_P12_BASE64 --repo ${REPO} < \\"${B64_FILE}\\""')
+    expect(script).toContain('echo "  gh secret set MAC_SIGN_P12_PASSWORD --repo ${REPO} < \\"${PASS_FILE}\\""')
+    expect(script.split('\n').filter((line) => /^\s*gh /.test(line))).toEqual([])
+  })
+})
+
+describe('CI build of the mac app', () => {
+  const ci = read('.github/workflows/ci.yml')
+
+  it('builds, checks the asar and smoke-tests the binary on macOS only', () => {
+    const steps = ['run: npm run build:mac', 'arm64) dir=dist/mac-arm64 ;;', 'run: node scripts/check-mac-asar.cjs "$MAC_APP"', 'run: bash scripts/smoke-test-mac.sh "$MAC_APP"']
+    let last = ci.indexOf('run: npm run typecheck')
+    for (const step of steps) {
+      const at = ci.indexOf(step)
+      expect(at, step).toBeGreaterThan(last)
+      expect(ci.slice(ci.lastIndexOf('- name:', at), at)).toContain("if: runner.os == 'macOS'")
+      last = at
+    }
+  })
+
+  it('derives the app folder from the runner architecture', () => {
+    expect(ci).toContain('*) dir=dist/mac ;;')
+    expect(ci).toContain('echo "MAC_APP=${dir}/Edge-Drop.app" >> "$GITHUB_ENV"')
+  })
+
+  it('the smoke script fails on a non-zero exit or a bad JSON line', () => {
+    const script = read('scripts/smoke-test-mac.sh')
+    expect(script).toContain('"$BIN" --smoke-test')
+    expect(script).toContain('FAIL: smoke test exited with')
+    expect(script).toContain('result.smokeTest !== true || result.ok !== true')
+  })
+})
+
+describe('Homebrew cask', () => {
+  const cask = read('packaging/homebrew/edge-drop.rb')
+
+  it('points at both architectures of the fork releases', () => {
+    expect(cask).toContain('arch arm: "arm64", intel: "x64"')
+    expect(cask).toContain('url "https://github.com/SVorobiev-ru/Edge-Drop/releases/download/v#{version}/Edge-Drop-#{version}-mac-#{arch}.dmg"')
+    expect(cask).toMatch(/sha256 arm:\s+"[^"]+",\n\s+intel: "[^"]+"/)
+    expect(cask).toContain('app "Edge-Drop.app"')
+  })
+
+  it('requires the same minimum macOS as Info.plist', () => {
+    expect(cask).toContain('depends_on macos: ">= :monterey"')
+    const pkg = JSON.parse(read('package.json'))
+    expect(pkg.build.mac.minimumSystemVersion).toBe('12.0')
+  })
+
+  it('update-cask.sh fills version and both checksums', () => {
+    const script = read('scripts/update-cask.sh')
+    expect(script).toContain('https://github.com/${REPO}/releases/download/v${VERSION}/${name}')
+    expect(script).toContain('die "cask layout not recognized\\n" unless $n == 3;')
+  })
+})
+
+describe('macOS documentation of signing and Homebrew', () => {
+  const doc = read('MACOS.md')
+  const readme = read('README.md')
+
+  it('documents the stable signature and that quarantine stays', () => {
+    for (const text of ['make-signing-cert.sh', 'MAC_SIGN_P12_BASE64', 'MAC_SIGN_P12_PASSWORD', 'Gatekeeper still quarantines the first install', 'packaging/homebrew/edge-drop.rb', 'update-cask.sh']) {
+      expect(doc).toContain(text)
+    }
+  })
+
+  it('README points mac users at the fork releases before the Windows content', () => {
+    const fork = readme.indexOf('https://github.com/SVorobiev-ru/Edge-Drop/releases/latest')
+    expect(fork).toBeGreaterThan(-1)
+    expect(fork).toBeLessThan(readme.indexOf('## Quick Start'))
+    expect(fork).toBeLessThan(readme.indexOf('img.shields.io/github/v/release/Deepender25'))
+    expect(readme).toContain('https://apps.microsoft.com/detail/9P3JMHN9M4NR')
   })
 })

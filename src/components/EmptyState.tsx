@@ -1,5 +1,15 @@
 import { useStore } from '../store/appStore'
 import { useTranslation } from '../i18n'
+import type { TypeFilter } from '../../shared/types'
+import { IS_DARWIN } from '../lib/edge'
+
+const TYPE_KEYS: Record<Exclude<TypeFilter, 'all'>, string> = {
+  text: 'Text',
+  links: 'Links',
+  images: 'Images',
+  files: 'Files',
+  colors: 'Colors'
+}
 
 export function EmptyState({ filtered }: { filtered: boolean }) {
   const { t } = useTranslation()
@@ -8,20 +18,10 @@ export function EmptyState({ filtered }: { filtered: boolean }) {
   let title = filtered ? t('emptyState.noResultsFound') : t('emptyState.shelfEmpty')
   let hint = filtered ? t('emptyState.noResultsHint') : t('emptyState.shelfEmptyHint')
 
-  if (typeFilter !== 'all') {
-    const labelKey =
-      typeFilter === 'text'
-        ? 'emptyState.textClips'
-        : typeFilter === 'links'
-          ? 'emptyState.links'
-          : typeFilter === 'images'
-            ? 'emptyState.images'
-            : typeFilter === 'colors'
-              ? 'filters.colors'
-              : 'emptyState.files'
-    const label = (t(labelKey) || 'colors').toLowerCase()
-    title = t('emptyState.noClipsFound', { type: label })
-    hint = t('emptyState.copyTypeHint', { type: label })
+  if (typeFilter !== 'all' && !(IS_DARWIN && filtered)) {
+    const kind = TYPE_KEYS[typeFilter]
+    title = t(`emptyState.no${kind}Found`)
+    hint = t(`emptyState.copy${kind}Hint`)
   }
 
   return (

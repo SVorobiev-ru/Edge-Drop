@@ -15,7 +15,7 @@ describe('update prompt placement contracts (promoted lifecycle, bottom hides wh
     expect(src).toContain('hasPromotedTopUpdate = !isStoreBuild && (')
     // Bottom manual card and horizontal status card hide while promoted.
     expect(src).toContain('if (isStoreBuild || hasPromotedTopUpdate) return null')
-    expect(src).toContain('{!isStoreBuild && !hasPromotedTopUpdate && (')
+    expect(src).toContain('{!isStoreBuild && !hasPromotedTopUpdate && renderHorizontalUpdateStatusCard()}')
   })
 
   it('store tracks manual-flow ownership across check, download, and dismiss', () => {

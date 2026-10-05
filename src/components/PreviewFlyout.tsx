@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { useStore } from '../store/appStore'
+import { useStore, selectReduceMotion } from '../store/appStore'
 import { formatBytes, formatImageDisplayName, fileStreamUrl } from '../lib/format'
 import { getFileKind } from '../lib/fileType'
 import { FileKindIcon, FolderOpenIcon, CopyIcon, CheckIcon, ExternalLinkIcon, CloseIcon, GlobeIcon } from './icons'
@@ -9,19 +9,25 @@ import { createPortal } from 'react-dom'
 import { useAdaptiveSpring } from '../hooks/useAdaptiveSpring'
 import { useDragOut } from '../hooks/useDragOut'
 import { tryPaste } from '../lib/tryPaste'
+import { pasteOptionsFor } from '../lib/pasteOptions'
+import { edge, IS_DARWIN } from '../lib/edge'
 import { playButtonClickSound, playToggleSound } from '../lib/soundEffects'
 
 import { useTranslation, t } from '../i18n'
+import { panelRect } from '../lib/panelPosition'
+import { isHorizontalEdge } from '../../shared/panelPlacement'
+import type { StickPosition } from '../../shared/types'
 
 /** Fast start, soft landing — no overshoot, no spring hang. */
 const flyoutEaseOpen = [0.16, 1, 0.3, 1] as const
 const flyoutEaseClose = [0.3, 0, 0.2, 1] as const
+const FLYOUT_GAP = 12
 
 const flyoutVariants = {
-  hidden: (dir: 'left' | 'right' | 'top') => ({
+  hidden: (dir: StickPosition) => ({
     opacity: 0,
     x: dir === 'right' ? 14 : dir === 'left' ? -14 : 0,
-    y: dir === 'top' ? -14 : 0,
+    y: dir === 'top' ? -14 : dir === 'bottom' ? 14 : 0,
     scale: 0.97,
   }),
   shown: {
@@ -36,10 +42,10 @@ const flyoutVariants = {
       opacity: { duration: 0.18, ease: 'easeOut' as const },
     },
   },
-  exit: (dir: 'left' | 'right' | 'top') => ({
+  exit: (dir: StickPosition) => ({
     opacity: 0,
     x: dir === 'right' ? 10 : dir === 'left' ? -10 : 0,
-    y: dir === 'top' ? -10 : 0,
+    y: dir === 'top' ? -10 : dir === 'bottom' ? 10 : 0,
     scale: 0.98,
     transition: {
       x: { duration: 0.18, ease: flyoutEaseClose },
@@ -61,9 +67,9 @@ export function PreviewFlyout({ isRight }: { isRight: boolean }) {
   
   const item = previewItemId ? items.find((i) => i.id === previewItemId) : null
 
-  const stickPosition = (settings.stickPosition || (isRight ? 'right' : 'left')) as 'left' | 'right' | 'top'
+  const stickPosition = (settings.stickPosition || (isRight ? 'right' : 'left')) as StickPosition
   const isTop = stickPosition === 'top'
-  const isHorizontal = isTop
+  const isHorizontal = isHorizontalEdge(stickPosition)
 
   const screenH = typeof window !== 'undefined' ? window.innerHeight : 800
   const screenW = typeof window !== 'undefined' ? window.innerWidth : 1140
@@ -75,13 +81,14 @@ export function PreviewFlyout({ isRight }: { isRight: boolean }) {
   const midY = Math.round(minY + vOffset * (maxY - minY))
   const panelTop = midY - panelH / 2
 
-  const reduceMotion = settings.reduceMotion || adaptiveSpring.type === 'tween'
+  const reduceMotion = useStore(selectReduceMotion) || adaptiveSpring.type === 'tween'
 
-  const dockWidth = Math.min(screenW - 60, 1080)
+  const dock = panelRect(settings, { width: screenW, height: screenH }, null, null)
+  const dockWidth = dock.width
   const flyoutWidth = 440
   const maxFlyoutHeight = isHorizontal ? Math.min(460, Math.max(200, screenH - 240)) : Math.max(100, panelH - 24)
 
-  const dockLeft = Math.round((screenW - dockWidth) / 2)
+  const dockLeft = dock.x
   const previewItemRect = useStore((s) => s.previewItemRect)
   const cardCenterXInBlade = previewItemRect?.x !== undefined
     ? (previewItemRect.x + (previewItemRect.width || 210) / 2) - dockLeft
@@ -106,8 +113,8 @@ export function PreviewFlyout({ isRight }: { isRight: boolean }) {
       const h = flyoutRef.current.offsetHeight
       if (isHorizontal) {
         useStore.getState().setPreviewFlyoutRect({
-          top: 210,
-          bottom: 222 + h,
+          top: isTop ? dock.y + dock.height : dock.y - FLYOUT_GAP - h,
+          bottom: isTop ? dock.y + dock.height + FLYOUT_GAP + h : dock.y,
           left: flyoutLeft,
           right: flyoutLeft + flyoutWidth
         })
@@ -127,7 +134,7 @@ export function PreviewFlyout({ isRight }: { isRight: boolean }) {
       window.removeEventListener('resize', updateRect)
       useStore.getState().setPreviewFlyoutRect(null)
     }
-  }, [item?.id, panelTop, panelH, isHorizontal, isTop, dockLeft, flyoutLeft, flyoutWidth])
+  }, [item?.id, panelTop, panelH, isHorizontal, isTop, dockLeft, flyoutLeft, flyoutWidth, dock.y, dock.height])
 
   // Dismiss preview flyout when user clicks inside the clipboard shelf (outside the flyout)
   useEffect(() => {
@@ -270,13 +277,13 @@ export function PreviewFlyout({ isRight }: { isRight: boolean }) {
                   position: 'absolute',
                   left: dockLeft + flyoutLeft,
                   width: flyoutWidth,
-                  top: 222,
+                  ...(isTop ? { top: dock.y + dock.height + FLYOUT_GAP } : { bottom: screenH - dock.y + FLYOUT_GAP }),
                   display: 'flex',
                   flexDirection: 'column',
                   pointerEvents: 'none',
                   zIndex: 5,
                   originX: 0.5,
-                  originY: 0,
+                  originY: isTop ? 0 : 1,
                   willChange: 'transform, opacity',
                   backfaceVisibility: 'hidden',
                 }
@@ -303,13 +310,18 @@ export function PreviewFlyout({ isRight }: { isRight: boolean }) {
             ref={flyoutRef}
             className="preview-flyout"
             data-preview-flyout="true"
+            onContextMenu={(e) => {
+              if (!IS_DARWIN || !previewItemId) return
+              e.preventDefault()
+              useStore.getState().showItemMenu(previewItemId)
+            }}
             onDragOver={handleDragOver}
             onDragLeave={handleDragLeave}
             onDrop={handleDrop}
             style={{
               width: '100%',
               maxHeight: maxFlyoutHeight,
-              background: dragOver ? 'rgba(15, 30, 18, 0.95)' : '#141414',
+              background: dragOver ? 'var(--bg-flyout-drop)' : 'var(--bg-flyout)',
               borderRadius: 20,
               border: dragOver ? '2px dashed #4caf50' : 'none',
               overflow: 'hidden',
@@ -368,8 +380,8 @@ export function PreviewFlyout({ isRight }: { isRight: boolean }) {
                   left: 12,
                   right: 12,
                   background: 'rgba(16, 16, 20, 0.92)',
-                  border: '1px solid rgba(255, 255, 255, 0.12)',
-                  boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.1), 0 12px 32px rgba(0, 0, 0, 0.75)',
+                  border: '1px solid rgb(var(--ink) / 0.12)',
+                  boxShadow: 'inset 0 1px 0 rgb(var(--ink) / 0.1), 0 12px 32px rgba(0, 0, 0, 0.75)',
                   borderRadius: 12,
                   padding: '7px 10px',
                   display: 'flex',
@@ -380,9 +392,9 @@ export function PreviewFlyout({ isRight }: { isRight: boolean }) {
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                   <div style={{
-                    background: 'rgba(255, 255, 255, 0.08)',
-                    border: '1px solid rgba(255, 255, 255, 0.16)',
-                    color: '#ffffff',
+                    background: 'rgb(var(--ink) / 0.08)',
+                    border: '1px solid rgb(var(--ink) / 0.16)',
+                    color: 'var(--text-primary)',
                     fontSize: 11,
                     fontWeight: 600,
                     padding: '3px 10px',
@@ -398,7 +410,7 @@ export function PreviewFlyout({ isRight }: { isRight: boolean }) {
                     style={{
                       background: 'none',
                       border: 'none',
-                      color: 'rgba(255, 255, 255, 0.65)',
+                      color: 'rgb(var(--ink) / max(0.65, var(--text-alpha-floor)))',
                       fontSize: 12,
                       fontWeight: 500,
                       cursor: 'pointer',
@@ -406,8 +418,8 @@ export function PreviewFlyout({ isRight }: { isRight: boolean }) {
                       fontFamily: SYS_FONT,
                       transition: 'color 0.15s ease'
                     }}
-                    onMouseEnter={(e) => (e.currentTarget.style.color = '#ffffff')}
-                    onMouseLeave={(e) => (e.currentTarget.style.color = 'rgba(255, 255, 255, 0.65)')}
+                    onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--text-primary)')}
+                    onMouseLeave={(e) => (e.currentTarget.style.color = 'rgb(var(--ink) / max(0.65, var(--text-alpha-floor)))')}
                   >
                     {selectedKeys.size === allItemKeys.length ? t('flyout.deselectAll') : t('flyout.selectAll')}
                   </button>
@@ -416,15 +428,16 @@ export function PreviewFlyout({ isRight }: { isRight: boolean }) {
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   <button
                     title={t('flyout.copySelected')}
+                    aria-label={t('flyout.copySelected')}
                     onClick={handleBatchCopy}
                     style={{
                       display: 'flex',
                       alignItems: 'center',
                       gap: 5,
                       height: 28,
-                      background: 'rgba(255, 255, 255, 0.06)',
-                      border: '1px solid rgba(255, 255, 255, 0.08)',
-                      color: 'rgba(255, 255, 255, 0.85)',
+                      background: 'rgb(var(--ink) / 0.06)',
+                      border: '1px solid rgb(var(--ink) / 0.08)',
+                      color: 'rgb(var(--ink) / max(0.85, var(--text-alpha-floor)))',
                       borderRadius: 8,
                       padding: '0 10px',
                       fontSize: 12,
@@ -434,12 +447,12 @@ export function PreviewFlyout({ isRight }: { isRight: boolean }) {
                       transition: 'all 0.15s ease'
                     }}
                     onMouseEnter={(e) => {
-                      e.currentTarget.style.background = 'rgba(255, 255, 255, 0.16)'
-                      e.currentTarget.style.color = '#ffffff'
+                      e.currentTarget.style.background = 'rgb(var(--ink) / 0.16)'
+                      e.currentTarget.style.color = 'var(--text-primary)'
                     }}
                     onMouseLeave={(e) => {
-                      e.currentTarget.style.background = 'rgba(255, 255, 255, 0.06)'
-                      e.currentTarget.style.color = 'rgba(255, 255, 255, 0.85)'
+                      e.currentTarget.style.background = 'rgb(var(--ink) / 0.06)'
+                      e.currentTarget.style.color = 'rgb(var(--ink) / max(0.85, var(--text-alpha-floor)))'
                     }}
                   >
                     <CopyIcon width={13} height={13} />
@@ -448,15 +461,16 @@ export function PreviewFlyout({ isRight }: { isRight: boolean }) {
 
                   <button
                     title={t('flyout.pasteSelected')}
+                    aria-label={t('flyout.pasteSelected')}
                     onClick={handleBatchPaste}
                     style={{
                       display: 'flex',
                       alignItems: 'center',
                       gap: 6,
                       height: 28,
-                      background: '#ffffff',
+                      background: 'var(--surface-inverse)',
                       border: 'none',
-                      color: '#000000',
+                      color: 'var(--on-inverse)',
                       borderRadius: 8,
                       padding: '0 12px',
                       fontSize: 12,
@@ -472,6 +486,7 @@ export function PreviewFlyout({ isRight }: { isRight: boolean }) {
 
                   <button
                     title={t('flyout.clearSelection')}
+                    aria-label={t('flyout.clearSelection')}
                     onClick={() => {
                       playButtonClickSound()
                       setSelectedKeys(new Set())
@@ -479,9 +494,9 @@ export function PreviewFlyout({ isRight }: { isRight: boolean }) {
                     style={{
                       width: 28,
                       height: 28,
-                      background: 'rgba(255, 255, 255, 0.06)',
-                      border: '1px solid rgba(255, 255, 255, 0.08)',
-                      color: 'rgba(255, 255, 255, 0.7)',
+                      background: 'rgb(var(--ink) / 0.06)',
+                      border: '1px solid rgb(var(--ink) / 0.08)',
+                      color: 'rgb(var(--ink) / max(0.7, var(--text-alpha-floor)))',
                       borderRadius: 8,
                       display: 'flex',
                       alignItems: 'center',
@@ -490,12 +505,12 @@ export function PreviewFlyout({ isRight }: { isRight: boolean }) {
                       transition: 'all 0.15s ease'
                     }}
                     onMouseEnter={(e) => {
-                      e.currentTarget.style.background = 'rgba(255, 255, 255, 0.16)'
-                      e.currentTarget.style.color = '#ffffff'
+                      e.currentTarget.style.background = 'rgb(var(--ink) / 0.16)'
+                      e.currentTarget.style.color = 'var(--text-primary)'
                     }}
                     onMouseLeave={(e) => {
-                      e.currentTarget.style.background = 'rgba(255, 255, 255, 0.06)'
-                      e.currentTarget.style.color = 'rgba(255, 255, 255, 0.7)'
+                      e.currentTarget.style.background = 'rgb(var(--ink) / 0.06)'
+                      e.currentTarget.style.color = 'rgb(var(--ink) / max(0.7, var(--text-alpha-floor)))'
                     }}
                   >
                     <CloseIcon width={14} height={14} />
@@ -547,18 +562,19 @@ function QuickActionButton({
     setTimeout(() => setCopied(false), 1200)
   }
 
-  const defaultBg = solidDark ? 'rgba(0, 0, 0, 0.85)' : 'rgba(255, 255, 255, 0.06)'
-  const defaultBorder = solidDark ? '1px solid rgba(255, 255, 255, 0.25)' : '1px solid rgba(255, 255, 255, 0.08)'
-  const defaultColor = solidDark ? '#ffffff' : 'rgba(255, 255, 255, 0.75)'
+  const defaultBg = solidDark ? 'rgba(0, 0, 0, 0.85)' : 'rgb(var(--ink) / 0.06)'
+  const defaultBorder = solidDark ? '1px solid rgba(255, 255, 255, 0.25)' : '1px solid rgb(var(--ink) / 0.08)'
+  const defaultColor = solidDark ? '#ffffff' : 'rgb(var(--ink) / max(0.75, var(--text-alpha-floor)))'
 
-  const hoverBg = solidDark ? 'rgba(0, 0, 0, 0.98)' : 'rgba(255, 255, 255, 0.18)'
-  const hoverColor = '#ffffff'
+  const hoverBg = solidDark ? 'rgba(0, 0, 0, 0.98)' : 'rgb(var(--ink) / 0.18)'
+  const hoverColor = solidDark ? '#ffffff' : 'var(--text-primary)'
   const iconSize = size === 24 ? 12 : 14
   const borderRadius = size === 24 ? 6 : 8
 
   return (
     <button
       title={copied ? t('flyout.copied') : title}
+      aria-label={copied ? t('flyout.copied') : title}
       onClick={handleClick}
       style={{
         width: size,
@@ -605,17 +621,18 @@ function ExplorerButton({
   solidDark?: boolean
 }) {
   const { t } = useTranslation()
-  const defaultBg = solidDark ? 'rgba(0, 0, 0, 0.85)' : 'rgba(255, 255, 255, 0.06)'
-  const defaultBorder = solidDark ? '1px solid rgba(255, 255, 255, 0.25)' : '1px solid rgba(255, 255, 255, 0.08)'
-  const defaultColor = solidDark ? '#ffffff' : 'rgba(255, 255, 255, 0.75)'
-  const hoverBg = solidDark ? 'rgba(0, 0, 0, 0.98)' : 'rgba(255, 255, 255, 0.18)'
-  const hoverColor = '#ffffff'
+  const defaultBg = solidDark ? 'rgba(0, 0, 0, 0.85)' : 'rgb(var(--ink) / 0.06)'
+  const defaultBorder = solidDark ? '1px solid rgba(255, 255, 255, 0.25)' : '1px solid rgb(var(--ink) / 0.08)'
+  const defaultColor = solidDark ? '#ffffff' : 'rgb(var(--ink) / max(0.75, var(--text-alpha-floor)))'
+  const hoverBg = solidDark ? 'rgba(0, 0, 0, 0.98)' : 'rgb(var(--ink) / 0.18)'
+  const hoverColor = solidDark ? '#ffffff' : 'var(--text-primary)'
   const iconSize = size === 24 ? 12 : 14
   const borderRadius = size === 24 ? 6 : 8
 
   return (
     <button
       title={title || t('flyout.openInExplorer')}
+      aria-label={title || t('flyout.openInExplorer')}
       onClick={(e) => {
         e.stopPropagation()
         window.edge.revealFile(path)
@@ -737,7 +754,8 @@ function PreviewContent({
             const sel = window.getSelection()?.toString()
             if (sel && sel.trim().length > 0) return
             e.stopPropagation()
-            tryPaste(() => useStore.getState().paste(item.id))
+            const opts = pasteOptionsFor(item, useStore.getState().settings, e.altKey, edge.platform)
+            tryPaste(() => useStore.getState().paste(item.id, opts))
           }}
           title={t('flyout.clickToPaste')}
           style={{ position: 'relative', display: 'flex', flexDirection: 'column', gap: 14, cursor: 'pointer' }}
@@ -747,8 +765,8 @@ function PreviewContent({
               display: 'inline-flex',
               alignItems: 'center',
               gap: 6,
-              background: 'rgba(255, 255, 255, 0.08)',
-              border: '1px solid rgba(255, 255, 255, 0.14)',
+              background: 'rgb(var(--ink) / 0.08)',
+              border: '1px solid rgb(var(--ink) / 0.14)',
               borderRadius: 999,
               padding: '3px 10px',
               maxWidth: 'calc(100% - 75px)',
@@ -756,10 +774,10 @@ function PreviewContent({
               whiteSpace: 'nowrap',
               boxSizing: 'border-box'
             }}>
-              <GlobeIcon width={13} height={13} style={{ color: 'rgba(255, 255, 255, 0.85)', flexShrink: 0 }} />
-              <span style={{ fontSize: 12, fontWeight: 600, color: '#ffffff', fontFamily: SYS_FONT, flexShrink: 0, whiteSpace: 'nowrap' }}>{info.serviceName}</span>
-              <span style={{ fontSize: 11, color: 'rgba(255, 255, 255, 0.35)', flexShrink: 0 }}>·</span>
-              <span style={{ fontSize: 11.5, color: 'rgba(255, 255, 255, 0.65)', fontFamily: SYS_FONT, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0, flexShrink: 1 }}>{info.domain}</span>
+              <GlobeIcon width={13} height={13} style={{ color: 'rgb(var(--ink) / max(0.85, var(--text-alpha-floor)))', flexShrink: 0 }} />
+              <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)', fontFamily: SYS_FONT, flexShrink: 0, whiteSpace: 'nowrap' }}>{info.serviceName}</span>
+              <span style={{ fontSize: 11, color: 'rgb(var(--ink) / max(0.35, var(--text-alpha-floor)))', flexShrink: 0 }}>·</span>
+              <span style={{ fontSize: 11.5, color: 'rgb(var(--ink) / max(0.65, var(--text-alpha-floor)))', fontFamily: SYS_FONT, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0, flexShrink: 1 }}>{info.domain}</span>
             </div>
 
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -781,7 +799,7 @@ function PreviewContent({
               <div style={{
                 fontSize: 16,
                 fontWeight: 600,
-                color: '#ffffff',
+                color: 'var(--text-primary)',
                 lineHeight: 1.35,
                 fontFamily: SYS_FONT,
                 wordBreak: 'break-word'
@@ -795,8 +813,8 @@ function PreviewContent({
                     fontWeight: 600,
                     textTransform: 'uppercase',
                     letterSpacing: '0.04em',
-                    color: 'rgba(255, 255, 255, 0.6)',
-                    background: 'rgba(255, 255, 255, 0.08)',
+                    color: 'rgb(var(--ink) / max(0.6, var(--text-alpha-floor)))',
+                    background: 'rgb(var(--ink) / 0.08)',
                     padding: '2px 7px',
                     borderRadius: 4,
                     display: 'inline-block'
@@ -816,10 +834,10 @@ function PreviewContent({
             style={{
               padding: '10px 12px',
               background: 'rgba(0, 0, 0, 0.25)',
-              border: '1px solid rgba(255, 255, 255, 0.08)',
+              border: '1px solid rgb(var(--ink) / 0.08)',
               borderRadius: 10,
               fontSize: 12,
-              color: 'rgba(255, 255, 255, 0.80)',
+              color: 'rgb(var(--ink) / max(0.80, var(--text-alpha-floor)))',
               fontFamily: 'var(--font-ui)',
               wordBreak: 'break-all',
               lineHeight: 1.45,
@@ -827,12 +845,12 @@ function PreviewContent({
               transition: 'background 0.15s ease, border-color 0.15s ease'
             }}
             onMouseEnter={(e) => {
-              e.currentTarget.style.background = 'rgba(255, 255, 255, 0.08)'
-              e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.16)'
+              e.currentTarget.style.background = 'rgb(var(--ink) / 0.08)'
+              e.currentTarget.style.borderColor = 'rgb(var(--ink) / 0.16)'
             }}
             onMouseLeave={(e) => {
               e.currentTarget.style.background = 'rgba(0, 0, 0, 0.25)'
-              e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.08)'
+              e.currentTarget.style.borderColor = 'rgb(var(--ink) / 0.08)'
             }}
           >
             {info.cleanUrl || activeText}
@@ -847,7 +865,8 @@ function PreviewContent({
           const sel = window.getSelection()?.toString()
           if (sel && sel.trim().length > 0) return
           e.stopPropagation()
-          tryPaste(() => useStore.getState().paste(item.id))
+          const opts = pasteOptionsFor(item, useStore.getState().settings, e.altKey, edge.platform)
+          tryPaste(() => useStore.getState().paste(item.id, opts))
         }}
         title={t('flyout.clickToPaste')}
         style={{ position: 'relative', display: 'flex', flexDirection: 'column', gap: 10, cursor: 'pointer' }}
@@ -859,8 +878,8 @@ function PreviewContent({
             onClick={() => useStore.getState().copy(item.id)}
           />
         </div>
-        <div style={{
-          color: 'rgba(255,255,255,0.88)',
+        <div dir="auto" style={{
+          color: 'rgb(var(--ink) / max(0.88, var(--text-alpha-floor)))',
           whiteSpace: 'pre-wrap',
           wordBreak: 'break-word',
           fontSize: 13.5,
@@ -904,8 +923,8 @@ function PreviewContent({
         {item.data.imageId && (
           <img src={`edgelocal://${item.data.imageId}`} alt="preview" style={{ width: '100%', maxHeight: '65vh', objectFit: 'contain', borderRadius: 8 }} draggable={false} />
         )}
-        <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)', fontFamily: SYS_FONT, letterSpacing: '0.02em' }}>
-          {item.data.width} × {item.data.height} · {formatBytes(item.data.bytes)}
+        <div style={{ fontSize: 12, color: 'rgb(var(--ink) / max(0.4, var(--text-alpha-floor)))', fontFamily: SYS_FONT, letterSpacing: '0.02em' }}>
+          {item.data.width} × {item.data.height} · {formatBytes(item.data.fileBytes || item.data.bytes)}
         </div>
       </div>
     )
@@ -948,8 +967,8 @@ function PreviewContent({
                 padding: 4,
                 borderRadius: 10,
                 border: isSelected ? '2px solid #ffffff' : '2px solid transparent',
-                background: isSelected ? 'rgba(255, 255, 255, 0.08)' : 'transparent',
-                boxShadow: isSelected ? '0 0 16px rgba(255, 255, 255, 0.2)' : 'none',
+                background: isSelected ? 'rgb(var(--ink) / 0.08)' : 'transparent',
+                boxShadow: isSelected ? '0 0 16px rgb(var(--ink) / 0.2)' : 'none',
                 transition: 'all 0.15s ease'
               }}
             >
@@ -969,8 +988,8 @@ function PreviewContent({
                 />
               </div>
               <img src={`edgelocal://${img.imageId}`} alt="" style={{ width: '100%', maxHeight: '65vh', objectFit: 'contain', borderRadius: 8 }} draggable={false} />
-              <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.35)', textAlign: 'center', fontFamily: SYS_FONT, letterSpacing: '0.02em' }}>
-                {idx + 1} / {item.data.images.length} · {img.width} × {img.height} · {formatBytes(img.bytes)}
+              <div style={{ fontSize: 11, color: 'rgb(var(--ink) / max(0.35, var(--text-alpha-floor)))', textAlign: 'center', fontFamily: SYS_FONT, letterSpacing: '0.02em' }}>
+                {idx + 1} / {item.data.images.length} · {img.width} × {img.height} · {formatBytes(img.fileBytes || img.bytes)}
               </div>
             </div>
           )
@@ -1029,7 +1048,7 @@ function PreviewContent({
             style={{ width: '100%', maxHeight: '65vh', objectFit: 'contain', borderRadius: 8 }}
             draggable={false}
           />
-          <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.5)', fontFamily: SYS_FONT, letterSpacing: '0.02em', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{ fontSize: 12, color: 'rgb(var(--ink) / max(0.5, var(--text-alpha-floor)))', fontFamily: SYS_FONT, letterSpacing: '0.02em', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <span>{fileName}</span>
             {entry?.size ? <span>{formatBytes(entry.size)}</span> : null}
           </div>
@@ -1065,9 +1084,9 @@ function PreviewContent({
             textAlign: 'center',
             gap: 16,
             padding: '36px 20px 28px',
-            background: 'rgba(255, 255, 255, 0.035)',
+            background: 'rgb(var(--ink) / 0.035)',
             borderRadius: 14,
-            border: '1px solid rgba(255, 255, 255, 0.06)',
+            border: '1px solid rgb(var(--ink) / 0.06)',
             position: 'relative',
             cursor: 'grab'
           }}
@@ -1104,7 +1123,7 @@ function PreviewContent({
               style={{
                 fontSize: 15,
                 fontWeight: 600,
-                color: '#ffffff',
+                color: 'var(--text-primary)',
                 wordBreak: 'break-word',
                 lineHeight: 1.4,
                 fontFamily: SYS_FONT
@@ -1112,7 +1131,7 @@ function PreviewContent({
             >
               {fileName}
             </div>
-            <div style={{ fontSize: 12, color: 'rgba(255, 255, 255, 0.45)', fontFamily: SYS_FONT, letterSpacing: '0.02em' }}>
+            <div style={{ fontSize: 12, color: 'rgb(var(--ink) / max(0.45, var(--text-alpha-floor)))', fontFamily: SYS_FONT, letterSpacing: '0.02em' }}>
               {!entry?.isDirectory && entry?.size ? `${formatBytes(entry.size)} · ` : ''}{info.label}
             </div>
           </div>
@@ -1165,7 +1184,7 @@ function PreviewContent({
                   flexDirection: 'column',
                   gap: 8,
                   padding: 4,
-                  background: isSelected ? 'rgba(255, 255, 255, 0.08)' : 'transparent',
+                  background: isSelected ? 'rgb(var(--ink) / 0.08)' : 'transparent',
                   borderRadius: 10,
                   border: isSelected ? '2px solid #ffffff' : '2px solid transparent',
                   cursor: 'grab',
@@ -1209,7 +1228,7 @@ function PreviewContent({
                   draggable={false}
                   style={{ width: '100%', maxHeight: '65vh', objectFit: 'contain', borderRadius: 8 }}
                 />
-                <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.35)', textAlign: 'center', fontFamily: SYS_FONT, letterSpacing: '0.02em' }}>
+                <div style={{ fontSize: 11, color: 'rgb(var(--ink) / max(0.35, var(--text-alpha-floor)))', textAlign: 'center', fontFamily: SYS_FONT, letterSpacing: '0.02em' }}>
                   {fileName}{entry?.size ? ` · ${formatBytes(entry.size)}` : ''}
                 </div>
               </div>
@@ -1247,9 +1266,9 @@ function PreviewContent({
                 textAlign: 'center',
                 gap: 8,
                 padding: '14px 10px 12px',
-                background: isSelected ? 'rgba(255, 255, 255, 0.12)' : 'rgba(255, 255, 255, 0.035)',
+                background: isSelected ? 'rgb(var(--ink) / 0.12)' : 'rgb(var(--ink) / 0.035)',
                 borderRadius: 12,
-                border: isSelected ? '1px solid rgba(255, 255, 255, 0.3)' : '1px solid rgba(255, 255, 255, 0.06)',
+                border: isSelected ? '1px solid rgb(var(--ink) / 0.3)' : '1px solid rgb(var(--ink) / 0.06)',
                 cursor: 'grab',
                 position: 'relative',
                 minWidth: 0,
@@ -1269,8 +1288,8 @@ function PreviewContent({
                       width: 18,
                       height: 18,
                       borderRadius: 4,
-                      border: isSelected ? '1.5px solid #fff' : '1.5px solid rgba(255, 255, 255, 0.3)',
-                      background: isSelected ? '#fff' : 'transparent',
+                      border: isSelected ? '1.5px solid var(--surface-inverse)' : '1.5px solid rgb(var(--ink) / 0.3)',
+                      background: isSelected ? 'var(--surface-inverse)' : 'transparent',
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
@@ -1279,7 +1298,7 @@ function PreviewContent({
                     }}
                   >
                     {isSelected && (
-                      <CheckIcon width={12} height={12} style={{ color: '#000', strokeWidth: 3 }} />
+                      <CheckIcon width={12} height={12} style={{ color: 'var(--on-inverse)', strokeWidth: 3 }} />
                     )}
                   </div>
                 ) : <div />}
@@ -1319,7 +1338,7 @@ function PreviewContent({
                   style={{
                     fontSize: 12,
                     fontWeight: 500,
-                    color: 'rgba(255, 255, 255, 0.92)',
+                    color: 'rgb(var(--ink) / max(0.92, var(--text-alpha-floor)))',
                     wordBreak: 'break-word',
                     overflowWrap: 'anywhere',
                     lineHeight: 1.35,
@@ -1332,7 +1351,7 @@ function PreviewContent({
                 >
                   {fileName}
                 </span>
-                <span style={{ fontSize: 11, color: 'rgba(255, 255, 255, 0.42)', fontFamily: SYS_FONT, letterSpacing: '0.02em' }}>
+                <span style={{ fontSize: 11, color: 'rgb(var(--ink) / max(0.42, var(--text-alpha-floor)))', fontFamily: SYS_FONT, letterSpacing: '0.02em' }}>
                   {!entry?.isDirectory && entry?.size ? formatBytes(entry.size) : info.label}
                 </span>
               </div>

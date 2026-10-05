@@ -1,5 +1,6 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ItemData } from '../shared/types'
+import { restorePlatform, setPlatform } from './helpers/platform'
 
 const mocks = vi.hoisted(() => ({
   listeners: new Map<string, (...args: any[]) => any>(),
@@ -39,7 +40,7 @@ const mocks = vi.hoisted(() => ({
   changeCount: 41,
   imageEmpty: false,
   items: new Map<string, unknown>(),
-  watcher: { setPaused: vi.fn(), resyncSignature: vi.fn(), invalidateSignature: vi.fn() },
+  watcher: { setPaused: vi.fn(), resyncSignature: vi.fn(), invalidateSignature: vi.fn(), noteSelfWrite: vi.fn() },
   clipboardClear: vi.fn(),
   clipboardWriteText: vi.fn(),
   clipboardSignature: vi.fn(),
@@ -50,153 +51,120 @@ const mocks = vi.hoisted(() => ({
   notifications: [] as Array<{ options: { title: string; body: string; icon?: string }; show: ReturnType<typeof vi.fn>; click: () => void }>
 }))
 
-vi.mock('electron', () => ({
-  app: {
-    getVersion: () => '0.0.0',
-    quit: vi.fn(),
-    getAppPath: () => '/mock/app',
-    getPath: () => '/mock/userData',
-    getPreferredSystemLanguages: () => mocks.systemLanguages,
-    focus: mocks.appFocus
-  },
-  dialog: { showMessageBox: mocks.showMessageBox },
-  ipcMain: {
-    on: (channel: string, fn: (...args: any[]) => any) => mocks.listeners.set(channel, fn),
-    handle: (channel: string, fn: (...args: any[]) => any) => mocks.handlers.set(channel, fn)
-  },
-  clipboard: { clear: mocks.clipboardClear, write: vi.fn(), writeText: mocks.clipboardWriteText, writeImage: mocks.writeImage },
-  nativeImage: { createFromPath: (p: string) => ({ isEmpty: () => mocks.imageEmpty, toPNG: () => Buffer.from(`png:${p}`) }) },
-  shell: { openExternal: mocks.openExternal, showItemInFolder: vi.fn() },
-  net: { fetch: vi.fn() },
-  screen: { getCursorScreenPoint: () => mocks.cursor },
-  BrowserWindow: {
-    fromWebContents: () => ({
-      isDestroyed: () => false,
-      getBounds: () => ({ x: 0, y: 0, width: 400, height: 900 })
-    })
-  },
-  systemPreferences: { isTrustedAccessibilityClient: mocks.isTrusted },
-  Notification: class {
-    static isSupported = () => mocks.notificationSupported
-    private handlers = new Map<string, () => void>()
-    show = vi.fn()
-    constructor(public options: { title: string; body: string; icon?: string }) {
-      if (mocks.notificationThrows) throw new Error('no notification center')
-      mocks.notifications.push({ options, show: this.show, click: () => this.handlers.get('click')?.() })
+vi.mock('electron', async () => {
+  const { electronMock, fakeIpcMain } = await import('./helpers/electronMock')
+  return electronMock({
+    app: { getPreferredSystemLanguages: () => mocks.systemLanguages, focus: mocks.appFocus },
+    dialog: { showMessageBox: mocks.showMessageBox },
+    ipcMain: fakeIpcMain(mocks.handlers, mocks.listeners),
+    clipboard: { clear: mocks.clipboardClear, writeText: mocks.clipboardWriteText, writeImage: mocks.writeImage },
+    nativeImage: { createFromPath: (p: string) => ({ isEmpty: () => mocks.imageEmpty, toPNG: () => Buffer.from(`png:${p}`) }) },
+    shell: { openExternal: mocks.openExternal },
+    screen: { getCursorScreenPoint: () => mocks.cursor },
+    BrowserWindow: {
+      fromWebContents: () => ({
+        isDestroyed: () => false,
+        getBounds: () => ({ x: 0, y: 0, width: 400, height: 900 })
+      })
+    },
+    systemPreferences: { isTrustedAccessibilityClient: mocks.isTrusted },
+    Notification: class {
+      static isSupported = () => mocks.notificationSupported
+      private handlers = new Map<string, () => void>()
+      show = vi.fn()
+      constructor(public options: { title: string; body: string; icon?: string }) {
+        if (mocks.notificationThrows) throw new Error('no notification center')
+        mocks.notifications.push({ options, show: this.show, click: () => this.handlers.get('click')?.() })
+      }
+      on(event: string, fn: () => void) {
+        this.handlers.set(event, fn)
+        return this
+      }
     }
-    on(event: string, fn: () => void) {
-      this.handlers.set(event, fn)
-      return this
-    }
-  }
-}))
+  })
+})
 
 vi.mock('node:fs', () => ({ existsSync: () => true }))
 vi.mock('node:child_process', () => ({ execFile: mocks.execFile }))
 
-vi.mock('../electron/main/powershell', () => ({
-  psHost: { run: mocks.psRun },
-  getSystemPowerShellPath: () => 'powershell.exe',
-  getWritableCwd: () => '/tmp'
-}))
+vi.mock('../electron/main/powershell', async () => (await import('./helpers/ipcMocks')).powershellMock({ psHost: { run: mocks.psRun } }))
+vi.mock('../electron/main/pathValidation', async () => (await import('./helpers/ipcMocks')).pathValidationMock())
 
-vi.mock('../electron/main/pathValidation', () => ({
-  filterValidPaths: (paths: string[]) => paths,
-  isExistingFilePath: () => true
-}))
+vi.mock('../electron/main/state', async () =>
+  (await import('./helpers/stateMock')).stateModuleMock({
+    store: {
+      get: (id: string) => mocks.items.get(id) ?? { id },
+      touch: mocks.touch,
+      delete: mocks.storeDelete,
+      toDto: () => [],
+      resolveStoredImagePath: (imageId: string, ext = 'png') => `/store/${imageId}.${ext}`
+    },
+    settings: () => ({ movePastedToTop: true, incognito: false, language: mocks.language }),
+    saveSettings: mocks.saveSettings,
+    pushState: { items: mocks.pushItems },
+    addFiles: mocks.addFiles,
+    watcher: mocks.watcher
+  })
+)
 
-vi.mock('../electron/main/state', () => ({
-  getStore: () => ({
-    get: (id: string) => mocks.items.get(id) ?? { id },
-    touch: mocks.touch,
-    delete: mocks.storeDelete,
-    toDto: () => [],
-    resolveStoredImagePath: (imageId: string, ext = 'png') => `/store/${imageId}.${ext}`
-  }),
-  loadSettings: () => ({ movePastedToTop: true, incognito: false, language: mocks.language }),
-  saveSettings: mocks.saveSettings,
-  pushState: { items: mocks.pushItems, togglePanel: vi.fn(), settings: vi.fn() },
-  addFiles: mocks.addFiles,
-  getWatcher: () => mocks.watcher
-}))
+vi.mock('../electron/main/window', async () =>
+  (await import('./helpers/ipcMocks')).windowMock({
+    sendToMainWindow: (channel: string, payload: { message: string; tone: string }) => {
+      if (channel === 'ui:toast') mocks.toasts.push({ message: payload.message, tone: payload.tone })
+    },
+    setHeartbeatPaused: mocks.setHeartbeatPaused,
+    resolvePasteTarget: vi.fn()
+  })
+)
 
-vi.mock('../electron/main/window', () => ({
-  sendToMainWindow: (channel: string, payload: { message: string; tone: string }) => {
-    if (channel === 'ui:toast') mocks.toasts.push({ message: payload.message, tone: payload.tone })
-  },
-  setInteractive: vi.fn(),
-  setHeartbeatPaused: mocks.setHeartbeatPaused,
-  setHotZoneWidth: vi.fn(),
-  repositionWindow: vi.fn(),
-  getDisplayListOptions: vi.fn(() => []),
-  popUpAndRetract: vi.fn(),
-  setWindowFocusable: vi.fn(),
-  captureExternalForeground: vi.fn(),
-  traceFg: vi.fn(),
-  resolvePasteTarget: vi.fn()
-}))
+vi.mock('../electron/main/index', async () => (await import('./helpers/ipcMocks')).indexMock())
+vi.mock('../electron/main/onboardingWindow', async () => (await import('./helpers/ipcMocks')).onboardingWindowMock())
+vi.mock('../electron/main/tray', async () => (await import('./helpers/ipcMocks')).trayMock())
 
-vi.mock('../electron/main/index', () => ({ registerGlobalHotkey: vi.fn() }))
-vi.mock('../electron/main/onboardingWindow', () => ({ getOnboardingWindow: () => null }))
-vi.mock('../electron/main/tray', () => ({ rebuildTrayMenu: vi.fn() }))
+vi.mock('../electron/main/drag', async () =>
+  (await import('./helpers/ipcMocks')).dragMock({
+    startDragOut: mocks.startDragOut,
+    resolveDragData: mocks.resolveDragData,
+    stageDragFile: mocks.stageDragFile
+  })
+)
 
-vi.mock('../electron/main/drag', () => ({
-  startDragOut: mocks.startDragOut,
-  resolveDragData: mocks.resolveDragData,
-  prestageDrag: vi.fn(),
-  stageDragFile: mocks.stageDragFile
-}))
+vi.mock('../electron/clipboard/formats', async () =>
+  (await import('./helpers/ipcMocks')).formatsMock({
+    clipboardSignature: mocks.clipboardSignature,
+    signatureMatchesItem: mocks.signatureMatchesItem,
+    localPathFromFileUrl: mocks.localPath
+  })
+)
 
-vi.mock('../electron/clipboard/formats', () => ({
-  clipboardSignature: mocks.clipboardSignature,
-  formatTabularDataForClipboard: (text: string, html?: string) => ({ text, html }),
-  signatureMatchesItem: mocks.signatureMatchesItem,
-  localPathFromFileUrl: mocks.localPath
-}))
+vi.mock('../electron/main/updater', async () => (await import('./helpers/ipcMocks')).updaterMock())
+vi.mock('../electron/main/config', async () => (await import('./helpers/ipcMocks')).configMock())
+vi.mock('../electron/main/loginItems', async () => (await import('./helpers/ipcMocks')).loginItemsMock())
+vi.mock('../electron/store/paths', async () => (await import('./helpers/pathsMock')).pathsModuleMock())
 
-vi.mock('../electron/main/updater', () => ({
-  quitAndInstallUpdate: vi.fn(),
-  checkForUpdatesManual: vi.fn(),
-  startUpdateDownload: vi.fn(),
-  syncAutoUpdaterState: vi.fn(),
-  getCachedUpdateState: vi.fn(),
-  triggerBackgroundCheck: vi.fn()
-}))
+vi.mock('../electron/main/macNative', async () =>
+  (await import('./helpers/ipcMocks')).macNativeMock({
+    pressedMouseButtons: () => mocks.pressed,
+    postCommandV: () => mocks.postCommandV(),
+    mouseButtonsAvailable: () => mocks.bridgeReady,
+    canPostEvents: () => mocks.canPost,
+    requestPostEvents: () => mocks.requestPostEvents(),
+    frontmostPid: () => (mocks.frontPids.length > 1 ? mocks.frontPids.shift()! : mocks.frontPids[0] ?? 0),
+    weAreFrontmost: () => (mocks.frontPids[0] ?? 0) === process.pid,
+    activatePid: (pid: number) => mocks.activatePid(pid)
+  })
+)
 
-vi.mock('../electron/main/config', () => ({ isStoreBuild: () => false }))
+vi.mock('../electron/main/macPasteboard', async () =>
+  (await import('./helpers/ipcMocks')).macPasteboardMock({
+    writeFileUrls: (paths: string[]) => mocks.writeFileUrls(paths),
+    addFileUrlToCurrentItem: (path: string, expected: number) => mocks.addFileUrl(path, expected),
+    addImageDataToFirstItem: (png: Buffer, expected: number) => mocks.addImageData(png.toString(), expected),
+    pasteboardChangeCount: () => mocks.changeCount
+  })
+)
 
-vi.mock('../electron/main/loginItems', () => ({
-  applyLaunchAtLogin: vi.fn(),
-  refreshLaunchAtLoginFromOs: vi.fn()
-}))
-
-vi.mock('../electron/store/paths', () => ({
-  PATHS: { icon: () => '/mock/app/resources/icon.png' },
-  toUnpackagedFilePath: (p: string) => p,
-  toUnpackagedFilePaths: (ps: string[]) => ps
-}))
-
-vi.mock('../electron/main/macNative', () => ({
-  pressedMouseButtons: () => mocks.pressed,
-  postCommandV: () => mocks.postCommandV(),
-  mouseButtonsAvailable: () => mocks.bridgeReady,
-  canPostEvents: () => mocks.canPost,
-  requestPostEvents: () => mocks.requestPostEvents(),
-  frontmostPid: () => (mocks.frontPids.length > 1 ? mocks.frontPids.shift()! : mocks.frontPids[0] ?? 0),
-  weAreFrontmost: () => (mocks.frontPids[0] ?? 0) === process.pid,
-  activatePid: (pid: number) => mocks.activatePid(pid)
-}))
-
-vi.mock('../electron/main/macPasteboard', () => ({
-  writeFileUrls: (paths: string[]) => mocks.writeFileUrls(paths),
-  addFileUrlToCurrentItem: (path: string, expected: number) => mocks.addFileUrl(path, expected),
-  addImageDataToFirstItem: (png: Buffer, expected: number) => mocks.addImageData(png.toString(), expected),
-  pasteboardChangeCount: () => mocks.changeCount
-}))
-
-vi.mock('../electron/main/macScreenshots', () => ({
-  refreshScreenshotWatcher: () => mocks.refreshScreenshotWatcher()
-}))
+vi.mock('../electron/main/macScreenshots', async () => (await import('./helpers/ipcMocks')).macScreenshotsMock({ refreshScreenshotWatcher: () => mocks.refreshScreenshotWatcher() }))
 
 import { MOUSE_RELEASE_MAX_WAIT_MS, MOUSE_RELEASE_POLL_MS } from '../electron/main/macDrag'
 
@@ -206,12 +174,6 @@ let registerIpc: IpcModule['registerIpc']
 let registerSendListeners: IpcModule['registerSendListeners']
 let simulatePaste: IpcModule['simulatePaste']
 let writeItemToClipboard: IpcModule['writeItemToClipboard']
-
-const realPlatform = process.platform
-
-function setPlatform(value: string): void {
-  Object.defineProperty(process, 'platform', { value, configurable: true })
-}
 
 function makeSender(): { send: ReturnType<typeof vi.fn>; isDestroyed: ReturnType<typeof vi.fn>; channels: () => string[] } {
   const send = vi.fn()
@@ -284,6 +246,7 @@ beforeEach(async () => {
   mocks.watcher.setPaused.mockReset()
   mocks.watcher.resyncSignature.mockReset()
   mocks.watcher.invalidateSignature.mockReset()
+  mocks.watcher.noteSelfWrite.mockReset()
   mocks.clipboardClear.mockReset()
   mocks.clipboardWriteText.mockReset()
   mocks.clipboardSignature.mockReset()
@@ -297,11 +260,11 @@ beforeEach(async () => {
 afterEach(() => {
   vi.useRealTimers()
   vi.restoreAllMocks()
-  setPlatform(realPlatform)
+  restorePlatform()
 })
 
 afterAll(() => {
-  setPlatform(realPlatform)
+  restorePlatform()
 })
 
 describe('item:start-drag completion', () => {
@@ -685,7 +648,8 @@ describe('item:copy of an image on darwin', () => {
     await expect(mocks.handlers.get('item:copy')!({}, 'img-1')).resolves.toBe(true)
     expect(order).toEqual(['pause', 'image', 'file-url'])
     expect(mocks.addFileUrl.mock.calls).toEqual([[named, 41]])
-    expect(mocks.touch).toHaveBeenCalledWith('img-1')
+    expect(mocks.watcher.noteSelfWrite).toHaveBeenCalledTimes(1)
+    expect(mocks.touch).not.toHaveBeenCalled()
 
     await vi.advanceTimersByTimeAsync(200)
     expect(order).toEqual(['pause', 'image', 'file-url', 'resume'])
@@ -1028,7 +992,7 @@ describe('simulatePaste on darwin', () => {
 
     vi.resetModules()
     const fresh = await import('../electron/main/ipc')
-    mocks.language = 'de'
+    mocks.language = 'xx'
     fresh.simulatePaste()
     expect(mocks.notifications[1].options.title).toBe('Copied — press ⌘V')
     expect(mocks.notifications[1].options.body).toContain('Accessibility')

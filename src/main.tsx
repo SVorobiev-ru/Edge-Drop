@@ -2,6 +2,7 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import App from './App'
+import { IS_DARWIN } from './lib/edge'
 
 import '@fontsource/plus-jakarta-sans/400.css'
 import '@fontsource/plus-jakarta-sans/500.css'
@@ -17,6 +18,7 @@ import './styles/panel.css'
 import './styles/item.css'
 import './styles/settings.css'
 import './styles/emoji.css'
+import './styles/darwin.css'
 
 const container = document.getElementById('root')
 if (!container) throw new Error('#root element not found')
@@ -26,6 +28,8 @@ if (!container) throw new Error('#root element not found')
 // saving massive amounts of GPU fill-rate on 4K/Hi-DPI displays.
 const dpr = window.devicePixelRatio || 1
 document.documentElement.style.setProperty('--dpr', dpr.toString())
+
+if (IS_DARWIN) document.documentElement.classList.add('platform-darwin')
 
 const root = createRoot(container)
 

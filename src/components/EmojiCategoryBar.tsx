@@ -88,10 +88,10 @@ export function EmojiCategoryBar({ isHorizontal = false, className = '', onHover
         })}
         value={category}
         onChange={(val) => selectCategory(val as EmojiCategoryId)}
-        trackColor="#141414"
-        thumbColor="#ffffff"
-        textColor="rgba(255, 255, 255, 0.72)"
-        activeTextColor="#000000"
+        trackColor="var(--bg-2)"
+        thumbColor="var(--surface-inverse)"
+        textColor="rgb(var(--ink) / max(0.72, var(--text-alpha-floor)))"
+        activeTextColor="var(--on-inverse)"
         size="custom"
         height={trackHeight}
         minWidth={slotSize}
