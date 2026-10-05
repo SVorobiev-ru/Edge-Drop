@@ -68,8 +68,9 @@ afterEach(() => {
   for (const dir of created.splice(0)) rmSync(dir, { recursive: true, force: true })
 })
 
-afterAll(() => {
+afterAll(async () => {
   restorePlatform()
+  await new Promise((resolve) => setTimeout(resolve, 200))
 })
 
 describe('source app on items', () => {
