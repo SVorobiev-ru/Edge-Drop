@@ -7,7 +7,6 @@ import type { LucideIcon } from 'lucide-react'
 import type { SVGProps } from 'react'
 import {
   Info,
-  Sparkles,
   ChevronLeft,
   ChevronRight,
   ChevronUp,
@@ -18,20 +17,16 @@ import {
   Trash2,
   Copy,
   Settings as SettingsGear,
-  GripVertical,
   Image as ImageGraphic,
   Link,
   X,
   Minus,
-  ArrowDownToLine,
   Layers,
   Maximize2,
   Minimize2,
   FolderOpen,
   Check,
   LogOut,
-  Coffee,
-  Heart,
   Star,
   RotateCcw,
   Clipboard,
@@ -39,13 +34,11 @@ import {
   Files,
   Globe,
   Smile,
-  Users,
   PawPrint,
   Utensils,
   Trophy,
   Lightbulb,
   Shapes,
-  Flag,
   Palette
 } from 'lucide-react'
 
@@ -64,12 +57,6 @@ function uiIcon(Icon: LucideIcon, fallback = 16) {
     )
   }
 }
-
-export const KofiLogo = (p: P) => (
-  <svg viewBox="0 0 24 24" width={p.width ?? 18} height={p.height ?? 18} fill="currentColor" {...(p as any)}>
-    <path d="M23.881 8.948c-.773-4.085-4.859-4.593-4.859-4.593H.723c-.604 0-.679.798-.679.798s-.082 7.324-.022 11.822c.164 2.424 2.586 2.672 2.586 2.672s8.267-.023 11.966-.049c2.438-.426 2.683-2.566 2.658-3.734 4.352.24 7.422-2.831 6.649-6.916zm-11.062 3.511c-1.246 1.453-4.011 3.976-4.011 3.976s-.121.119-.31.023c-.076-.057-.108-.09-.108-.09-.443-.441-3.368-3.049-4.034-3.954-.709-.965-1.041-2.7-.091-3.71.951-1.01 3.005-1.086 4.363.407 0 0 1.565-1.782 3.468-.963 1.904.82 1.832 3.011.723 4.311zm6.173.478c-.928.116-1.682.028-1.682.028V7.284h1.77s1.971.551 1.971 2.638c0 1.913-.985 2.667-2.059 3.015z" />
-  </svg>
-)
 
 export const GithubOctocatLogo = (p: P) => (
   <svg viewBox="0 0 24 24" width={p.width ?? 15} height={p.height ?? 15} fill="currentColor" {...(p as any)}>
@@ -90,14 +77,10 @@ export const MicrosoftStoreLogo = (p: P) => {
 }
 
 export const RotateCcwIcon = uiIcon(RotateCcw)
-export const CoffeeIcon = uiIcon(Coffee)
-export const HeartIcon = uiIcon(Heart)
 export const StarIcon = uiIcon(Star)
 export const GlobeIcon = uiIcon(Globe)
 export const LogOutIcon = uiIcon(LogOut)
 export const InfoIcon = uiIcon(Info)
-export const SparklesIcon = uiIcon(Sparkles)
-export const WhatsNewIcon = InfoIcon
 export const ChevronLeftIcon = uiIcon(ChevronLeft)
 export const ChevronRightIcon = uiIcon(ChevronRight)
 export const ChevronUpIcon = uiIcon(ChevronUp)
@@ -112,12 +95,10 @@ export const PinFillIcon = (p: P) => {
 export const TrashIcon = uiIcon(Trash2)
 export const CopyIcon = uiIcon(Copy)
 export const GearIcon = uiIcon(SettingsGear)
-export const GripIcon = uiIcon(GripVertical)
 export const ImageIcon = uiIcon(ImageGraphic)
 export const LinkIcon = uiIcon(Link)
 export const CloseIcon = uiIcon(X)
 export const MinusIcon = uiIcon(Minus)
-export const DropIcon = uiIcon(ArrowDownToLine)
 export const BundleIcon = uiIcon(Layers)
 export const ExpandIcon = uiIcon(Maximize2)
 export const ContractIcon = uiIcon(Minimize2)
@@ -140,23 +121,19 @@ export const ClockIcon = (p: P) => {
     </svg>
   )
 }
-export const RecentIcon = ClockIcon
 export const TypeIcon = uiIcon(Type)
 export const FilesIcon = uiIcon(Files)
 export const PaletteIcon = uiIcon(Palette)
 
 export const EmojiSmileIcon = uiIcon(Smile, 18)
 export const EmojiClockIcon = (p: P) => <ClockIcon width={p.width ?? 18} height={p.height ?? 18} {...(p as any)} />
-export const EmojiUserIcon = uiIcon(Users, 18)
 export const EmojiPawIcon = uiIcon(PawPrint, 18)
 export const EmojiFoodIcon = uiIcon(Utensils, 18)
 export const EmojiPlaneIcon = uiIcon(Globe, 18)
 export const EmojiTrophyIcon = uiIcon(Trophy, 18)
 export const EmojiBulbIcon = uiIcon(Lightbulb, 18)
 export const EmojiShapesIcon = uiIcon(Shapes, 18)
-export const EmojiFlagIcon = uiIcon(Flag, 18)
 import { CustomFileIcon, FileStackPhoto } from './CustomFileIcon'
 export { CustomFileIcon, CustomFileIcon as FileKindIcon, FileStackPhoto }
 
 export const FileIcon = (p: P) => <CustomFileIcon width={p.width ?? 16} height={p.height ?? 16} {...(p as any)} />
-export const FileIconGlyph = FileIcon

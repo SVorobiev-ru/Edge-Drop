@@ -1,0 +1,308 @@
+/* ── Top Update Banner (Live Downloading Progress & Ready to Install) ── */
+
+@keyframes updateCardFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ── Manual Update Section (Bottom of Behaviour, above Community) ── */
+.manual-update-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.manual-update-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  background: var(--bg-card, var(--bg-2));
+  border-radius: var(--radius-card, 16px);
+  border: 1px solid rgb(var(--ink) / 0.08);
+  box-sizing: border-box;
+  animation: updateCardFadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: background 0.14s ease, border-color 0.14s ease;
+}
+
+.manual-update-card:hover {
+  background: var(--bg-card-hover, var(--bg-3));
+  border-color: rgb(var(--ink) / 0.14);
+}
+
+.manual-update-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.manual-update-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: calc(13px * var(--font-scale, 1));
+  font-weight: 600;
+  color: var(--text-primary);
+  line-height: 1.3;
+}
+
+.manual-update-title.error {
+  color: #f87171;
+}
+
+.manual-update-desc {
+  font-size: calc(11.5px * var(--font-scale, 1));
+  color: rgb(var(--ink) / max(0.62, var(--text-alpha-floor)));
+  line-height: 1.35;
+}
+
+.manual-update-desc.error {
+  color: rgba(248, 113, 113, 0.75);
+}
+
+.manual-update-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  height: 32px;
+  min-height: 32px;
+  max-height: 32px;
+  padding: 0 14px;
+  border-radius: 10px;
+  font-size: 11.5px;
+  font-weight: 600;
+  box-sizing: border-box;
+  cursor: pointer;
+  border: none;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  outline: none;
+  user-select: none;
+}
+
+.manual-update-pill.primary {
+  background: var(--surface-inverse);
+  color: var(--on-inverse);
+}
+
+.manual-update-pill.primary:hover:not(:disabled) {
+  background: rgb(var(--ink) / 0.9);
+  transform: translateY(-1px);
+}
+
+.manual-update-pill.primary:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.manual-update-pill.primary:disabled {
+  cursor: default;
+  opacity: 0.92;
+}
+
+.manual-update-pill.outline {
+  background: rgb(var(--ink) / 0.05);
+  border: 1px solid rgb(var(--ink) / 0.08);
+  color: rgb(var(--ink) / max(0.85, var(--text-alpha-floor)));
+  font-weight: 500;
+}
+
+.manual-update-pill.outline:hover:not(:disabled) {
+  background: rgb(var(--ink) / 0.09);
+  border-color: rgb(var(--ink) / 0.16);
+  color: var(--text-primary);
+  transform: translateY(-1px);
+}
+
+.manual-update-pill.outline:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.manual-update-pill.outline:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+/* ── Unified Update Indicator Dots ── */
+.update-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: inline-block;
+  background: #30d158;
+  box-shadow: 0 0 8px rgba(48, 209, 88, 0.6);
+}
+
+.update-dot.checking {
+  animation: dotPulse 1.2s ease-in-out infinite;
+}
+
+@keyframes dotPulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+    box-shadow: 0 0 8px rgba(48, 209, 88, 0.6);
+  }
+  50% {
+    opacity: 0.4;
+    transform: scale(0.85);
+    box-shadow: 0 0 2px rgba(48, 209, 88, 0.2);
+  }
+}
+
+/* ── Unified Group Labels & Header for Update Cards ── */
+.update-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  margin-bottom: 3px;
+}
+
+.update-group-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgb(var(--ink) / max(0.45, var(--text-alpha-floor)));
+  margin: 0;
+  user-select: none;
+}
+
+.update-info-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  margin: -2px -2px 0 0;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: rgb(var(--ink) / max(0.45, var(--text-alpha-floor)));
+  cursor: pointer;
+  outline: none;
+  transition: color 0.15s ease, background-color 0.15s ease, transform 0.1s ease;
+  flex-shrink: 0;
+}
+
+.update-info-btn:hover {
+  color: var(--text-primary);
+  background: rgb(var(--ink) / 0.08);
+  transform: scale(1.08);
+}
+
+.update-info-btn:active {
+  transform: scale(0.95);
+}
+
+/* ── Unified Action Row and Buttons ── */
+.update-action-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.update-action-btn {
+  height: 32px;
+  min-height: 32px;
+  max-height: 32px;
+  padding: 0 12px;
+  border-radius: 10px;
+  font-size: 11.5px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  cursor: pointer;
+  border: none;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  outline: none;
+  user-select: none;
+}
+
+.update-action-btn:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.update-action-btn.full-width {
+  width: 100%;
+}
+
+.update-action-btn.primary {
+  background: var(--surface-inverse);
+  color: var(--on-inverse);
+  box-shadow: 0 0 14px rgb(var(--ink) / 0.16), 0 2px 8px rgba(0, 0, 0, 0.35);
+  animation: updateBtnGlow 3s ease-in-out infinite;
+}
+
+.update-action-btn.primary:hover:not(:disabled) {
+  background: var(--surface-inverse);
+  box-shadow: 0 0 22px rgb(var(--ink) / 0.35), 0 4px 12px rgba(0, 0, 0, 0.45);
+  transform: translateY(-1px);
+}
+
+@keyframes updateBtnGlow {
+  0%, 100% {
+    box-shadow: 0 0 12px rgb(var(--ink) / 0.12), 0 2px 6px rgba(0, 0, 0, 0.35);
+  }
+  50% {
+    box-shadow: 0 0 20px rgb(var(--ink) / 0.28), 0 2px 8px rgba(0, 0, 0, 0.4);
+  }
+}
+
+.update-action-btn.secondary {
+  background: rgb(var(--ink) / 0.06);
+  border: 1px solid rgb(var(--ink) / 0.12);
+  color: rgb(var(--ink) / max(0.85, var(--text-alpha-floor)));
+  font-weight: 500;
+}
+
+.update-action-btn.secondary:hover:not(:disabled) {
+  background: rgb(var(--ink) / 0.11);
+  border-color: rgb(var(--ink) / 0.22);
+  color: var(--text-primary);
+  transform: translateY(-1px);
+}
+
+.update-action-btn.secondary:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* ── Promoted Active Update Card at Top/Front (Border-free) ── */
+.update-promoted-card {
+  background: var(--bg-card, var(--bg-2)) !important;
+  border: none !important;
+  box-shadow: none !important;
+  transition: background 0.14s ease;
+}
+
+.update-promoted-card:hover {
+  background: var(--bg-card-hover, var(--bg-3)) !important;
+}
+
+.settings-shelf-card.update-promoted-card {
+  width: 250px;
+}
+

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+import { readFlyoutSource, readSettingsSource, readStyleSource } from './helpers/splitSources'
 
 function read(relPath: string): string {
   return readFileSync(resolve(__dirname, '..', relPath), 'utf8')
@@ -31,7 +32,7 @@ describe('Horizontal Card Shelf Settings Layout', () => {
   })
 
   it('item.css contains 210px card width, 5-line text clamp, and compact actions toolbar', () => {
-    const itemCss = read('src/styles/item.css')
+    const itemCss = readStyleSource('src/styles/item.css')
     expect(itemCss).toContain('width: 210px')
     expect(itemCss).toContain('-webkit-line-clamp: 5')
     expect(itemCss).toContain('.list.horizontal .actions')
@@ -39,13 +40,13 @@ describe('Horizontal Card Shelf Settings Layout', () => {
   })
 
   it('Settings accepts isHorizontal prop and detects horizontal dock positions', () => {
-    const src = read('src/components/Settings.tsx')
+    const src = readSettingsSource()
     expect(src).toContain('isHorizontal: propIsHorizontal')
     expect(src).toContain('isHorizontalEdge(settings.stickPosition)')
   })
 
   it('Settings renders horizontal card shelf with smooth scrolling track and shelf cards', () => {
-    const src = read('src/components/Settings.tsx')
+    const src = readSettingsSource()
     expect(src).toContain('if (isHorizontal)')
     expect(src).toContain('settings-horizontal-shelf')
     expect(src).toContain('settings-shelf-track')
@@ -66,7 +67,7 @@ describe('Horizontal Card Shelf Settings Layout', () => {
   })
 
   it('Trigger bar card renders length presets and thickness slider in horizontal settings', () => {
-    const src = read('src/components/Settings.tsx')
+    const src = readSettingsSource()
     expect(src).toContain("t('position.hoverAreaSizeTitle')")
     expect(src).toContain("t('position.edgeTriggerThicknessTitle')")
     expect(src).toContain('settings.hotZoneHeight')
@@ -76,12 +77,12 @@ describe('Horizontal Card Shelf Settings Layout', () => {
   })
 
   it('Appearance card triggers popup indicator style selector matching left/right alignment', () => {
-    const src = read('src/components/Settings.tsx')
+    const src = readSettingsSource()
     expect(src).toContain('style-preview-toggle-btn')
     expect(src).toContain('handleToggleFlyout')
     expect(src).toContain('copyIndicatorStyle')
 
-    const flyoutSrc = read('src/components/IndicatorStyleFlyout.tsx')
+    const flyoutSrc = readFlyoutSource('src/components/IndicatorStyleFlyout.tsx')
     expect(flyoutSrc).toContain("patch({ copyIndicatorStyle: 'logo' })")
     expect(flyoutSrc).toContain("patch({ copyIndicatorStyle: 'check' })")
     expect(flyoutSrc).toContain("patch({ copyIndicatorStyle: 'copy' })")
@@ -92,7 +93,7 @@ describe('Horizontal Card Shelf Settings Layout', () => {
   })
 
   it('Appearance shelf renders Show Copy Indicator toggle card first, followed by Indicator Style card matching Left/Right', () => {
-    const src = read('src/components/Settings.tsx')
+    const src = readSettingsSource()
     const appearanceSection = src.slice(src.indexOf("horizontalTab === 'appearance'"), src.indexOf("horizontalTab === 'appearance'") + 4000)
     const toggleCardIdx = appearanceSection.indexOf('renderCopyIndicatorCard()')
     const styleCardIdx = appearanceSection.indexOf('renderIndicatorStyleCard()')
@@ -117,7 +118,7 @@ describe('Horizontal Card Shelf Settings Layout', () => {
   })
 
   it('settings.css contains styles for horizontal shelf, track, and cards', () => {
-    const css = read('src/styles/settings.css')
+    const css = readStyleSource('src/styles/settings.css')
     expect(css).toContain('.settings-horizontal-shelf')
     expect(css).toContain('.settings-shelf-track')
     expect(css).toContain('.settings-shelf-card')
@@ -179,9 +180,9 @@ describe('Horizontal Card Shelf Settings Layout', () => {
   })
 
   it('Horizontal shelf includes trigger thickness and auto-updates, without panel height, horizontal position, or edge trigger position', () => {
-    const src = read('src/components/Settings.tsx')
+    const src = readSettingsSource()
     // Find the isHorizontal branch
-    const horizontalBlock = horizontalComposition(src)
+    const horizontalBlock = horizontalComposition(read('src/components/settings/HorizontalSettings.tsx'))
     // Should NOT contain horizontal position offset slider or panel height pills
     expect(horizontalBlock).not.toContain('renderPositionSliderCard')
     expect(horizontalBlock).not.toContain('renderPanelHeightCard')
@@ -209,7 +210,7 @@ describe('Horizontal Card Shelf Settings Layout', () => {
   })
 
   it('Vertical left/right settings remain untouched with position slider and vertical controls intact', () => {
-    const src = read('src/components/Settings.tsx')
+    const src = readSettingsSource()
     const verticalBlock = src.slice(src.indexOf('const maxTabLen ='))
     expect(verticalBlock).toContain('renderPositionSliderCard()')
     expect(verticalBlock).toContain('renderTriggerAlignmentCard()')
@@ -220,19 +221,21 @@ describe('Horizontal Card Shelf Settings Layout', () => {
   })
 
   it('Vertical settings arranges edge placement buttons in 3-way layout (left, top, right)', () => {
-    const src = read('src/components/Settings.tsx')
+    const src = readSettingsSource()
     const verticalBlock = src.slice(src.indexOf('const maxTabLen ='))
     expect(verticalBlock).toContain('renderPlacementCard()')
     expect(cardSource(src, 'renderPlacementCard')).toContain('placement-3way-wrap')
 
-    const css = read('src/styles/settings.css')
+    const css = readStyleSource('src/styles/settings.css')
     expect(css).toContain('.placement-3way-wrap')
     expect(css).toContain('.placement-3way-wrap .pill')
   })
 
   it('Horizontal dashboard uses correct translations, multi-column classes, and explicit pixel values', () => {
-    const src = read('src/components/Settings.tsx')
-    const horizontalBlock = src.slice(src.indexOf('if (isHorizontal) {'), src.indexOf('const maxTabLen ='))
+    const src = readSettingsSource()
+    const horizontalBlock = ['HorizontalSettings', 'UpdateCards', 'BehaviourCards', 'PositionCards', 'AppearanceCards']
+      .map((name) => read(`src/components/settings/${name}.tsx`))
+      .join('\n')
 
     // Translation fix: supportOnKofi instead of supportDev
     expect(horizontalBlock).toContain("t('footer.supportOnKofi')")
@@ -259,7 +262,7 @@ describe('Horizontal Card Shelf Settings Layout', () => {
   })
 
   it('settings.css contains tab-view full-width obsidian rules', () => {
-    const css = read('src/styles/settings.css')
+    const css = readStyleSource('src/styles/settings.css')
     expect(css).toContain('.settings-shelf-track.tab-view')
     expect(css).toContain('.settings-shelf-track.tab-view .settings-shelf-card')
   })
@@ -274,11 +277,11 @@ describe('Horizontal Card Shelf Settings Layout', () => {
   })
 
   it('Horizontal settings maintains independent scroll positions per section and resets to behaviour tab on open/close', () => {
-    const storeSrc = read('src/store/appStore.ts')
+    const storeSrc = read('src/store/viewSlice.ts')
     // setSettingsOpen should reset settingsTab to behaviour so reopening starts on first tab
     expect(storeSrc).toContain("settingsTab: 'behaviour'")
 
-    const settingsSrc = read('src/components/Settings.tsx')
+    const settingsSrc = readSettingsSource()
     // Independent scroll memory per tab
     expect(settingsSrc).toContain('horizontalTabScrollPositions')
     expect(settingsSrc).toContain('handleShelfScroll')
@@ -287,7 +290,7 @@ describe('Horizontal Card Shelf Settings Layout', () => {
     expect(settingsSrc).toContain("useStore.getState().setSettingsTab('behaviour')")
   })
 it('Appearance shelf renders Card 1 Copy Indicator toggle first, then Card 2 Indicator Style flyout trigger second', () => {
-    const src = read('src/components/Settings.tsx')
+    const src = readSettingsSource()
     const appearanceIndex = src.indexOf("horizontalTab === 'appearance'")
     expect(appearanceIndex).toBeGreaterThan(-1)
     const appearanceBlock = src.slice(appearanceIndex)
@@ -307,22 +310,22 @@ it('Appearance shelf renders Card 1 Copy Indicator toggle first, then Card 2 Ind
   })
 
   it('IndicatorStyleFlyout anchors horizontally relative to styleFlyoutAnchorRect', () => {
-    const flyoutSrc = read('src/components/IndicatorStyleFlyout.tsx')
-    expect(flyoutSrc).toContain('styleFlyoutAnchorRect')
-    expect(flyoutSrc).toContain('styleFlyoutAnchorRect.x')
+    const flyoutSrc = readFlyoutSource('src/components/IndicatorStyleFlyout.tsx')
+    expect(read('src/components/IndicatorStyleFlyout.tsx')).toContain('anchorRect={styleFlyoutAnchorRect}')
+    expect(flyoutSrc).toContain('anchorRect.x')
     expect(flyoutSrc).toContain('anchorCenterX - flyoutWidth / 2')
   })
 
   it('LanguageFlyout anchors horizontally relative to languageFlyoutAnchorRect in top/bottom dock', () => {
-    const flyoutSrc = read('src/components/LanguageFlyout.tsx')
-    expect(flyoutSrc).toContain('languageFlyoutAnchorRect')
-    expect(flyoutSrc).toContain('languageFlyoutAnchorRect.x')
+    const flyoutSrc = readFlyoutSource('src/components/LanguageFlyout.tsx')
+    expect(read('src/components/LanguageFlyout.tsx')).toContain('anchorRect={languageFlyoutAnchorRect}')
+    expect(flyoutSrc).toContain('anchorRect.x')
     expect(flyoutSrc).toContain('anchorCenterX - flyoutWidth / 2')
 
     const panelSrc = read('src/components/Panel.tsx')
     expect(panelSrc).toContain('<LanguageFlyout isRight={isRight} />')
 
-    const settingsSrc = read('src/components/Settings.tsx')
+    const settingsSrc = readSettingsSource()
     expect(settingsSrc).toContain('language-toggle-btn')
     expect(settingsSrc).toContain('setLanguageFlyoutOpen(!languageFlyoutOpen, rect)')
   })
@@ -335,7 +338,7 @@ it('Appearance shelf renders Card 1 Copy Indicator toggle first, then Card 2 Ind
     expect(itemListSrc).toContain('points="18 15 12 9 6 15"') // Up chevron in vertical
     expect(itemListSrc).toContain('playButtonClickSound()')
 
-    const itemCss = read('src/styles/item.css')
+    const itemCss = readStyleSource('src/styles/item.css')
     expect(itemCss).toContain('.scroll-top-btn.horizontal')
     expect(itemCss).toContain('right: 44px')
     expect(itemCss).toContain('bottom: 16px')

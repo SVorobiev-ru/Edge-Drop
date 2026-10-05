@@ -554,3 +554,46 @@ describe('pinned export and import', () => {
     expect(readdirSync(join(mocks.userData, 'images'))).toHaveLength(2)
   })
 })
+
+describe('store revision', () => {
+  it('changes with every mutation and on load', () => {
+    const store = new ItemStore()
+    const seen = new Set<number>([store.revision])
+    const step = (run: () => void): void => {
+      run()
+      expect(seen.has(store.revision)).toBe(false)
+      seen.add(store.revision)
+    }
+    const dir = realpathSync.native(mocks.userData)
+    const files = [join(dir, 'a.txt'), join(dir, 'b.txt'), join(dir, 'c.txt')]
+
+    step(() => store.add({ kind: 'files', paths: [files[0], files[1]] }, 50))
+    step(() => store.add({ kind: 'files', paths: [files[2]] }, 50))
+    step(() => store.split({ id: store.list()[1].id, paths: [files[1]] }))
+    step(() => store.merge(store.list()[0].id, store.list()[1].id))
+    step(() => store.removeSubitem({ id: store.list()[0].id, paths: [files[2]] }))
+    step(() => store.setPinned(store.list()[0].id, true))
+    step(() => store.clearUnpinned())
+    step(() => store.delete(store.list()[0].id))
+    step(() => store.load())
+  })
+})
+
+describe('deferred storage reconcile', () => {
+  it('sweeps orphans on the next tick instead of inside load', async () => {
+    const store = new ItemStore()
+    addImage(store, 'img-kept', png('kept'))
+    store.persistSync()
+    const orphan = join(mocks.userData, 'images', 'img-gone.png')
+    const stale = Date.now() / 1000 - 120
+    writeFileSync(orphan, 'stale')
+    utimesSync(orphan, stale, stale)
+
+    const reopened = new ItemStore()
+    reopened.load({ deferReconcile: true })
+    expect(existsSync(orphan)).toBe(true)
+
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(readdirSync(join(mocks.userData, 'images'))).toEqual(['img-kept.png'])
+  })
+})

@@ -1,13 +1,9 @@
 import { execFile } from 'node:child_process'
 import type { StickPosition } from './geometry'
 import { TRIGGER_PX, BUFFER_PX } from '../../shared/edgeZones'
+import type { Rect } from '../../shared/types'
 
-export interface ScreenRect {
-  x: number
-  y: number
-  width: number
-  height: number
-}
+export type ScreenRect = Rect
 
 export type DockOrientation = 'left' | 'bottom' | 'right'
 

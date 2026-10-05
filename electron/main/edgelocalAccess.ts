@@ -29,20 +29,28 @@ export function resolveRealPath(filePath: string): string {
   }
 }
 
+function isInsideResolvedRoot(root: string, resolvedTarget: string): boolean {
+  const prefix = root.endsWith(sep) ? root : root + sep
+  return resolvedTarget.startsWith(prefix)
+}
+
 export function isPathInside(rootDir: string, filePath: string): boolean {
   if (!rootDir || !filePath) return false
-  const root = resolveRealPath(rootDir)
-  const target = resolveRealPath(filePath)
-  const prefix = root.endsWith(sep) ? root : root + sep
-  return target.startsWith(prefix)
+  return isInsideResolvedRoot(resolveRealPath(rootDir), resolveRealPath(filePath))
 }
 
 export function isServableLocalPath(
   filePath: string,
-  allowed: { itemPaths: ReadonlySet<string>; roots: readonly string[] }
+  allowed: { itemPaths: ReadonlySet<string>; roots: readonly string[]; resolveRoot?: (rootDir: string) => string }
 ): boolean {
   if (!filePath || filePath.includes('\0')) return false
   const target = normalize(filePath)
   if (allowed.itemPaths.has(target)) return true
-  return allowed.roots.some((rootDir) => isPathInside(rootDir, target))
+  const resolveRoot = allowed.resolveRoot ?? resolveRealPath
+  let resolvedTarget: string | null = null
+  return allowed.roots.some((rootDir) => {
+    if (!rootDir) return false
+    resolvedTarget ??= resolveRealPath(target)
+    return isInsideResolvedRoot(resolveRoot(rootDir), resolvedTarget)
+  })
 }

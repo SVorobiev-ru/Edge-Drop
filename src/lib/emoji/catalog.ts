@@ -56,15 +56,6 @@ export interface EmojiCatalog {
 export const SKIN_TONE_KEYS = ['1F3FB', '1F3FC', '1F3FD', '1F3FE', '1F3FF'] as const
 export type SkinToneKey = (typeof SKIN_TONE_KEYS)[number]
 
-export const SKIN_TONES: ReadonlyArray<{ id: number; key: SkinToneKey | null; color: string; label: string }> = [
-  { id: 0, key: null, color: '#FFCC4D', label: 'Default' },
-  { id: 1, key: '1F3FB', color: '#F7D7C4', label: 'Light' },
-  { id: 2, key: '1F3FC', color: '#E0BB95', label: 'Medium-light' },
-  { id: 3, key: '1F3FD', color: '#BF8F68', label: 'Medium' },
-  { id: 4, key: '1F3FE', color: '#9B643D', label: 'Medium-dark' },
-  { id: 5, key: '1F3FF', color: '#5A4637', label: 'Dark' }
-]
-
 export const CATEGORY_ORDER = [
   { id: 'recents', sources: [] as const, labelKey: 'emoji.recents' },
   { id: 'smileys', sources: ['Smileys & Emotion', 'People & Body'] as const, labelKey: 'emoji.smileys' },
@@ -173,29 +164,6 @@ export function buildCatalog(raw: readonly EmojiSourceEntry[], options: CatalogO
 
   for (const src of raw) {
     ingestEmojiEntry(src, acc, options)
-  }
-
-  return finalizeCatalog(acc)
-}
-
-/**
- * Same result as buildCatalog, but yields to the event loop every chunk so
- * frames can paint between slices. Used on first picker open so the filter
- * animation keeps its frame budget while the catalog assembles.
- */
-export async function buildCatalogChunked(
-  raw: readonly EmojiSourceEntry[],
-  chunkSize = 600,
-  options: CatalogOptions = {}
-): Promise<EmojiCatalog> {
-  const acc: CatalogAccumulator = { all: [], byCategory: {}, byUnified: new Map() }
-  const yieldFrame = () => new Promise<void>((resolve) => setTimeout(resolve, 0))
-
-  for (let i = 0; i < raw.length; i++) {
-    ingestEmojiEntry(raw[i], acc, options)
-    if ((i + 1) % chunkSize === 0 && i + 1 < raw.length) {
-      await yieldFrame()
-    }
   }
 
   return finalizeCatalog(acc)

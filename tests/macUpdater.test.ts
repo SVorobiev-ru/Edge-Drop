@@ -298,7 +298,8 @@ describe('macOS updates: check, notify, download and install', () => {
       const winCheck = src.slice(src.indexOf('// 1. Fast path'))
       expect(winCheck).toContain('semverCompare(latestVersion, currentVersion) > 0')
       expect(winCheck).not.toContain('compareMacVersions')
-      expect(src).toContain("url = 'https://api.github.com/repos/Deepender25/Edge-Drop/releases/latest'")
+      const shared = readFileSync(join(process.cwd(), 'electron/main/updaterShared.ts'), 'utf8')
+      expect(shared).toContain("url = 'https://api.github.com/repos/Deepender25/Edge-Drop/releases/latest'")
     })
   })
 

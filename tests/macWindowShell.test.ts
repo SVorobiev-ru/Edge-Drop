@@ -16,7 +16,8 @@ const mocks = vi.hoisted(() => ({
   fullscreenDisplay: null as number | null,
   fullscreen: false,
   fullscreenListener: null as ((displayId: number | null) => void) | null,
-  fullscreenQueries: [] as Array<number | undefined>
+  fullscreenQueries: [] as Array<number | undefined>,
+  fullscreenMonitorCalls: [] as string[]
 }))
 
 vi.mock('../electron/main/macNative', () => ({
@@ -76,6 +77,12 @@ vi.mock('../electron/main/fullscreen', () => ({
   },
   registerFullscreenActiveListener: (fn: (displayId: number | null) => void) => {
     mocks.fullscreenListener = fn
+  },
+  pauseFullscreenMonitor: () => {
+    mocks.fullscreenMonitorCalls.push('pause')
+  },
+  resumeFullscreenMonitor: () => {
+    mocks.fullscreenMonitorCalls.push('resume')
   }
 }))
 
@@ -138,6 +145,7 @@ beforeEach(() => {
   mocks.fullscreenDisplay = null
   mocks.fullscreenListener = null
   mocks.fullscreenQueries = []
+  mocks.fullscreenMonitorCalls = []
   vi.spyOn(console, 'log').mockImplementation(() => {})
   vi.spyOn(console, 'warn').mockImplementation(() => {})
   vi.spyOn(console, 'error').mockImplementation(() => {})
@@ -273,6 +281,7 @@ describe('screen lock on macOS', () => {
     mocks.powerHandlers['unlock-screen']()
     vi.advanceTimersByTime(1000)
     expect(spy.mock.calls.length).toBeGreaterThan(0)
+    expect(mocks.fullscreenMonitorCalls).toEqual(['pause', 'resume'])
   })
 
   it('registers nothing on Windows', async () => {

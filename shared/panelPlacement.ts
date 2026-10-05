@@ -1,4 +1,4 @@
-import type { Settings, StickPosition } from './types'
+import type { Rect, Settings, StickPosition } from './types'
 import {
   clampDockHeight,
   clampDockWidth,
@@ -11,12 +11,7 @@ import {
   PANEL_LENGTH_MIN
 } from './panelWidth'
 
-export interface PlacementRect {
-  x: number
-  y: number
-  width: number
-  height: number
-}
+export type PlacementRect = Rect
 
 export interface PlacementDisplay {
   id: number

@@ -1,0 +1,604 @@
+/* ==========================================================================
+   Horizontal Settings Layout (Top / Bottom Dock Position)
+   Fixed 210px Height Shelf with Horizontal Scrolling Cards
+   ========================================================================== */
+
+/* Header category pills for horizontal mode */
+.settings-header-pills {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.settings-header-pill {
+  height: 24px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid rgb(var(--ink) / 0.08);
+  background: rgb(var(--ink) / 0.04);
+  color: rgb(var(--ink) / max(0.65, var(--text-alpha-floor)));
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+  user-select: none;
+  outline: none;
+}
+
+.settings-header-pill:hover {
+  background: rgb(var(--ink) / 0.1);
+  color: var(--text-primary);
+  border-color: rgb(var(--ink) / 0.15);
+}
+
+.settings-header-pill.active {
+  background: var(--surface-inverse);
+  color: var(--on-inverse);
+  font-weight: 600;
+  border-color: var(--surface-inverse);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+
+/* Horizontal Shelf Container */
+.settings-horizontal-shelf {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+  background: transparent;
+  box-sizing: border-box;
+}
+
+/* Single Horizontal Scrolling Row of Cards */
+.settings-shelf-track {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  gap: 12px;
+  width: 100%;
+  height: 100%;
+  padding: 8px 18px 14px 18px;
+  box-sizing: border-box;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.settings-shelf-track::-webkit-scrollbar {
+  display: none;
+}
+
+/* Dedicated Tab View: Smooth horizontal scrolling track */
+.settings-shelf-track.tab-view {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 6px 18px 12px 18px;
+  gap: 12px;
+}
+
+/* Vertical subsection divider in horizontal shelf matching recent-header */
+.settings-shelf-track.tab-view .shelf-section-divider {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  min-width: 20px;
+  height: 146px;
+  margin: 0 2px 0 0;
+  padding: 0;
+  background: transparent;
+  border-left: 1px solid rgb(var(--ink) / 0.08);
+  box-sizing: border-box;
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.settings-shelf-track.tab-view .shelf-section-divider:first-child {
+  border-left: none;
+}
+
+.settings-shelf-track.tab-view .shelf-section-divider .shelf-section-divider-text {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  font-size: calc(9.5px * var(--font-scale, 1));
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgb(var(--ink) / max(0.38, var(--text-alpha-floor)));
+  max-height: 130px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-shelf-track.tab-view .settings-shelf-card,
+.settings-shelf-card {
+  flex: 0 0 auto;
+  height: 146px;
+  background: var(--bg-card, var(--bg-2));
+  border: none;
+  border-radius: var(--radius-card, 18px);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  box-sizing: border-box;
+  position: relative;
+  overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+  transition: background 0.14s ease;
+}
+
+/* Specular light-reflection 1px border matching clipboard cards (.item::before) */
+.settings-shelf-track.tab-view .settings-shelf-card::before,
+.settings-shelf-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: 2;
+  transition: opacity 0.14s ease;
+  background: 
+    radial-gradient(
+      ellipse 70% 1px at 50% 0%,
+      rgb(var(--ink) / 0.22) 0%,
+      rgb(var(--ink) / 0.08) 45%,
+      transparent 80%
+    ) top / 100% 1px no-repeat,
+    linear-gradient(
+      90deg,
+      transparent 0%,
+      rgb(var(--ink) / 0.035) 20%,
+      rgb(var(--ink) / 0.035) 80%,
+      transparent 100%
+    ) bottom / 100% 1px no-repeat;
+}
+
+.settings-shelf-track.tab-view .settings-shelf-card:hover::before,
+.settings-shelf-card:hover::before {
+  opacity: 1.2;
+}
+
+.settings-shelf-track.tab-view .settings-shelf-card:first-child {
+  padding-left: 14px;
+}
+
+.settings-shelf-track.tab-view .settings-shelf-card:last-child {
+  padding-right: 14px;
+}
+
+.settings-shelf-track.tab-view .settings-shelf-card:hover,
+.settings-shelf-card:hover {
+  background: var(--bg-card-hover, var(--bg-3));
+}
+
+.settings-shelf-track.tab-view .hotkey-field {
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 10px;
+}
+
+.settings-shelf-card .setting-group-label {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgb(var(--ink) / max(0.42, var(--text-alpha-floor)));
+  margin: 0 0 3px 0;
+  flex-shrink: 0;
+}
+
+.settings-shelf-card .setting-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  line-height: 1.28;
+}
+
+.settings-shelf-card .setting-desc {
+  font-size: 11px;
+  color: rgb(var(--ink) / max(0.62, var(--text-alpha-floor)));
+  line-height: 1.36;
+  margin-top: 2px;
+}
+
+/* Card layout distribution */
+.shelf-card-top {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+}
+
+.shelf-card-bottom {
+  margin-top: auto;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.shelf-card-inline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  height: 100%;
+}
+
+.shelf-card-inline-text {
+  min-width: 0;
+  flex: 1;
+}
+
+.shelf-card-inline-action {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Segmented pills in shelf cards */
+.settings-shelf-card .setting-pills .pill {
+  height: 32px;
+  border-radius: 10px;
+  background: rgb(var(--ink) / 0.05);
+  border: 1px solid rgb(var(--ink) / 0.08);
+  color: rgb(var(--ink) / max(0.78, var(--text-alpha-floor)));
+  font-size: 11.5px;
+  font-weight: 500;
+  transition: all 0.14s ease;
+}
+
+.settings-shelf-card .setting-pills .pill:hover {
+  background: rgb(var(--ink) / 0.09);
+  border-color: rgb(var(--ink) / 0.16);
+  color: var(--text-primary);
+}
+
+.settings-shelf-card .setting-pills .pill.active {
+  background: var(--surface-inverse);
+  color: var(--on-inverse);
+  font-weight: 600;
+  border-color: var(--surface-inverse);
+  box-shadow: 0 2px 10px rgb(var(--ink) / 0.2);
+}
+
+/* Specific Card Widths tailored dynamically to content */
+.settings-shelf-card.shortcuts-card {
+  width: 250px;
+}
+
+/* Language Shelf Select Button */
+.language-shelf-btn {
+  width: 100%;
+  height: 32px;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  background: rgb(var(--ink) / 0.05);
+  border: 1px solid rgb(var(--ink) / 0.10);
+  border-radius: 10px;
+  padding: 0 12px;
+  color: var(--text-primary);
+  font-size: 11.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  box-sizing: border-box;
+  outline: none;
+}
+
+.language-shelf-btn:hover {
+  background: rgb(var(--ink) / 0.09);
+  border-color: rgb(var(--ink) / 0.18);
+  color: var(--text-primary);
+}
+
+.language-shelf-btn.flyout-open {
+  background: rgb(var(--ink) / 0.10);
+  border-color: rgb(var(--ink) / 0.28);
+  color: var(--text-primary);
+  box-shadow: 0 0 12px rgb(var(--ink) / 0.06);
+}
+
+.settings-shelf-card.hotkey-card {
+  width: 250px;
+}
+
+.settings-shelf-card.hover-card {
+  width: 240px;
+}
+
+.settings-shelf-card.fullscreen-card {
+  width: 250px;
+}
+
+.settings-shelf-card.system-card {
+  width: 230px;
+}
+
+.settings-shelf-card.incognito-card {
+  width: 230px;
+}
+
+.settings-shelf-card.rules-card {
+  width: 240px;
+}
+
+.settings-shelf-card.order-card {
+  width: 240px;
+}
+
+.settings-shelf-card.storage-card {
+  width: 270px;
+}
+
+.settings-shelf-card.autodelete-card {
+  width: 330px;
+}
+
+.settings-shelf-card.updates-card {
+  width: 290px;
+}
+
+.settings-shelf-card.check-updates-card {
+  width: 240px;
+}
+
+.settings-shelf-card.placement-card {
+  width: 320px;
+}
+
+.settings-shelf-card.display-card {
+  width: 280px;
+}
+
+.settings-shelf-card.display-card .shelf-card-bottom {
+  max-height: 74px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 2px;
+  gap: 5px;
+}
+
+.settings-shelf-card.display-card .shelf-card-bottom::-webkit-scrollbar {
+  width: 3px;
+}
+
+.settings-shelf-card.display-card .shelf-card-bottom::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.settings-shelf-card.display-card .shelf-card-bottom::-webkit-scrollbar-thumb {
+  background: rgb(var(--ink) / 0.2);
+  border-radius: 999px;
+}
+
+.settings-shelf-card.beacon-card {
+  width: 240px;
+}
+
+.settings-shelf-card.trigger-bar-card {
+  width: 300px;
+}
+
+.settings-shelf-card.trigger-thickness-card {
+  width: 290px;
+}
+
+.settings-shelf-card.copy-card {
+  width: 240px;
+}
+
+.settings-shelf-card.beacon-toggle-card {
+  width: 230px;
+}
+
+.settings-shelf-card.audio-card {
+  width: 230px;
+}
+
+.settings-shelf-card.support-card {
+  width: 260px;
+}
+
+.settings-shelf-card.about-card {
+  width: 260px;
+}
+
+/* Miniature 4-tile Indicator Style Grid */
+.shelf-indicator-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+  width: 100%;
+}
+
+.shelf-indicator-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  padding: 5px 3px;
+  border-radius: 8px;
+  background: rgb(var(--ink) / 0.04);
+  border: 1px solid rgb(var(--ink) / 0.07);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+
+.shelf-indicator-item:hover {
+  background: rgb(var(--ink) / 0.08);
+  border-color: rgb(var(--ink) / 0.15);
+}
+
+.shelf-indicator-item.active {
+  background: rgb(var(--ink) / 0.12);
+  border-color: rgb(var(--ink) / 0.35);
+  box-shadow: 0 0 8px rgb(var(--ink) / 0.1);
+}
+
+.shelf-indicator-icon {
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.shelf-indicator-name {
+  font-size: 9.5px;
+  font-weight: 500;
+  color: rgb(var(--ink) / max(0.85, var(--text-alpha-floor)));
+  white-space: nowrap;
+}
+
+/* Shelf Community & Support Action Buttons (Matches Vertical Settings Aesthetic) */
+.shelf-kofi-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  width: 100%;
+  height: 30px;
+  padding: 0 14px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--on-inverse);
+  background: var(--surface-inverse);
+  border: none;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.18s cubic-bezier(0.22, 1, 0.36, 1);
+  box-sizing: border-box;
+}
+
+.shelf-kofi-btn:hover {
+  background: rgb(var(--ink) / 0.92);
+  transform: translateY(-1px);
+}
+
+.shelf-kofi-btn:active {
+  transform: scale(0.98);
+}
+
+.shelf-github-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  width: 100%;
+  height: 30px;
+  padding: 0 14px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 550;
+  color: rgb(var(--ink) / max(0.92, var(--text-alpha-floor)));
+  background: var(--bg-3);
+  border: 1px solid rgb(var(--ink) / 0.08);
+  box-shadow: none;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.18s cubic-bezier(0.22, 1, 0.36, 1);
+  box-sizing: border-box;
+}
+
+.shelf-github-btn:hover {
+  background: #262626;
+  border-color: rgb(var(--ink) / 0.18);
+  color: var(--text-primary);
+  transform: translateY(-1px);
+}
+
+.shelf-github-btn:active {
+  transform: scale(0.98);
+}
+
+.shelf-github-btn .github-octocat-icon,
+.shelf-github-btn .store-logo-icon {
+  flex-shrink: 0;
+  color: rgb(var(--ink) / max(0.9, var(--text-alpha-floor)));
+}
+
+.shelf-github-btn .star-icon {
+  color: #fbbf24;
+}
+
+/* Subtle Quit Button for Horizontal Shelf */
+.shelf-quit-btn {
+  height: 24px;
+  padding: 0 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  color: rgb(var(--ink) / max(0.55, var(--text-alpha-floor)));
+  background: rgb(var(--ink) / 0.05);
+  border: 1px solid rgb(var(--ink) / 0.08);
+  cursor: pointer;
+  outline: none;
+  transition: all 0.18s ease;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.shelf-quit-btn:hover {
+  background: rgba(255, 69, 58, 0.14);
+  border-color: rgba(255, 69, 58, 0.35);
+  color: #ff5e57;
+}
+
+.shelf-quit-btn:active {
+  transform: scale(0.96);
+}
+
+/* Update Progress inside Shelf / Vertical Settings */
+.shelf-update-progress-wrap {
+  width: 100%;
+  height: 32px;
+  background: rgb(var(--ink) / 0.05);
+  border: 1px solid rgb(var(--ink) / 0.10);
+  border-radius: 10px;
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+}
+
+.shelf-progress-bar {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  background: rgb(var(--ink) / 0.18);
+  transition: width 0.2s ease;
+}
+
+.shelf-progress-text {
+  position: relative;
+  z-index: 1;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-primary);
+  letter-spacing: 0.01em;
+}
+

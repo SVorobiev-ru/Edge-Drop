@@ -1,8 +1,8 @@
 import koffi from 'koffi'
 import { basename } from 'node:path'
 import type { AppInfo } from '../../shared/types'
+import { NS_BITMAP_PNG, autoreleasePoolRunner, nsString, objcClass, objcMsgSend, objcSel, type Ptr } from './macObjc'
 
-type Ptr = unknown
 type Rect = { x: number; y: number; width: number; height: number }
 
 export interface FrontmostApp {
@@ -12,16 +12,13 @@ export interface FrontmostApp {
 }
 
 const REGULAR_ACTIVATION_POLICY = 0
-const NS_BITMAP_PNG = 4
 
 let ready = false
 let msgPtr: ((a: Ptr, b: Ptr) => Ptr) | null = null
-let msgVoid: ((a: Ptr, b: Ptr) => void) | null = null
 let msgInt: ((a: Ptr, b: Ptr) => number) | null = null
 let msgLong: ((a: Ptr, b: Ptr) => number | bigint) | null = null
 let msgStr: ((a: Ptr, b: Ptr) => string | null) | null = null
 let msgObj: ((a: Ptr, b: Ptr, c: Ptr) => Ptr) | null = null
-let msgFromUtf8: ((a: Ptr, b: Ptr, c: string) => Ptr) | null = null
 let msgAt: ((a: Ptr, b: Ptr, c: number) => Ptr) | null = null
 let msgRectImage: ((a: Ptr, b: Ptr, c: Rect, d: Ptr, e: Ptr) => Ptr) | null = null
 let msgAtObj: ((a: Ptr, b: Ptr, c: number, d: Ptr) => Ptr) | null = null
@@ -37,36 +34,31 @@ const sels: Record<string, Ptr> = {}
 
 if (process.platform === 'darwin') {
   try {
-    const objc = koffi.load('/usr/lib/libobjc.A.dylib')
-    const getClass = objc.func('void *objc_getClass(const char *name)') as (n: string) => Ptr
-    const sel = objc.func('void *sel_registerName(const char *name)') as (n: string) => Ptr
-    msgPtr = objc.func('objc_msgSend', 'void *', ['void *', 'void *']) as unknown as (a: Ptr, b: Ptr) => Ptr
-    msgVoid = objc.func('objc_msgSend', 'void', ['void *', 'void *']) as unknown as (a: Ptr, b: Ptr) => void
-    msgInt = objc.func('objc_msgSend', 'int', ['void *', 'void *']) as unknown as (a: Ptr, b: Ptr) => number
-    msgLong = objc.func('objc_msgSend', 'long', ['void *', 'void *']) as unknown as (a: Ptr, b: Ptr) => number | bigint
-    msgStr = objc.func('objc_msgSend', 'str', ['void *', 'void *']) as unknown as (a: Ptr, b: Ptr) => string | null
-    msgObj = objc.func('objc_msgSend', 'void *', ['void *', 'void *', 'void *']) as unknown as (a: Ptr, b: Ptr, c: Ptr) => Ptr
-    msgFromUtf8 = objc.func('objc_msgSend', 'void *', ['void *', 'void *', 'str']) as unknown as (a: Ptr, b: Ptr, c: string) => Ptr
-    msgAt = objc.func('objc_msgSend', 'void *', ['void *', 'void *', 'ulong']) as unknown as (a: Ptr, b: Ptr, c: number) => Ptr
+    msgPtr = objcMsgSend('void *', ['void *', 'void *'])
+    msgInt = objcMsgSend('int', ['void *', 'void *'])
+    msgLong = objcMsgSend('long', ['void *', 'void *'])
+    msgStr = objcMsgSend('str', ['void *', 'void *'])
+    msgObj = objcMsgSend('void *', ['void *', 'void *', 'void *'])
+    msgAt = objcMsgSend('void *', ['void *', 'void *', 'ulong'])
     const rect = koffi.struct({ x: 'double', y: 'double', width: 'double', height: 'double' })
-    msgRectImage = objc.func('objc_msgSend', 'void *', ['void *', 'void *', koffi.pointer(rect), 'void *', 'void *']) as unknown as (a: Ptr, b: Ptr, c: Rect, d: Ptr, e: Ptr) => Ptr
-    msgAtObj = objc.func('objc_msgSend', 'void *', ['void *', 'void *', 'ulong', 'void *']) as unknown as (a: Ptr, b: Ptr, c: number, d: Ptr) => Ptr
-    msgGetBytes = objc.func('objc_msgSend', 'void', ['void *', 'void *', 'void *', 'ulong']) as unknown as (a: Ptr, b: Ptr, c: Buffer, d: number) => void
-    NSWorkspace = getClass('NSWorkspace')
-    NSBundle = getClass('NSBundle')
-    NSString = getClass('NSString')
-    NSFileManager = getClass('NSFileManager')
-    NSAutoreleasePool = getClass('NSAutoreleasePool')
-    NSBitmapImageRep = getClass('NSBitmapImageRep')
-    NSDictionary = getClass('NSDictionary')
+    msgRectImage = objcMsgSend('void *', ['void *', 'void *', koffi.pointer(rect), 'void *', 'void *'])
+    msgAtObj = objcMsgSend('void *', ['void *', 'void *', 'ulong', 'void *'])
+    msgGetBytes = objcMsgSend('void', ['void *', 'void *', 'void *', 'ulong'])
+    NSWorkspace = objcClass('NSWorkspace')
+    NSBundle = objcClass('NSBundle')
+    NSString = objcClass('NSString')
+    NSFileManager = objcClass('NSFileManager')
+    NSAutoreleasePool = objcClass('NSAutoreleasePool')
+    NSBitmapImageRep = objcClass('NSBitmapImageRep')
+    NSDictionary = objcClass('NSDictionary')
     for (const n of [
-      'new', 'drain', 'sharedWorkspace', 'frontmostApplication', 'runningApplications', 'bundleIdentifier',
+      'sharedWorkspace', 'frontmostApplication', 'runningApplications', 'bundleIdentifier',
       'localizedName', 'processIdentifier', 'activationPolicy', 'count', 'objectAtIndex:', 'UTF8String',
-      'stringWithUTF8String:', 'URLForApplicationWithBundleIdentifier:', 'path', 'bundleWithPath:', 'mainBundle',
+      'URLForApplicationWithBundleIdentifier:', 'path', 'bundleWithPath:', 'mainBundle',
       'defaultManager', 'displayNameAtPath:', 'iconForFile:', 'CGImageForProposedRect:context:hints:', 'alloc',
       'initWithCGImage:', 'autorelease', 'representationUsingType:properties:', 'dictionary', 'length', 'getBytes:length:'
     ]) {
-      sels[n] = sel(n)
+      sels[n] = objcSel(n)
     }
     ready = !!(NSWorkspace && NSBundle && NSString && NSFileManager && NSAutoreleasePool)
   } catch (err) {
@@ -74,28 +66,7 @@ if (process.platform === 'darwin') {
   }
 }
 
-function withPool<T>(fn: () => T, fallback: T): T {
-  let pool: Ptr = null
-  try {
-    pool = msgPtr!(NSAutoreleasePool, sels.new)
-    return fn()
-  } catch (err) {
-    console.error('[macSourceApp] ObjC call failed:', err)
-    return fallback
-  } finally {
-    if (pool) {
-      try {
-        msgVoid!(pool, sels.drain)
-      } catch (err) {
-        console.error('[macSourceApp] autorelease pool drain failed:', err)
-      }
-    }
-  }
-}
-
-function nsString(value: string): Ptr {
-  return msgFromUtf8!(NSString, sels['stringWithUTF8String:'], value)
-}
+const withPool = autoreleasePoolRunner('[macSourceApp]')
 
 function jsString(ns: Ptr): string {
   if (!ns) return ''

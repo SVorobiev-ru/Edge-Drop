@@ -5,8 +5,9 @@
  * equivalent of GetForegroundWindow / SetForegroundWindow on Windows.
  */
 import koffi from 'koffi'
+import type { Rect } from '../../shared/types'
+import { objcClass, objcMsgSend, objcSel, type Ptr } from './macObjc'
 
-type Ptr = unknown
 let ready = false
 let msgPtr: ((a: Ptr, b: Ptr) => Ptr) | null = null
 let msgInt: ((a: Ptr, b: Ptr) => number) | null = null
@@ -45,37 +46,29 @@ let cgsMainConnection: (() => number) | null = null
 let cgsSetConnectionProperty: ((cid: number, target: number, key: Ptr, value: Ptr) => number) | null = null
 const sels: Record<string, Ptr> = {}
 
-export interface NativeRect {
-  x: number
-  y: number
-  width: number
-  height: number
-}
+export type NativeRect = Rect
 
 if (process.platform === 'darwin') {
   try {
-    const objc = koffi.load('/usr/lib/libobjc.A.dylib')
-    const getClass = objc.func('void *objc_getClass(const char *name)') as (n: string) => Ptr
-    const sel = objc.func('void *sel_registerName(const char *name)') as (n: string) => Ptr
-    msgPtr = objc.func('objc_msgSend', 'void *', ['void *', 'void *']) as unknown as (a: Ptr, b: Ptr) => Ptr
-    msgInt = objc.func('objc_msgSend', 'int', ['void *', 'void *']) as unknown as (a: Ptr, b: Ptr) => number
-    msgPtrInt = objc.func('objc_msgSend', 'void *', ['void *', 'void *', 'int']) as unknown as (a: Ptr, b: Ptr, c: number) => Ptr
-    msgBoolULong = objc.func('objc_msgSend', 'bool', ['void *', 'void *', 'unsigned long']) as unknown as (a: Ptr, b: Ptr, c: number) => boolean
-    NSWorkspace = getClass('NSWorkspace')
-    NSRunningApplication = getClass('NSRunningApplication')
-    msgULong = objc.func('objc_msgSend', 'unsigned long', ['void *', 'void *']) as unknown as (a: Ptr, b: Ptr) => number | bigint
-    NSEvent = getClass('NSEvent')
+    msgPtr = objcMsgSend('void *', ['void *', 'void *'])
+    msgInt = objcMsgSend('int', ['void *', 'void *'])
+    msgPtrInt = objcMsgSend('void *', ['void *', 'void *', 'int'])
+    msgBoolULong = objcMsgSend('bool', ['void *', 'void *', 'unsigned long'])
+    NSWorkspace = objcClass('NSWorkspace')
+    NSRunningApplication = objcClass('NSRunningApplication')
+    msgULong = objcMsgSend('unsigned long', ['void *', 'void *'])
+    NSEvent = objcClass('NSEvent')
     for (const n of ['sharedWorkspace', 'frontmostApplication', 'processIdentifier', 'runningApplicationWithProcessIdentifier:', 'activateWithOptions:', 'pressedMouseButtons']) {
-      sels[n] = sel(n)
+      sels[n] = objcSel(n)
     }
     try {
-      msgBoolPtr = objc.func('objc_msgSend', 'bool', ['void *', 'void *', 'void *']) as unknown as (a: Ptr, b: Ptr, c: Ptr) => boolean
-      msgVoidPtr = objc.func('objc_msgSend', 'void', ['void *', 'void *', 'void *']) as unknown as (a: Ptr, b: Ptr, c: Ptr) => void
-      msgBoolPtrULong = objc.func('objc_msgSend', 'bool', ['void *', 'void *', 'void *', 'unsigned long']) as unknown as (a: Ptr, b: Ptr, c: Ptr, d: number) => boolean
-      msgVoid = objc.func('objc_msgSend', 'void', ['void *', 'void *']) as unknown as (a: Ptr, b: Ptr) => void
-      NSApplication = getClass('NSApplication')
+      msgBoolPtr = objcMsgSend('bool', ['void *', 'void *', 'void *'])
+      msgVoidPtr = objcMsgSend('void', ['void *', 'void *', 'void *'])
+      msgBoolPtrULong = objcMsgSend('bool', ['void *', 'void *', 'void *', 'unsigned long'])
+      msgVoid = objcMsgSend('void', ['void *', 'void *'])
+      NSApplication = objcClass('NSApplication')
       for (const n of ['sharedApplication', 'currentApplication', 'respondsToSelector:', 'yieldActivationToApplication:', 'activateFromApplication:options:', 'activate']) {
-        sels[n] = sel(n)
+        sels[n] = objcSel(n)
       }
     } catch (err) {
       msgBoolPtr = null
@@ -84,30 +77,30 @@ if (process.platform === 'darwin') {
     try {
       koffi.load('/System/Library/Frameworks/AppKit.framework/AppKit')
       const rect = koffi.struct('EdgeDropNSRect', { x: 'double', y: 'double', width: 'double', height: 'double' })
-      msgPtrRect = objc.func('objc_msgSend', 'void *', ['void *', 'void *', rect]) as unknown as (a: Ptr, b: Ptr, r: NativeRect) => Ptr
-      msgVoidRect = objc.func('objc_msgSend', 'void', ['void *', 'void *', rect]) as unknown as (a: Ptr, b: Ptr, r: NativeRect) => void
-      msgVoidLong = objc.func('objc_msgSend', 'void', ['void *', 'void *', 'long']) as unknown as (a: Ptr, b: Ptr, c: number) => void
-      msgVoidBool = objc.func('objc_msgSend', 'void', ['void *', 'void *', 'bool']) as unknown as (a: Ptr, b: Ptr, c: boolean) => void
-      msgVoidDouble = objc.func('objc_msgSend', 'void', ['void *', 'void *', 'double']) as unknown as (a: Ptr, b: Ptr, c: number) => void
-      msgVoidULong = objc.func('objc_msgSend', 'void', ['void *', 'void *', 'unsigned long']) as unknown as (a: Ptr, b: Ptr, c: number) => void
-      msgBool = objc.func('objc_msgSend', 'bool', ['void *', 'void *']) as unknown as (a: Ptr, b: Ptr) => boolean
-      msgAddSubview = objc.func('objc_msgSend', 'void', ['void *', 'void *', 'void *', 'long', 'void *']) as unknown as (a: Ptr, b: Ptr, view: Ptr, place: number, relative: Ptr) => void
-      NSVisualEffectView = getClass('NSVisualEffectView')
+      msgPtrRect = objcMsgSend('void *', ['void *', 'void *', rect])
+      msgVoidRect = objcMsgSend('void', ['void *', 'void *', rect])
+      msgVoidLong = objcMsgSend('void', ['void *', 'void *', 'long'])
+      msgVoidBool = objcMsgSend('void', ['void *', 'void *', 'bool'])
+      msgVoidDouble = objcMsgSend('void', ['void *', 'void *', 'double'])
+      msgVoidULong = objcMsgSend('void', ['void *', 'void *', 'unsigned long'])
+      msgBool = objcMsgSend('bool', ['void *', 'void *'])
+      msgAddSubview = objcMsgSend('void', ['void *', 'void *', 'void *', 'long', 'void *'])
+      NSVisualEffectView = objcClass('NSVisualEffectView')
       for (const n of ['alloc', 'initWithFrame:', 'window', 'contentView', 'isFlipped', 'setFrame:', 'setMaterial:', 'setBlendingMode:', 'setState:', 'setWantsLayer:', 'layer', 'setCornerRadius:', 'setMasksToBounds:', 'setMaskedCorners:', 'setHidden:', 'setAlphaValue:', 'animator', 'addSubview:positioned:relativeTo:', 'removeFromSuperview', 'release']) {
-        sels[n] = sel(n)
+        sels[n] = objcSel(n)
       }
     } catch (err) {
       NSVisualEffectView = null
       console.error('[macNative] visual effect view unavailable:', err)
     }
     try {
-      msgPtrBool = objc.func('objc_msgSend', 'void *', ['void *', 'void *', 'bool']) as unknown as (a: Ptr, b: Ptr, c: boolean) => Ptr
-      msgPtrStr = objc.func('objc_msgSend', 'void *', ['void *', 'void *', 'const char *']) as unknown as (a: Ptr, b: Ptr, c: string) => Ptr
-      NSCursor = getClass('NSCursor')
-      NSNumber = getClass('NSNumber')
-      NSString = getClass('NSString')
+      msgPtrBool = objcMsgSend('void *', ['void *', 'void *', 'bool'])
+      msgPtrStr = objcMsgSend('void *', ['void *', 'void *', 'const char *'])
+      NSCursor = objcClass('NSCursor')
+      NSNumber = objcClass('NSNumber')
+      NSString = objcClass('NSString')
       for (const n of ['resizeLeftRightCursor', 'resizeUpDownCursor', 'arrowCursor', 'set', 'numberWithBool:', 'stringWithUTF8String:']) {
-        sels[n] = sel(n)
+        sels[n] = objcSel(n)
       }
     } catch (err) {
       NSCursor = null

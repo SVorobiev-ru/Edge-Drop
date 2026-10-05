@@ -62,9 +62,3 @@ export function createOnboardingWindow(): void {
     }
   })
 }
-
-export function closeOnboardingWindow(): void {
-  if (onboardingWindow && !onboardingWindow.isDestroyed()) {
-    onboardingWindow.close()
-  }
-}

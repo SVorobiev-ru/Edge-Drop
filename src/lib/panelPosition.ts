@@ -11,7 +11,7 @@
  * background animates from the old box and corners to the new ones while the
  * content, already laid out for the new edge, stays hidden, then fades in.
  */
-import { useSyncExternalStore } from 'react'
+import { createSignal, useSignalValue } from './signal'
 import { selectReduceMotion, useStore } from '../store/appStore'
 import { isHorizontalEdge, panelLayout, panelSizes, type PlacementRect, type ResizeSide } from '../../shared/panelPlacement'
 import type { PanelDragPlacement, Settings, StickPosition } from '../../shared/types'
@@ -33,7 +33,7 @@ let livePlacement: PanelDragPlacement | null = null
 let sizePatch: PanelSizePatch | null = null
 let morph: MorphPhase = 'idle'
 let morphTimer: ReturnType<typeof setTimeout> | null = null
-const morphListeners = new Set<() => void>()
+const morphSignal = createSignal()
 
 export function panelRadius(edge: StickPosition): string {
   const r = PANEL_RADIUS
@@ -128,7 +128,7 @@ function setMorph(next: MorphPhase): void {
   }
   if (next === morph) return
   morph = next
-  morphListeners.forEach((fn) => fn())
+  morphSignal.emit()
 }
 
 /** Starts, restarts or skips the morph for an edge change of the drawn panel. */
@@ -141,11 +141,6 @@ export function currentMorphPhase(): MorphPhase {
   return morph
 }
 
-function subscribeMorph(fn: () => void): () => void {
-  morphListeners.add(fn)
-  return () => morphListeners.delete(fn)
-}
-
 export function usePanelMorph(): MorphPhase {
-  return useSyncExternalStore(subscribeMorph, currentMorphPhase, () => 'idle')
+  return useSignalValue<MorphPhase>(morphSignal, currentMorphPhase, () => 'idle')
 }

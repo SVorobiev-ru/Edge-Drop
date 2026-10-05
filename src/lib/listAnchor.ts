@@ -34,6 +34,11 @@ function itemSpans(list: HTMLElement, horizontal: boolean): ItemSpan[] {
   return spans
 }
 
+export function findItemElement(root: ParentNode, id: string): HTMLElement | null {
+  const escaped = typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(id) : id
+  return root.querySelector<HTMLElement>(`.item-main[data-id="${escaped}"]`)
+}
+
 export function captureListAnchor(list: HTMLElement | null, horizontal: boolean): ListAnchor | null {
   if (!list || list.clientHeight === 0) return null
   const box = list.getBoundingClientRect()
@@ -48,8 +53,7 @@ export function firstVisibleItemId(list: HTMLElement | null, horizontal: boolean
 
 export function restoreListAnchor(list: HTMLElement | null, horizontal: boolean, anchor: ListAnchor | null | undefined): boolean {
   if (!list || !anchor || list.clientHeight === 0) return false
-  const escaped = typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(anchor.id) : anchor.id
-  const el = list.querySelector<HTMLElement>(`.item-main[data-id="${escaped}"]`)
+  const el = findItemElement(list, anchor.id)
   if (!el) return false
   const box = list.getBoundingClientRect()
   const r = el.getBoundingClientRect()

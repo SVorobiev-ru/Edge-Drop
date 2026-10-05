@@ -198,9 +198,6 @@ const api = {
     send('item:start-drag', req)
   },
   prestageDrag: (req: DragRequest) => send('item:prestage-drag', req),
-  addFiles: (paths: string[]) => invoke('item:add-files', paths),
-  addItemData: (data: import('../../shared/types').ItemData) => invoke('item:add-data', data),
-  removeSubitem: (req: import('../../shared/types').DragRequest) => invoke('item:remove-subitem', req),
   mergeItems: (sourceId: string, targetId: string) => invoke('item:merge', sourceId, targetId),
   splitItem: (req: import('../../shared/types').DragRequest) => invoke('item:split', req),
   getDisplays: () => invoke('displays:list'),
@@ -239,10 +236,8 @@ const api = {
   setPreviewMode: (active: boolean) => invoke('window:set-preview-mode', active),
   pauseHotkey: (paused: boolean) => invoke('hotkey:pause', paused),
   revealFile: (path: string) => invoke('file:reveal', path),
-  minimizeWindow: () => invoke('window:minimize'),
   focusWindow: (focusable?: boolean) => invoke('window:focus', focusable),
   setInternalDrag: (active: boolean) => { setInternalDragState(active) },
-  broadcastTutorialStep: (step: number) => send('tutorial:set-step', step),
 
   /* Main -> Renderer */
   onItems: (cb: (items: EventArgs<'state:items'>[0]) => void) => on('state:items', cb),
@@ -263,7 +258,6 @@ const api = {
   onPanelDragPlacement: (cb: (placement: EventArgs<'window:panel-drag-placement'>[0]) => void) => on('window:panel-drag-placement', cb),
   onToast: (cb: (toast: { id: string; message: string; tone: 'info' | 'error' }) => void) => on('ui:toast', cb),
   onCopyFlare: (cb: () => void) => on('ui:copy-flare', cb),
-  onTutorialStep: (cb: (step: number) => void) => on('tutorial:step', cb),
   onUpdateAvailable: (cb: (info: { version: string }) => void) => on('app:update-available', cb),
   onUpdateProgress: (cb: (progress: { percent: number; bytesPerSecond?: number; transferred?: number; total?: number }) => void) => on('app:update-progress', cb),
   onUpdateDownloaded: (cb: (info: { version: string }) => void) => on('app:update-downloaded', cb),

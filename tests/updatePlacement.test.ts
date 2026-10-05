@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { readSettingsSource } from './helpers/splitSources'
 
 const root = join(__dirname, '..')
 
@@ -10,7 +11,7 @@ function read(rel: string): string {
 
 describe('update prompt placement contracts (promoted lifecycle, bottom hides while active)', () => {
   it('promoted gate includes downloading and downloaded states seamlessly', () => {
-    const src = read('src/components/Settings.tsx')
+    const src = readSettingsSource()
     // Top card shows all active update lifecycle stages.
     expect(src).toContain('hasPromotedTopUpdate = !isStoreBuild && (')
     // Bottom manual card and horizontal status card hide while promoted.
@@ -19,15 +20,15 @@ describe('update prompt placement contracts (promoted lifecycle, bottom hides wh
   })
 
   it('store tracks manual-flow ownership across check, download, and dismiss', () => {
-    const src = read('src/store/appStore.ts')
-    expect(src).toContain('manualUpdateActive: boolean')
+    const src = read('src/store/updaterSlice.ts')
+    expect(read('src/store/types.ts')).toContain('manualUpdateActive: boolean')
     expect(src).toContain('manualUpdateActive: true')
     // Dismiss and stale-result paths release ownership.
     expect(src).toContain('manualUpdateActive: false')
   })
 
   it('a background find for a newer version retires stale manual results', () => {
-    const src = read('src/store/appStore.ts')
+    const src = read('src/store/updaterSlice.ts')
     expect(src).toContain("mc.version !== info.version")
   })
 })

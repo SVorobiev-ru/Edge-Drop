@@ -1,0 +1,186 @@
+/* ── Section Dividers across Vertical Settings (Matches Horizontal Subcategory Style) ── */
+.setting-section-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 22px 2px 10px;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.setting-section-divider:first-of-type,
+.setting-section-divider:first-child {
+  margin-top: 6px;
+}
+
+.setting-section-divider .setting-section-divider-text {
+  font-size: calc(9.5px * var(--font-scale, 1));
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgb(var(--ink) / max(0.38, var(--text-alpha-floor)));
+  white-space: nowrap;
+}
+
+.setting-section-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: rgb(var(--ink) / 0.08);
+}
+
+.setting-group-label {
+  font-size: calc(10px * var(--font-scale, 1));
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: rgb(var(--ink) / max(0.42, var(--text-alpha-floor)));
+  margin: 18px 4px 8px;
+  user-select: none;
+  white-space: normal;
+  word-break: break-word;
+  overflow-wrap: break-word;
+}
+
+.setting-group-label:first-of-type {
+  margin-top: 4px;
+}
+
+/* ── Vertical Setting Card (Matches Horizontal Shelf Card Aesthetic) ── */
+.setting-card {
+  width: 100%;
+  background: var(--bg-card, var(--bg-2));
+  border: none;
+  border-radius: var(--radius-card, 16px);
+  padding: 12px 14px;
+  margin-bottom: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  box-sizing: border-box;
+  position: relative;
+  overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+  transition: background 0.14s ease;
+}
+
+.setting-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: 2;
+  transition: opacity 0.14s ease;
+  background: 
+    radial-gradient(
+      ellipse 70% 1px at 50% 0%,
+      rgb(var(--ink) / 0.22) 0%,
+      rgb(var(--ink) / 0.08) 45%,
+      transparent 80%
+    ) top / 100% 1px no-repeat,
+    linear-gradient(
+      90deg,
+      transparent 0%,
+      rgb(var(--ink) / 0.035) 20%,
+      rgb(var(--ink) / 0.035) 80%,
+      transparent 100%
+    ) bottom / 100% 1px no-repeat;
+}
+
+.setting-card:hover {
+  background: var(--bg-card-hover, var(--bg-3));
+}
+
+.setting-card:hover::before {
+  opacity: 1.2;
+}
+
+.setting-card .setting-group-label {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgb(var(--ink) / max(0.42, var(--text-alpha-floor)));
+  margin: 0 0 2px 0;
+  flex-shrink: 0;
+}
+
+.setting-card .setting-title {
+  font-size: calc(13px * var(--font-scale, 1));
+  font-weight: 600;
+  color: var(--text-primary);
+  line-height: 1.3;
+}
+
+.setting-card .setting-desc {
+  font-size: calc(11.5px * var(--font-scale, 1));
+  color: rgb(var(--ink) / max(0.62, var(--text-alpha-floor)));
+  line-height: 1.4;
+  margin-top: 2px;
+}
+
+.setting-card .shelf-card-inline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+}
+
+.setting-card .shelf-card-top {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+}
+
+.setting-card .shelf-card-bottom {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  margin-top: 2px;
+}
+
+.setting-card .setting-pills .pill {
+  height: 32px;
+  border-radius: 10px;
+  background: rgb(var(--ink) / 0.05);
+  border: 1px solid rgb(var(--ink) / 0.08);
+  color: rgb(var(--ink) / max(0.78, var(--text-alpha-floor)));
+  font-size: 11.5px;
+  font-weight: 500;
+  transition: all 0.14s ease;
+}
+
+.setting-card .setting-pills .pill:hover {
+  background: rgb(var(--ink) / 0.09);
+  border-color: rgb(var(--ink) / 0.16);
+  color: var(--text-primary);
+}
+
+.setting-card .setting-pills .pill.active {
+  background: var(--surface-inverse);
+  color: var(--on-inverse);
+  font-weight: 600;
+  border-color: var(--surface-inverse);
+  box-shadow: 0 2px 10px rgb(var(--ink) / 0.2);
+}
+
+.setting-badge-subtle {
+  display: inline-flex;
+  align-items: center;
+  margin-top: 4px;
+  padding: 2px 7px;
+  font-size: calc(10px * var(--font-scale, 1));
+  font-weight: 500;
+  color: rgb(var(--ink) / max(0.55, var(--text-alpha-floor)));
+  background: rgb(var(--ink) / 0.04);
+  border: 1px solid rgb(var(--ink) / 0.08);
+  border-radius: 4px;
+  width: fit-content;
+  user-select: none;
+}
+

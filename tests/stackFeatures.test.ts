@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+import { readClipboardItemSource, readStyleSource } from './helpers/splitSources'
 
 function read(relPath: string): string {
   return readFileSync(resolve(__dirname, '..', relPath), 'utf8')
@@ -15,21 +16,21 @@ describe('Stack Features: SVG Folder Silhouette, Sizing, Horizontal Expansion & 
   })
 
   it('ClipboardItem.tsx uses FileStackPhoto for image stacks with responsive photoSize', () => {
-    const src = read('src/components/ClipboardItem.tsx')
+    const src = readClipboardItemSource()
     expect(src).toContain('<FileStackPhoto src={img.preview} width={photoSize} height={photoSize} />')
     expect(src).toContain('photoSize = isHorizontal ? 76 : 124')
     expect(src).toContain('HorizontalBundleExpanded')
   })
 
   it('ClipboardItem.tsx does not introduce an intrusive merge-target indicator overlay', () => {
-    const src = read('src/components/ClipboardItem.tsx')
+    const src = readClipboardItemSource()
     expect(src).not.toContain('merge-target-indicator')
     expect(src).not.toContain('item.stack')
     expect(src).not.toContain('isDragOverTarget')
   })
 
   it('ClipboardItem.tsx provides copy and ungroup hover actions on horizontal subitems with clean header', () => {
-    const src = read('src/components/ClipboardItem.tsx')
+    const src = readClipboardItemSource()
     expect(src).toContain('horizontal-subitem-actions')
     expect(src).toContain('subitem-copy-btn')
     expect(src).toContain('subitem-delete-btn')
@@ -43,7 +44,7 @@ describe('Stack Features: SVG Folder Silhouette, Sizing, Horizontal Expansion & 
   })
 
   it('ClipboardItem.tsx calculates dynamic width for horizontally expanded stacks', () => {
-    const src = read('src/components/ClipboardItem.tsx')
+    const src = readClipboardItemSource()
     expect(src).toContain('expandedWidth')
     expect(src).toContain('expanded && isHorizontal')
     expect(src).toContain('bundleCount')
@@ -51,16 +52,18 @@ describe('Stack Features: SVG Folder Silhouette, Sizing, Horizontal Expansion & 
 
   it('Panel.tsx passes stickPosition to SplitDropZone for left/top/right orientations without text pill', () => {
     const src = read('src/components/Panel.tsx')
+    const zones = read('src/components/panel/DropZones.tsx')
     expect(src).toContain('SplitDropZone stickPosition={settings.stickPosition')
-    expect(src).toContain('pos-${stickPosition}')
-    expect(src).toContain("isTop = stickPosition === 'top'")
-    expect(src).toContain("isRight = stickPosition === 'right'")
+    expect(zones).toContain('pos-${stickPosition}')
+    expect(zones).toContain("isTop = stickPosition === 'top'")
+    expect(zones).toContain("isRight = stickPosition === 'right'")
     // Text pill must NOT be introduced into SplitDropZone
     expect(src).not.toContain('split-dropzone-pill')
+    expect(zones).not.toContain('split-dropzone-pill')
   })
 
   it('item.css includes styles for orientation-aware split-dropzone and no split-dropzone-pill', () => {
-    const css = read('src/styles/item.css')
+    const css = readStyleSource('src/styles/item.css')
     expect(css).toContain('.split-dropzone.pos-top')
     expect(css).toContain('.split-dropzone.pos-bottom')
     expect(css).toContain('.split-dropzone.pos-left')
@@ -70,7 +73,7 @@ describe('Stack Features: SVG Folder Silhouette, Sizing, Horizontal Expansion & 
   })
 
   it('item.css includes clean header without divider and subitem actions without red danger hover', () => {
-    const css = read('src/styles/item.css')
+    const css = readStyleSource('src/styles/item.css')
     expect(css).toContain('.list.horizontal .item.is-expanded')
     expect(css).toContain('.horizontal-bundle-expanded')
     expect(css).toContain('.horizontal-bundle-header')
@@ -89,7 +92,7 @@ describe('Stack Features: SVG Folder Silhouette, Sizing, Horizontal Expansion & 
   })
 
   it('ClipboardItem.tsx uses ChevronLeftIcon pointing to left for horizontal stack collapse', () => {
-    const src = read('src/components/ClipboardItem.tsx')
+    const src = readClipboardItemSource()
     const expandedSection = src.slice(src.indexOf('function HorizontalBundleExpanded'), src.indexOf('function BundleFluidPreview'))
     expect(expandedSection).toContain('<ChevronLeftIcon />')
     expect(expandedSection).not.toContain('<ChevronUpIcon />')
@@ -104,7 +107,7 @@ describe('Stack Features: SVG Folder Silhouette, Sizing, Horizontal Expansion & 
   })
 
   it('item.css vertically centers and frames images in horizontal dock mode', () => {
-    const css = read('src/styles/item.css')
+    const css = readStyleSource('src/styles/item.css')
     expect(css).toContain('.list.horizontal .item.is-image .item-content')
     expect(css).toContain('.list.horizontal .thumb-wrap')
     expect(css).toContain('.list.horizontal .thumb')

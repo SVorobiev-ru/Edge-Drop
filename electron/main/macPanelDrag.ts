@@ -15,7 +15,8 @@ import {
   type PlacementDisplay
 } from '../../shared/panelPlacement'
 import { loadSettings } from '../store/settings'
-import type { PanelCursor, PanelDragPlacement, PanelDragResult, Settings, SolidRect } from '../../shared/types'
+import type { PanelCursor, PanelDragPlacement, PanelDragResult, Settings } from '../../shared/types'
+import { sanitizeRect } from './clickThrough'
 
 const TICK_MS = 16
 const REVEAL_TIMEOUT_MS = 400
@@ -45,15 +46,6 @@ interface ActiveDrag {
   windowDisplayId: number
   lastCursor: { x: number; y: number }
   lastMoveAt: number
-}
-
-function sanitizeBlade(input: unknown): SolidRect | null {
-  if (!input || typeof input !== 'object') return null
-  const { x, y, width, height } = input as Record<string, unknown>
-  const values = [x, y, width, height]
-  if (!values.every((v) => typeof v === 'number' && Number.isFinite(v) && Math.abs(v) <= 100000)) return null
-  if ((width as number) <= 0 || (height as number) <= 0) return null
-  return { x: x as number, y: y as number, width: width as number, height: height as number }
 }
 
 function sanitizeCursor(input: unknown): PanelCursor {
@@ -139,7 +131,7 @@ export function createPanelDrag(deps: PanelDragDeps): PanelDrag {
 
   function start(blade: unknown): boolean {
     const win = deps.getWindow()
-    const rect = sanitizeBlade(blade)
+    const rect = sanitizeRect(blade)
     if (process.platform !== 'darwin' || active || !rect || !win || win.isDestroyed()) return false
     unclaimedResult = null
     const settings = loadSettings()
@@ -186,17 +178,20 @@ export function createPanelDrag(deps: PanelDragDeps): PanelDrag {
     return { moved: false, settings: loadSettings() }
   }
 
+  function isFromPanel(event: Electron.IpcMainInvokeEvent): boolean {
+    const win = deps.getWindow()
+    return !!win && !win.isDestroyed() && event.sender === win.webContents
+  }
+
   function registerIpc(): void {
     if (ipcRegistered) return
     ipcRegistered = true
     ipcMain.handle('window:panel-drag-start', (event, blade) => {
-      const win = deps.getWindow()
-      if (!win || win.isDestroyed() || event.sender !== win.webContents) return false
+      if (!isFromPanel(event)) return false
       return start(blade)
     })
     ipcMain.handle('window:panel-drag-end', (event, commit) => {
-      const win = deps.getWindow()
-      if (!win || win.isDestroyed() || event.sender !== win.webContents) return null
+      if (!isFromPanel(event)) return null
       if (!active) {
         const result = unclaimedResult
         unclaimedResult = null
@@ -205,13 +200,11 @@ export function createPanelDrag(deps: PanelDragDeps): PanelDrag {
       return finish(commit !== false)
     })
     ipcMain.handle('window:panel-drag-reveal', (event) => {
-      const win = deps.getWindow()
-      if (!win || win.isDestroyed() || event.sender !== win.webContents) return
+      if (!isFromPanel(event)) return
       reveal()
     })
     ipcMain.handle('window:panel-cursor', (event, cursor) => {
-      const win = deps.getWindow()
-      if (process.platform !== 'darwin' || !win || win.isDestroyed() || event.sender !== win.webContents) return
+      if (process.platform !== 'darwin' || !isFromPanel(event)) return
       showCursor(sanitizeCursor(cursor))
     })
   }

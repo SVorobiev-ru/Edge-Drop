@@ -1,19 +1,14 @@
-import koffi from 'koffi'
-
-type Ptr = unknown
+import { NS_BITMAP_PNG, autoreleasePoolRunner, nsString, objcClass, objcMsgSend, objcSel, type Ptr } from './macObjc'
 
 const FILE_URL_TYPE = 'public.file-url'
 const PNG_TYPE = 'public.png'
 const TIFF_TYPE = 'public.tiff'
 const IMAGE_ANCHOR_TYPES = [PNG_TYPE, TIFF_TYPE]
-const NS_BITMAP_PNG = 4
 
 let ready = false
 let msgPtr: ((a: Ptr, b: Ptr) => Ptr) | null = null
-let msgVoid: ((a: Ptr, b: Ptr) => void) | null = null
 let msgLong: ((a: Ptr, b: Ptr) => number | bigint) | null = null
 let msgObj: ((a: Ptr, b: Ptr, c: Ptr) => Ptr) | null = null
-let msgFromUtf8: ((a: Ptr, b: Ptr, c: string) => Ptr) | null = null
 let msgVoidObj: ((a: Ptr, b: Ptr, c: Ptr) => void) | null = null
 let msgBoolObj: ((a: Ptr, b: Ptr, c: Ptr) => boolean) | null = null
 let msgLongObjObj: ((a: Ptr, b: Ptr, c: Ptr, d: Ptr) => number | bigint) | null = null
@@ -35,39 +30,34 @@ const sels: Record<string, Ptr> = {}
 
 if (process.platform === 'darwin') {
   try {
-    const objc = koffi.load('/usr/lib/libobjc.A.dylib')
-    const getClass = objc.func('void *objc_getClass(const char *name)') as (n: string) => Ptr
-    const sel = objc.func('void *sel_registerName(const char *name)') as (n: string) => Ptr
-    msgPtr = objc.func('objc_msgSend', 'void *', ['void *', 'void *']) as unknown as (a: Ptr, b: Ptr) => Ptr
-    msgVoid = objc.func('objc_msgSend', 'void', ['void *', 'void *']) as unknown as (a: Ptr, b: Ptr) => void
-    msgLong = objc.func('objc_msgSend', 'long', ['void *', 'void *']) as unknown as (a: Ptr, b: Ptr) => number | bigint
-    msgObj = objc.func('objc_msgSend', 'void *', ['void *', 'void *', 'void *']) as unknown as (a: Ptr, b: Ptr, c: Ptr) => Ptr
-    msgFromUtf8 = objc.func('objc_msgSend', 'void *', ['void *', 'void *', 'str']) as unknown as (a: Ptr, b: Ptr, c: string) => Ptr
-    msgVoidObj = objc.func('objc_msgSend', 'void', ['void *', 'void *', 'void *']) as unknown as (a: Ptr, b: Ptr, c: Ptr) => void
-    msgBoolObj = objc.func('objc_msgSend', 'bool', ['void *', 'void *', 'void *']) as unknown as (a: Ptr, b: Ptr, c: Ptr) => boolean
-    msgLongObjObj = objc.func('objc_msgSend', 'long', ['void *', 'void *', 'void *', 'void *']) as unknown as (a: Ptr, b: Ptr, c: Ptr, d: Ptr) => number | bigint
-    msgBoolObjObj = objc.func('objc_msgSend', 'bool', ['void *', 'void *', 'void *', 'void *']) as unknown as (a: Ptr, b: Ptr, c: Ptr, d: Ptr) => boolean
-    msgAt = objc.func('objc_msgSend', 'void *', ['void *', 'void *', 'ulong']) as unknown as (a: Ptr, b: Ptr, c: number) => Ptr
-    msgBytes = objc.func('objc_msgSend', 'void *', ['void *', 'void *', 'void *', 'ulong']) as unknown as (a: Ptr, b: Ptr, c: Buffer, d: number) => Ptr
-    msgAtObj = objc.func('objc_msgSend', 'void *', ['void *', 'void *', 'ulong', 'void *']) as unknown as (a: Ptr, b: Ptr, c: number, d: Ptr) => Ptr
-    NSPasteboard = getClass('NSPasteboard')
-    NSString = getClass('NSString')
-    NSURL = getClass('NSURL')
-    NSArray = getClass('NSArray')
-    NSMutableArray = getClass('NSMutableArray')
-    NSData = getClass('NSData')
-    NSAutoreleasePool = getClass('NSAutoreleasePool')
-    NSImage = getClass('NSImage')
-    NSBitmapImageRep = getClass('NSBitmapImageRep')
-    NSDictionary = getClass('NSDictionary')
+    msgPtr = objcMsgSend('void *', ['void *', 'void *'])
+    msgLong = objcMsgSend('long', ['void *', 'void *'])
+    msgObj = objcMsgSend('void *', ['void *', 'void *', 'void *'])
+    msgVoidObj = objcMsgSend('void', ['void *', 'void *', 'void *'])
+    msgBoolObj = objcMsgSend('bool', ['void *', 'void *', 'void *'])
+    msgLongObjObj = objcMsgSend('long', ['void *', 'void *', 'void *', 'void *'])
+    msgBoolObjObj = objcMsgSend('bool', ['void *', 'void *', 'void *', 'void *'])
+    msgAt = objcMsgSend('void *', ['void *', 'void *', 'ulong'])
+    msgBytes = objcMsgSend('void *', ['void *', 'void *', 'void *', 'ulong'])
+    msgAtObj = objcMsgSend('void *', ['void *', 'void *', 'ulong', 'void *'])
+    NSPasteboard = objcClass('NSPasteboard')
+    NSString = objcClass('NSString')
+    NSURL = objcClass('NSURL')
+    NSArray = objcClass('NSArray')
+    NSMutableArray = objcClass('NSMutableArray')
+    NSData = objcClass('NSData')
+    NSAutoreleasePool = objcClass('NSAutoreleasePool')
+    NSImage = objcClass('NSImage')
+    NSBitmapImageRep = objcClass('NSBitmapImageRep')
+    NSDictionary = objcClass('NSDictionary')
     for (const n of [
-      'new', 'drain', 'generalPasteboard', 'pasteboardWithName:', 'clearContents', 'writeObjects:', 'pasteboardItems',
-      'count', 'array', 'addObject:', 'arrayWithObject:', 'stringWithUTF8String:', 'fileURLWithPath:', 'absoluteString',
+      'generalPasteboard', 'pasteboardWithName:', 'clearContents', 'writeObjects:', 'pasteboardItems',
+      'count', 'array', 'addObject:', 'arrayWithObject:', 'fileURLWithPath:', 'absoluteString',
       'addTypes:owner:', 'setString:forType:', 'types', 'containsObject:', 'changeCount', 'objectAtIndex:',
       'setData:forType:', 'dataWithBytes:length:', 'alloc', 'autorelease', 'initWithData:', 'TIFFRepresentation',
       'imageRepWithData:', 'representationUsingType:properties:', 'dictionary'
     ]) {
-      sels[n] = sel(n)
+      sels[n] = objcSel(n)
     }
     ready = !!(NSPasteboard && NSString && NSURL && NSArray && NSMutableArray && NSData && NSAutoreleasePool)
   } catch (err) {
@@ -75,9 +65,7 @@ if (process.platform === 'darwin') {
   }
 }
 
-function nsString(value: string): Ptr {
-  return msgFromUtf8!(NSString, sels['stringWithUTF8String:'], value)
-}
+const withPool = autoreleasePoolRunner('[macPasteboard]')
 
 function pasteboard(name?: string): Ptr {
   if (!name) return msgPtr!(NSPasteboard, sels.generalPasteboard)
@@ -88,25 +76,6 @@ function pasteboard(name?: string): Ptr {
 function fileUrl(path: string): Ptr {
   const nsPath = nsString(path)
   return nsPath ? msgObj!(NSURL, sels['fileURLWithPath:'], nsPath) : null
-}
-
-function withPool<T>(fn: () => T, fallback: T): T {
-  let pool: Ptr = null
-  try {
-    pool = msgPtr!(NSAutoreleasePool, sels.new)
-    return fn()
-  } catch (err) {
-    console.error('[macPasteboard] ObjC call failed:', err)
-    return fallback
-  } finally {
-    if (pool) {
-      try {
-        msgVoid!(pool, sels.drain)
-      } catch (err) {
-        console.error('[macPasteboard] autorelease pool drain failed:', err)
-      }
-    }
-  }
 }
 
 function isWritablePath(path: unknown): path is string {

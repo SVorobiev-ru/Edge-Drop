@@ -1,0 +1,252 @@
+/* ── WakeSlider Segmented Wave Slider ── */
+.wake-slider {
+  --ws-fill: var(--surface-inverse);
+  --ws-track: rgb(var(--ink) / 0.12);
+  --ws-crest: var(--surface-inverse);
+  --ws-height: 28px;
+  --ws-gap: 3px;
+  --ws-rest: 0.28;
+
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  color: inherit;
+  box-sizing: border-box;
+}
+
+.wake-slider[aria-disabled='true'] {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.wake-slider__track {
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: var(--ws-gap);
+  height: var(--ws-height);
+  min-height: 26px;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+  cursor: grab;
+}
+
+.wake-slider__track:active {
+  cursor: grabbing;
+}
+
+.wake-slider__bar {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 0;
+  height: var(--ws-height);
+  border-radius: 9999px;
+  background: var(--ws-track);
+  transform: scaleY(var(--ws-rest));
+  transform-origin: 50% 50%;
+  transition: background-color 100ms ease;
+  will-change: transform;
+}
+
+.wake-slider__bar[data-on='true'] {
+  background: var(--ws-fill);
+}
+
+.wake-slider[data-instant='true'] .wake-slider__bar {
+  transition-duration: 0ms;
+}
+
+.wake-slider__crest {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--ws-crest);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.wake-slider__handle {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  outline: none;
+  cursor: inherit;
+  touch-action: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.wake-slider__value {
+  min-width: 3ch;
+  font-size: 11.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  color: rgb(var(--ink) / max(0.85, var(--text-alpha-floor)));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wake-slider__bar {
+    transform: scaleY(var(--ws-rest)) !important;
+  }
+}
+
+
+
+.update-action-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+}
+
+.settings-shelf-card .update-action-stack {
+  gap: 4px;
+}
+
+.settings-shelf-card .update-action-stack .update-action-btn {
+  height: 28px;
+}
+
+.accessibility-status.granted {
+  color: #43e97b;
+}
+
+.accessibility-status.missing {
+  color: #ff8e53;
+}
+
+.hotkey-conflict-hint {
+  font-size: calc(11px * var(--font-scale, 1));
+  color: rgb(var(--ink) / max(0.55, var(--text-alpha-floor)));
+}
+
+.accessibility-repair-hint {
+  margin-top: 6px;
+  font-size: calc(11.5px * var(--font-scale, 1));
+  color: rgb(var(--ink) / max(0.55, var(--text-alpha-floor)));
+}
+
+.setting-desc-note {
+  display: block;
+  margin-top: 4px;
+  color: rgb(var(--ink) / max(0.55, var(--text-alpha-floor)));
+}
+
+.ignored-apps-list {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+}
+
+.ignored-apps-empty {
+  font-size: calc(12px * var(--font-scale, 1));
+  color: rgb(var(--ink) / max(0.5, var(--text-alpha-floor)));
+}
+
+.ignored-app-row,
+.ignored-apps-chooser-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  width: 100%;
+  padding: 5px 8px;
+  border-radius: 8px;
+  background: rgb(var(--ink) / 0.05);
+  box-sizing: border-box;
+}
+
+.ignored-app-icon {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  border-radius: 4px;
+  object-fit: contain;
+}
+
+.ignored-app-icon.placeholder {
+  background: rgb(var(--ink) / 0.12);
+}
+
+.ignored-app-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: calc(12.5px * var(--font-scale, 1));
+  color: rgb(var(--ink) / max(0.9, var(--text-alpha-floor)));
+  text-align: left;
+}
+
+.ignored-app-remove {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: rgb(var(--ink) / max(0.6, var(--text-alpha-floor)));
+  cursor: pointer;
+}
+
+.ignored-app-remove:hover {
+  background: rgb(var(--ink) / 0.12);
+  color: var(--text-primary);
+}
+
+.ignored-apps-add-wrap {
+  position: relative;
+  width: 100%;
+}
+
+.ignored-apps-chooser {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 168px;
+  overflow-y: auto;
+  padding: 4px;
+  border-radius: 10px;
+  background: var(--bg-dock-btn);
+  border: 1px solid rgb(var(--ink) / 0.14);
+}
+
+.ignored-apps-chooser-item {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.ignored-apps-chooser-item:hover {
+  background: rgb(var(--ink) / 0.08);
+}
+
+.ignored-apps-chooser-item.other .ignored-app-name {
+  color: rgb(var(--ink) / max(0.7, var(--text-alpha-floor)));
+}
+
+.settings-shelf-card.accessibility-card,
+.settings-shelf-card.ignored-apps-card {
+  justify-content: flex-start;
+  overflow-y: auto;
+  scrollbar-width: none;
+}

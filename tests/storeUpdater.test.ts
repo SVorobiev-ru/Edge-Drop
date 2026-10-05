@@ -28,7 +28,7 @@ vi.mock('../electron/main/state', () => ({
 }))
 
 vi.mock('../electron/store/settings', () => ({
-  getSettings: () => mocks.getSettings()
+  loadSettings: () => mocks.getSettings()
 }))
 
 import {

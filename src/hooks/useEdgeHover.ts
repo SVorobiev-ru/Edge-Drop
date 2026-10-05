@@ -25,194 +25,19 @@ import { edge, IS_DARWIN } from '../lib/edge'
 import { useStore } from '../store/appStore'
 import { isShelfClosing, releaseInteractive, watchShelfClose } from '../lib/shelf'
 import { TRIGGER_PX, BUFFER_PX } from '../../shared/edgeZones'
-import type { Settings, SolidRect } from '../../shared/types'
-import { PANEL_WIDTH_DEFAULT, clampDockHeight, clampPanelWidth } from '../../shared/panelWidth'
-import { dockSpan, isHorizontalEdge } from '../../shared/panelPlacement'
-import { PANEL_LAYOUT_EVENT } from '../lib/panelPosition'
+import { isHorizontalEdge } from '../../shared/panelPlacement'
+import { resolvePanelWidth, panelZones, dockBladeHeight, getHorizontalDockMetrics } from '../lib/edgeGeometry'
+import { startPanelStateReporter } from '../lib/panelStateReporter'
 
 export { PANEL_WIDTH_DEFAULT, PANEL_WIDTH_MAX, PANEL_WIDTH_MIN, PANEL_WIDTH_STEP } from '../../shared/panelWidth'
+export { resolvePanelWidth, panelZones, dockBladeHeight, getHorizontalDockMetrics }
 
 const DWELL_MS = 40      // cursor must linger this long to open
 const GRACE_MS = 250     // close delay after leaving
 const OPEN_COMMIT_TIMEOUT_MS = 250
-const PANEL_STATE_SETTLE_MS = 450
-const PANEL_STATE_RENEW_MS = 1500
-
-export function resolvePanelWidth(settings: Pick<Settings, 'panelWidth' | 'stickPosition'>): number {
-  if (isHorizontalEdge(settings.stickPosition)) return PANEL_WIDTH_DEFAULT
-  return clampPanelWidth(settings.panelWidth)
-}
-
-/** Hysteresis thresholds for closing the panel.
- * KEEP_OPEN_PX: if cursor x is <= this, the panel stays open (clearly inside blade).
- * START_CLOSE_PX: if cursor x is > this, start the close timer (clearly outside).
- * Gap between the two prevents rapid cancel/schedule oscillation at the blade edge
- * when the cursor hovers just outside the visual boundary.
- */
-export function panelZones(settings: Pick<Settings, 'panelWidth' | 'stickPosition'>) {
-  const wide = resolvePanelWidth(settings)
-  return {
-    wide,
-    keepOpen: wide - 15,
-    startClose: wide + 20,
-    previewWide: wide + 470
-  }
-}
-
-function solidRectOf(el: Element | null): SolidRect | null {
-  if (!el) return null
-  const r = el.getBoundingClientRect()
-  if (!(r.width > 0 && r.height > 0)) return null
-  const x = Math.floor(r.left)
-  const y = Math.floor(r.top)
-  return { x, y, width: Math.ceil(r.right) - x, height: Math.ceil(r.bottom) - y }
-}
-
-function collectSolidRects(root: ParentNode = document): SolidRect[] {
-  const rects: SolidRect[] = []
-  const blade = root.querySelector('.blade-container.is-morphing') ? null : solidRectOf(root.querySelector('.blade'))
-  if (blade) rects.push(blade)
-  root.querySelectorAll('[data-preview-flyout]').forEach((el) => {
-    const rect = solidRectOf(el)
-    if (rect) rects.push(rect)
-  })
-  return rects
-}
-
-function startPanelStateReporter(): () => void {
-  let frame: number | undefined
-  let settleUntil = 0
-  let lastKey = ''
-
-  const send = (force: boolean) => {
-    const { open, settings } = useStore.getState()
-    const rects = open ? collectSolidRects() : []
-    const key = JSON.stringify([open, rects, settings.stickPosition])
-    if (!force && key === lastKey) return
-    lastKey = key
-    try {
-      void edge.setPanelState({ open, rects, edge: settings.stickPosition })?.catch?.(() => {})
-    } catch { /* ignore */ }
-  }
-
-  const loop = () => {
-    frame = undefined
-    if (Date.now() < settleUntil) {
-      send(false)
-      frame = window.requestAnimationFrame(loop)
-      return
-    }
-    send(true)
-  }
-
-  const kick = () => {
-    settleUntil = Date.now() + PANEL_STATE_SETTLE_MS
-    if (frame === undefined) frame = window.requestAnimationFrame(loop)
-  }
-
-  const unsubscribe = useStore.subscribe((state, prev) => {
-    if (prev.open && !state.open) send(false)
-    if (
-      state.open !== prev.open ||
-      state.previewItemId !== prev.previewItemId ||
-      state.styleFlyoutOpen !== prev.styleFlyoutOpen ||
-      state.languageFlyoutOpen !== prev.languageFlyoutOpen ||
-      state.settingsOpen !== prev.settingsOpen ||
-      state.emojiOpen !== prev.emojiOpen ||
-      state.settings !== prev.settings ||
-      state.toasts !== prev.toasts ||
-      state.dragActive !== prev.dragActive ||
-      state.sliderActive !== prev.sliderActive ||
-      state.edgeTransition !== prev.edgeTransition
-    ) {
-      kick()
-    }
-  })
-  const renew = window.setInterval(() => {
-    if (useStore.getState().open) send(true)
-  }, PANEL_STATE_RENEW_MS)
-  window.addEventListener('resize', kick)
-  window.addEventListener(PANEL_LAYOUT_EVENT, kick)
-  kick()
-
-  return () => {
-    unsubscribe()
-    window.clearInterval(renew)
-    window.removeEventListener('resize', kick)
-    window.removeEventListener(PANEL_LAYOUT_EVENT, kick)
-    if (frame !== undefined) window.cancelAnimationFrame(frame)
-    frame = undefined
-  }
-}
 
 export const PANEL_LEAVE_EVENT = 'panel:leave'
 export const PANEL_ENTER_EVENT = 'panel:enter'
-
-// How long to keep the panel alive after the user explicitly closes the preview
-// via the X button. This prevents the jarring simultaneous collapse of both
-// the preview and the clipboard.
-const PREVIEW_CLOSE_STAY_MS = 2500
-
-// Module-level flag set by the X button click. useEdgeHover reads this to
-// extend the close grace period without needing React state or store updates.
-let _previewClosedByUser = false
-let _previewClosedTimer: number | undefined
-
-/**
- * Call this from the preview flyout's X button to signal that the user
- * deliberately closed the preview — the clipboard should stay open for a
- * while so they can keep browsing.
- */
-export function notifyPreviewClosedByUser(): void {
-  _previewClosedByUser = true
-  if (_previewClosedTimer !== undefined) window.clearTimeout(_previewClosedTimer)
-  _previewClosedTimer = window.setTimeout(() => {
-    _previewClosedByUser = false
-    _previewClosedTimer = undefined
-  }, PREVIEW_CLOSE_STAY_MS)
-}
-
-/** Depth of the dock area that keeps the panel open, measured from its screen edge. */
-export function dockBladeHeight(settings: Pick<Settings, 'dockHeight'>): number {
-  return clampDockHeight(settings.dockHeight) + 8
-}
-
-export function getHorizontalDockMetrics(
-  displayWidth: number,
-  horizontalOffset = 0.5,
-  hotZoneHeight = 0.25,
-  triggerAlignment: 'top' | 'center' | 'bottom' | 'left' | 'right' = 'center',
-  dockWidthSetting?: number
-) {
-  const { width: dockWidth, minX, maxX } = dockSpan(displayWidth, dockWidthSetting)
-  const hOffset = Math.min(1, Math.max(0, horizontalOffset))
-  const dockX = minX + Math.round(Math.max(0, maxX - minX) * hOffset)
-  const dockCenterX = dockX + dockWidth / 2
-  // Trigger bar length scales with hotZoneHeight (+25% increase):
-  // Small (0.25) => 275px, Medium (0.40) => 400px, Large (0.60) => 575px
-  const triggerWidth = Math.round(
-    hotZoneHeight >= 0.55 ? 575 : hotZoneHeight >= 0.35 ? 400 : 275
-  )
-  let triggerLeft = dockCenterX - triggerWidth / 2
-  let triggerRight = dockCenterX + triggerWidth / 2
-
-  if (triggerAlignment === 'top' || triggerAlignment === 'left') {
-    triggerLeft = dockX
-    triggerRight = dockX + triggerWidth
-  } else if (triggerAlignment === 'bottom' || triggerAlignment === 'right') {
-    triggerLeft = dockX + dockWidth - triggerWidth
-    triggerRight = dockX + dockWidth
-  }
-
-  return {
-    dockWidth,
-    dockX,
-    dockCenterX,
-    triggerWidth,
-    triggerLeft,
-    triggerRight
-  }
-}
 
 export function useEdgeHover(): void {
   // Throttle the self-healing setInteractive(true) call.
@@ -381,8 +206,6 @@ export function useEdgeHover(): void {
 
       if (timeSincePositionChange < 1750) {
         effectiveDelay = Math.max(delay, 1750 - timeSincePositionChange)
-      } else if (_previewClosedByUser) {
-        effectiveDelay = PREVIEW_CLOSE_STAY_MS
       }
 
       graceTimer = window.setTimeout(closePanel, effectiveDelay)
@@ -400,13 +223,6 @@ export function useEdgeHover(): void {
       const elapsed = state.sliderReleasedTime > 0 ? Date.now() - state.sliderReleasedTime : Infinity
       if (elapsed >= 1750) {
         state.resetPositionChangedTime()
-      }
-      if (_previewClosedByUser) {
-        _previewClosedByUser = false
-        if (_previewClosedTimer !== undefined) {
-          window.clearTimeout(_previewClosedTimer)
-          _previewClosedTimer = undefined
-        }
       }
     }
 

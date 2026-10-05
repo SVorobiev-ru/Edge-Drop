@@ -1,14 +1,17 @@
 import { clipboard } from 'electron'
 import type { ClipboardItem, MergeResult, MultiRequest } from '../../shared/types'
 import { SELECTION_LIMIT, allStackable, allTextLike, joinTextParts, type TextPart } from '../../shared/selection'
-import { getStore, loadSettings, pushState, getWatcher } from './state'
+import { getStore, loadSettings, pushState } from './state'
 import { setHeartbeatPaused, getMainWindow } from './window'
 import { stageSelectionFiles, startMultiDragOut } from './drag'
 import { buildSelectionMenuTemplate, popupItemMenu } from './itemMenu'
 import { mainText } from './language'
 import { handle } from './ipcHandle'
 import { toast } from './toast'
-import { awaitMacDragEnd, cursorPointInSenderWindow, deleteItems, keepsPanelOpenAfterPaste, markSelfWrite, nextDragGeneration, pasteQueue, promotePasted, promotesOnCopy, sendPasteKeys, serializePaste, settleWatcher, takePasteSlot, writeFileListToClipboard } from './ipc'
+import { awaitMacDragEnd, cursorPointInSenderWindow, nextDragGeneration } from './dragEnd'
+import { deleteItems } from './itemOps'
+import { keepsPanelOpenAfterPaste, markSelfWrite, pasteQueue, promotePasted, promotesOnCopy, sendPasteKeys, serializePaste, takePasteSlot, withClipboardWrite } from './pastePipeline'
+import { writeFileListToClipboard } from './clipboardWrite'
 
 type SelectionPayload =
   | { kind: 'text'; text: string; html?: string }
@@ -65,8 +68,7 @@ async function copySelection(req: MultiRequest): Promise<boolean> {
   if (!items) return false
   const payload = buildSelectionPayload(items, req.plain === true)
   if (!payload) return false
-  getWatcher().setPaused(true)
-  try {
+  return withClipboardWrite(200, 'resync', async () => {
     if (!(await writeSelectionPayload(payload))) {
       toast('toast.fileUnavailable', 'error')
       return false
@@ -78,9 +80,7 @@ async function copySelection(req: MultiRequest): Promise<boolean> {
     }
     toast('toast.selectionCopied', 'info', { count: items.length })
     return true
-  } finally {
-    settleWatcher(200, 'resync')
-  }
+  })
 }
 
 async function pasteSelection(req: MultiRequest): Promise<boolean> {
@@ -97,8 +97,7 @@ async function pasteSelectionNow(req: MultiRequest): Promise<boolean> {
   const payload = buildSelectionPayload(items, req.plain === true)
   if (!payload) return false
 
-  getWatcher().setPaused(true)
-  try {
+  return withClipboardWrite(350, 'resync', async () => {
     if (!(await writeSelectionPayload(payload))) {
       toast('toast.fileUnavailable', 'error')
       return false
@@ -112,10 +111,8 @@ async function pasteSelectionNow(req: MultiRequest): Promise<boolean> {
         pushState.items()
       }, 250)
     }
-  } finally {
-    settleWatcher(350, 'resync')
-  }
-  return true
+    return true
+  })
 }
 
 function stackSelection(ids: string[]): MergeResult {

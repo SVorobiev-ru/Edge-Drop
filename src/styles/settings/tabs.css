@@ -1,0 +1,101 @@
+.settings-fixed-header {
+  flex-shrink: 0;
+  padding: 8px var(--pad) 6px;
+  background: transparent;
+  z-index: 10;
+}
+
+.settings-scroll-list {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 4px var(--pad) 28px;
+  scrollbar-width: none;
+}
+
+.settings-scroll-list::-webkit-scrollbar {
+  display: none;
+}
+
+/* ── Segmented Tab Bar ─────────────────────────────────────────────────── */
+.settings-tab-bar {
+  display: flex;
+  position: relative;
+  width: 100%;
+  background: transparent;
+  border: none;
+  border-radius: 12px;
+  padding: 0;
+  gap: 4px;
+  flex-shrink: 0;
+  box-shadow: none;
+}
+
+.settings-tab-btn {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 7px 2px;
+  min-height: 34px;
+  border-radius: 999px;
+  font-size: calc(11.5px * var(--font-scale, 1));
+  font-weight: 500;
+  line-height: 1.25;
+  color: rgb(var(--ink) / max(0.72, var(--text-alpha-floor)));
+  background: var(--bg-2);
+  border: none;
+  cursor: pointer;
+  outline: none;
+  transition: color 0.15s ease, background-color 0.15s ease, box-shadow 0.15s ease;
+  letter-spacing: 0;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.settings-tab-btn:hover:not(.active) {
+  color: var(--text-primary);
+  background: var(--bg-2);
+}
+
+.settings-tab-btn.active {
+  color: var(--on-inverse);
+  font-weight: 600;
+  background: var(--surface-inverse);
+  box-shadow: none;
+}
+
+.settings-tab-text {
+  position: relative;
+  z-index: 1;
+  display: inline-block;
+  line-height: 1.2;
+  padding: 1px 0;
+  white-space: nowrap;
+}
+
+.setting-title {
+  font-size: calc(14px * var(--font-scale, 1));
+  font-weight: 600;
+  color: var(--text-primary);
+  letter-spacing: 0.01em;
+  line-height: 1.35;
+  white-space: normal;
+  word-break: break-word;
+  overflow-wrap: break-word;
+}
+
+.setting-desc {
+  font-size: calc(12.5px * var(--font-scale, 1));
+  font-weight: 400;
+  color: rgb(var(--ink) / max(0.78, var(--text-alpha-floor)));
+  line-height: 1.48;
+  white-space: normal;
+  word-break: break-word;
+  overflow-wrap: break-word;
+}
+

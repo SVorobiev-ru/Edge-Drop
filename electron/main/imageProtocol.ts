@@ -19,6 +19,13 @@ const IMAGE_MIME_TYPES: Readonly<Record<string, string>> = {
   tiff: 'image/tiff'
 }
 
+const STREAMED_FILE_EXTENSIONS: ReadonlySet<string> = new Set(['jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'avif'])
+
+export function streamedFileContentType(filePath: string): string {
+  const extension = extname(filePath).slice(1).toLowerCase()
+  return STREAMED_FILE_EXTENSIONS.has(extension) ? IMAGE_MIME_TYPES[extension] : 'image/png'
+}
+
 export interface StoredImage {
   filePath: string
   contentType: string
@@ -85,6 +92,11 @@ export function resolveStoredImage(imagesDir: string, imageId: string): StoredIm
   if (!/^[a-z0-9-]+$/i.test(imageId)) return null
 
   const baseDir = resolve(imagesDir)
+  for (const extension of Object.keys(IMAGE_MIME_TYPES)) {
+    const candidate = join(baseDir, `${imageId}.${extension}`)
+    if (existsSync(candidate)) return { filePath: candidate, contentType: IMAGE_MIME_TYPES[extension] }
+  }
+
   let entries: string[]
   try {
     entries = readdirSync(baseDir)

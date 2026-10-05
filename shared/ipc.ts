@@ -34,9 +34,6 @@ export interface InvokeMap {
   /** Fetch the full text payload from disk for a large text item on-demand. */
   'item:get-full-text': { args: [id: string]; result: string }
 
-  /** Remove a specific sub-item from a bundle. */
-  'item:remove-subitem': { args: [req: DragRequest]; result: boolean }
-
   /** Copy an item back onto the system clipboard. */
   'item:copy': { args: [id: string]; result: boolean }
 
@@ -79,9 +76,6 @@ export interface InvokeMap {
 
   /** Toggle whether the flyout preview is active (widens the window). */
   'window:set-preview-mode': { args: [active: boolean]; result: void }
-
-  /** Minimize the window (used by Onboarding). */
-  'window:minimize': { args: []; result: void }
 
   /** Request explicit OS focus for the main window (e.g. for recording hotkeys). */
   'window:focus': { args: [focusable?: boolean]; result: void }
@@ -179,8 +173,6 @@ export interface EventMap {
   'queue:state': [state: { ids: string[] }]
   /** Fired when an OS drag initiated by the app has completed. */
   'item:drag-end': []
-  /** Tutorial step sync */
-  'tutorial:step': [step: number]
   /** Internal drop triggered by the main process when startDrag ends inside the window */
   'item:internal-drop': [pos: { x: number; y: number }]
   /**
@@ -229,18 +221,11 @@ export interface SendMap {
   /** Pre-stage drag file and warm icon in background before drag begins. */
   'item:prestage-drag': { args: [req: DragRequest] }
   'items:start-drag-multi': { args: [ids: string[]] }
-  /** Synchronize tutorial step */
-  'tutorial:set-step': { args: [step: number] }
 }
 
 /* ------------------------------------------------------------------ */
 /* Keys                                                                */
 /* ------------------------------------------------------------------ */
-
-/** Typed keyof helpers so channel names can never drift. */
-export const INVOKE_CHANNELS = Object.keys({} as InvokeMap) as (keyof InvokeMap)[]
-export const EVENT_CHANNELS = Object.keys({} as EventMap) as (keyof EventMap)[]
-export const SEND_CHANNELS = Object.keys({} as SendMap) as (keyof SendMap)[]
 
 export type InvokeChannel = keyof InvokeMap
 export type EventChannel = keyof EventMap

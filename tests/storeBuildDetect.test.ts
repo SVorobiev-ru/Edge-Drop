@@ -18,7 +18,7 @@ vi.mock('electron', () => ({
   }
 }))
 
-import { isStoreBuild, STORE_STARTUP_TASK_ID } from '../electron/main/config'
+import { isStoreBuild, resetStoreBuildCache, STORE_STARTUP_TASK_ID } from '../electron/main/config'
 
 function setWindowsStore(value: boolean | undefined): void {
   if (value === undefined) {
@@ -139,6 +139,15 @@ describe('isStoreBuild — every detection signal', () => {
     writeFileSync(join(dir, 'package.json'), JSON.stringify({ buildTarget: 'store' }))
     appState.isPackaged = false
     appState.appPath = dir
+    expect(isStoreBuild()).toBe(false)
+  })
+
+  it('reads the packaged package.json once per path until the cache is reset', () => {
+    const dir = writePackagedJson({ buildTarget: 'store' })
+    expect(isStoreBuild()).toBe(true)
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ buildTarget: 'github' }))
+    expect(isStoreBuild()).toBe(true)
+    resetStoreBuildCache()
     expect(isStoreBuild()).toBe(false)
   })
 

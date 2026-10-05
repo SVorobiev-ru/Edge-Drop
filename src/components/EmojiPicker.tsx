@@ -103,17 +103,10 @@ export function EmojiPicker({
   // always the image mount burst, which the row budget below spreads out.
   useEffect(() => {
     let alive = true
-    // TEMP-DIAG-EMOJI (remove after diagnosis): stage timings.
-    const tMount = performance.now()
     loadEmojiCatalog()
       .then((c) => {
         if (!alive) return
-        const tLoaded = performance.now()
         setCatalog(c)
-        requestAnimationFrame(() => {
-          // eslint-disable-next-line no-console
-          console.log(`[EmojiPerf] mountToLoadStart=~0ms load=${(tLoaded - tMount).toFixed(1)}ms loadToPaint=${(performance.now() - tLoaded).toFixed(1)}ms`)
-        })
         if (loadRecents().length > 0 && category === 'smileys') {
           setCategory('recents')
         }

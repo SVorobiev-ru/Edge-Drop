@@ -10,37 +10,112 @@ import type { ClipboardItemDto, TypeFilter } from '../../shared/types'
 import { basename, formatImageDisplayName, imageItemDisplayName, isImagePath } from '../lib/format'
 import { parseColor } from '../lib/colorUtils'
 import { IS_DARWIN } from '../lib/edge'
+import { getResolvedLanguage, isLanguageLoaded } from '../i18n'
+
+const MAX_CACHED_TEXT_LENGTH = 100_000
+
+interface ItemSearchIndex {
+  plain?: string[]
+  rich?: string[]
+  richLocale?: string
+  color?: boolean
+  imageOnly?: boolean
+}
+
+const searchIndexCache = new WeakMap<ClipboardItemDto, ItemSearchIndex>()
+
+function searchIndex(it: ClipboardItemDto): ItemSearchIndex {
+  let index = searchIndexCache.get(it)
+  if (!index) {
+    index = {}
+    searchIndexCache.set(it, index)
+  }
+  return index
+}
+
+function localeKey(): string {
+  const lang = getResolvedLanguage()
+  return isLanguageLoaded(lang) ? lang : `${lang}?`
+}
+
+function hasLocalizedName(it: ClipboardItemDto): boolean {
+  const data = it.data
+  switch (data.kind) {
+    case 'text':
+      return false
+    case 'files':
+      return data.paths.some((p) => isImagePath(p))
+    case 'image':
+    case 'image-collection':
+      return true
+  }
+}
+
+function isCachedText(text: string): boolean {
+  return text.length <= MAX_CACHED_TEXT_LENGTH
+}
+
+function plainHaystack(it: ClipboardItemDto): string[] {
+  const index = searchIndex(it)
+  if (index.plain) return index.plain
+  const data = it.data
+  let parts: string[] = []
+  if (data.kind === 'text') {
+    if (isCachedText(data.text)) parts = [data.text.toLowerCase()]
+  } else if (data.kind === 'files') {
+    parts = data.paths.map((p) => basename(p).toLowerCase())
+  }
+  index.plain = parts
+  return parts
+}
+
+function richHaystack(it: ClipboardItemDto): string[] {
+  const index = searchIndex(it)
+  const locale = hasLocalizedName(it) ? localeKey() : ''
+  if (index.rich && index.richLocale === locale) return index.rich
+  const parts: string[] = []
+  const add = (value: string | undefined): void => {
+    if (value) parts.push(value.toLowerCase())
+  }
+  add(it.title)
+  add(it.ocrText)
+  add(it.sourceApp?.name)
+  const data = it.data
+  switch (data.kind) {
+    case 'text':
+      if (isCachedText(data.text)) add(data.text)
+      break
+    case 'files':
+      data.paths.forEach((p, i) => {
+        add(basename(p))
+        add(data.entries?.[i]?.name)
+        if (isImagePath(p)) add(formatImageDisplayName(p, it.capturedAt))
+      })
+      break
+    case 'image':
+      add(data.fileName)
+      add(imageItemDisplayName(data, it.capturedAt))
+      break
+    case 'image-collection':
+      for (const img of data.images) {
+        add(img.fileName)
+        add(imageItemDisplayName(img, it.capturedAt))
+      }
+      break
+  }
+  index.rich = parts
+  index.richLocale = locale
+  return parts
+}
 
 export function itemMatchesQuery(it: ClipboardItemDto, q: string, rich = true): boolean {
   if (!q) return true
   const needle = q.toLowerCase()
-  if (!rich) {
-    switch (it.data.kind) {
-      case 'text':
-        return it.data.text.toLowerCase().includes(needle)
-      case 'files':
-        return it.data.paths.some((p) => basename(p).toLowerCase().includes(needle))
-      case 'image':
-      case 'image-collection':
-        return false
-    }
+  const parts = rich ? richHaystack(it) : plainHaystack(it)
+  for (const part of parts) {
+    if (part.includes(needle)) return true
   }
-  const hit = (value: string | undefined): boolean => !!value && value.toLowerCase().includes(needle)
-  if (hit(it.title) || hit(it.ocrText) || hit(it.sourceApp?.name)) return true
-  const data = it.data
-  switch (data.kind) {
-    case 'text':
-      return data.text.toLowerCase().includes(needle)
-    case 'files':
-      return data.paths.some((p, i) => {
-        if (hit(basename(p)) || hit(data.entries?.[i]?.name)) return true
-        return isImagePath(p) && hit(formatImageDisplayName(p, it.capturedAt))
-      })
-    case 'image':
-      return hit(data.fileName) || hit(imageItemDisplayName(data, it.capturedAt))
-    case 'image-collection':
-      return data.images.some((img) => hit(img.fileName) || hit(imageItemDisplayName(img, it.capturedAt)))
-  }
+  return it.data.kind === 'text' && !isCachedText(it.data.text) && it.data.text.toLowerCase().includes(needle)
 }
 
 /**
@@ -49,17 +124,28 @@ export function itemMatchesQuery(it: ClipboardItemDto, q: string, rich = true): 
  */
 export function isImageOnlyFileItem(it: ClipboardItemDto): boolean {
   if (it.data.kind !== 'files') return false
+  const index = searchIndex(it)
+  if (index.imageOnly !== undefined) return index.imageOnly
   const paths = it.data.paths
-  if (paths.length === 0) return false
-  if (it.data.entries?.some((en) => en.isDirectory)) return false
-  return paths.every((p) => isImagePath(p))
+  const imageOnly = paths.length > 0 && !it.data.entries?.some((en) => en.isDirectory) && paths.every((p) => isImagePath(p))
+  index.imageOnly = imageOnly
+  return imageOnly
+}
+
+function isColorTextItem(it: ClipboardItemDto): boolean {
+  if (it.data.kind !== 'text') return false
+  const index = searchIndex(it)
+  if (index.color !== undefined) return index.color
+  const color = !!it.data.isColor || !!parseColor(it.data.text)
+  index.color = color
+  return color
 }
 
 export function itemMatchesTypeFilter(it: ClipboardItemDto, filter: TypeFilter): boolean {
   if (filter === 'all') return true
   switch (filter) {
     case 'text':
-      return it.data.kind === 'text' && !it.data.isUrl && !it.data.isColor && !parseColor(it.data.text)
+      return it.data.kind === 'text' && !it.data.isUrl && !isColorTextItem(it)
     case 'links':
       return it.data.kind === 'text' && !!it.data.isUrl
     case 'images':
@@ -68,7 +154,7 @@ export function itemMatchesTypeFilter(it: ClipboardItemDto, filter: TypeFilter):
     case 'files':
       return it.data.kind === 'files' && !isImageOnlyFileItem(it)
     case 'colors':
-      return it.data.kind === 'text' && (!!it.data.isColor || !!parseColor(it.data.text))
+      return isColorTextItem(it)
   }
 }
 
@@ -111,8 +197,7 @@ export function useFilteredItems(): GroupedItems {
   const tutorialStep = useStore((s) => s.tutorialStep)
 
   return useMemo(() => {
-    const filteredByTutorial = items.filter((it) => {
-      if (tutorialStep <= 0) return true
+    const filteredByTutorial = tutorialStep <= 0 ? items : items.filter((it) => {
       switch (tutorialStep) {
         case 1:
           return it.id === 'onboarding-welcome'

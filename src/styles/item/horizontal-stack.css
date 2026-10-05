@@ -1,0 +1,284 @@
+/* ------------------------------------------------------------------ */
+/* Horizontal Expanded Stack & Sub-Item Tile Styling                  */
+/* ------------------------------------------------------------------ */
+
+.list.horizontal .item.is-expanded {
+  max-width: none;
+  overflow: visible;
+  z-index: 10;
+}
+
+.list.horizontal .item.is-expanded .item-main {
+  width: 100%;
+}
+
+.list.horizontal .item.is-expanded .item-content {
+  padding: 6px 10px 6px 10px;
+  overflow: visible;
+}
+
+.horizontal-bundle-expanded {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+  gap: 4px;
+}
+
+.horizontal-bundle-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 2px 2px 2px;
+  width: 100%;
+  border: none;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.horizontal-bundle-header .bundle-collapse-hit {
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  color: rgb(var(--ink) / max(0.75, var(--text-alpha-floor)));
+  background: rgb(var(--ink) / 0.06);
+  border: 1px solid rgb(var(--ink) / 0.06);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.horizontal-bundle-header .bundle-collapse-hit:hover {
+  background: rgb(var(--ink) / 0.12);
+  border-color: rgb(var(--ink) / 0.14);
+  color: var(--text-primary);
+}
+
+.horizontal-bundle-header .actions-pill {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  background: rgb(var(--ink) / 0.06);
+  border: 1px solid rgb(var(--ink) / 0.06);
+  border-radius: 999px;
+  box-shadow: none;
+  flex-shrink: 0;
+}
+
+.horizontal-bundle-header .actions-pill .act {
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: 5px;
+  color: rgb(var(--ink) / max(0.82, var(--text-alpha-floor)));
+  cursor: pointer;
+  transition: all 0.14s ease;
+}
+
+.horizontal-bundle-header .actions-pill .act:hover {
+  background: rgb(var(--ink) / 0.14);
+  color: var(--text-primary);
+}
+
+.horizontal-bundle-header .actions-pill .act.danger:hover {
+  background: rgba(239, 68, 68, 0.25);
+  color: #f87171;
+}
+
+.horizontal-subitem-track {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  gap: 8px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  height: 96px;
+  padding: 3px 4px 5px 4px;
+  scroll-behavior: smooth;
+}
+
+/* Custom sleek scrollbar for horizontal sub-item track */
+.horizontal-subitem-track::-webkit-scrollbar {
+  height: 3px;
+}
+.horizontal-subitem-track::-webkit-scrollbar-track {
+  background: transparent;
+}
+.horizontal-subitem-track::-webkit-scrollbar-thumb {
+  background: rgb(var(--ink) / 0.18);
+  border-radius: 999px;
+}
+.horizontal-subitem-track::-webkit-scrollbar-thumb:hover {
+  background: rgb(var(--ink) / 0.32);
+}
+
+.horizontal-subitem-tile {
+  flex-shrink: 0;
+  width: 104px;
+  height: 88px;
+  background: rgb(var(--ink) / 0.04);
+  border-radius: 12px;
+  border: 1px solid rgb(var(--ink) / 0.07);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  padding: 5px 6px 5px 6px;
+  overflow: hidden;
+  cursor: grab;
+  position: relative;
+  transition: background 0.16s cubic-bezier(0.16, 1, 0.3, 1),
+              border-color 0.16s cubic-bezier(0.16, 1, 0.3, 1),
+              transform 0.16s cubic-bezier(0.16, 1, 0.3, 1),
+              box-shadow 0.16s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Edge-Drop signature specular top highlight reflection */
+.horizontal-subitem-tile::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: 2;
+  opacity: 0.5;
+  transition: opacity 0.14s ease;
+  background: radial-gradient(
+    ellipse 70% 1px at 50% 0%,
+    rgb(var(--ink) / 0.2) 0%,
+    rgb(var(--ink) / 0.04) 50%,
+    transparent 80%
+  ) top / 100% 1px no-repeat;
+}
+
+.horizontal-subitem-tile:hover {
+  background: rgb(var(--ink) / 0.08);
+  border-color: rgb(var(--ink) / 0.16);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+}
+.horizontal-subitem-tile:hover::before {
+  opacity: 1;
+}
+.horizontal-subitem-tile:active {
+  cursor: grabbing;
+}
+
+/* Hover Action Floating Micro-Pill */
+.horizontal-subitem-actions {
+  position: absolute;
+  top: 4px;
+  inset-inline-end: 4px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 4px;
+  background: var(--bg-pill);
+  border: 1px solid rgb(var(--ink) / 0.14);
+  border-radius: 999px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+  opacity: 0;
+  pointer-events: none;
+  transform: scale(0.9) translateY(-1px);
+  transition: opacity 0.14s cubic-bezier(0.16, 1, 0.3, 1), transform 0.14s cubic-bezier(0.16, 1, 0.3, 1);
+  z-index: 5;
+}
+
+.horizontal-subitem-tile:hover .horizontal-subitem-actions,
+.horizontal-subitem-tile:has(:focus-visible) .horizontal-subitem-actions {
+  opacity: 1;
+  pointer-events: auto;
+  transform: scale(1) translateY(0);
+}
+
+.horizontal-subitem-actions .act {
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: rgb(var(--ink) / max(0.85, var(--text-alpha-floor)));
+  cursor: pointer;
+  transition: all 0.12s ease;
+  padding: 0;
+}
+
+.horizontal-subitem-actions .act:hover {
+  background: rgb(var(--ink) / 0.18);
+  color: var(--text-primary);
+}
+
+/* Icon / Thumbnail Wrap */
+.horizontal-subitem-icon-wrap {
+  width: 100%;
+  height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.horizontal-subitem-img {
+  width: 42px;
+  height: 42px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid rgb(var(--ink) / 0.08);
+  display: block;
+  user-select: none;
+  pointer-events: none;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+}
+
+.horizontal-subitem-icon-wrap svg {
+  width: 36px;
+  height: 36px;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.25));
+}
+
+.horizontal-subitem-meta {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  padding: 0 2px;
+  gap: 1px;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+}
+
+.horizontal-subitem-name {
+  width: 100%;
+  font-size: 10.5px;
+  font-weight: 500;
+  color: rgb(var(--ink) / max(0.9, var(--text-alpha-floor)));
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: center;
+  line-height: 1.2;
+}
+
+.horizontal-subitem-sub {
+  width: 100%;
+  font-size: 9px;
+  color: rgb(var(--ink) / max(0.45, var(--text-alpha-floor)));
+  font-family: var(--font-mono);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: center;
+  line-height: 1.2;
+}
+

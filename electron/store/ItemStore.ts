@@ -9,7 +9,7 @@
  *   - Persist the index to JSON and image bytes to per-item PNG files.
  *   - Convert internal items to the serializable DTO form for the renderer.
  */
-import { existsSync, readFileSync, writeFileSync, rmSync, statSync, readdirSync, renameSync, realpathSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync, rmSync, statSync, readdirSync, renameSync } from 'node:fs'
 import { join, extname, dirname, basename as pathBasename } from 'node:path'
 import { nativeImage, safeStorage } from 'electron'
 import { thumbnailUrlForFile, thumbnailUrlForStoredImage } from '../main/imageProtocol'
@@ -19,7 +19,6 @@ import {
   type DragRequest,
   type ItemData,
   type MergeResult,
-  type FileEntry,
   type SourceApp,
   type ClipboardImageFields,
   MAX_STACK
@@ -29,18 +28,14 @@ import { createId } from './ids'
 import { contentSignature } from './signature'
 import { writeFileAtomicSync } from './atomicWrite'
 import { MAX_ITEM_HTML_CHARS, MAX_PAYLOAD_CHARS, MAX_ORIGINAL_IMAGE_BYTES, MAC_PNG_TYPE, MAC_TIFF_TYPE, isPngBytes, isTiffBytes } from '../clipboard/formats'
-import { isValidFilePath } from '../main/pathValidation'
+import { MAX_IMPORT_ITEMS, PINNED_EXPORT_FORMAT, PINNED_EXPORT_VERSION, cleanSourceApp, cleanTitle, importItem, isRecord, type PinnedExport, type PinnedExportCommon, type PinnedExportImage, type PinnedExportItem } from './pinnedBackup'
+import { buildFileEntry, isImageExt } from './fileEntry'
 
-const MAX_TITLE_CHARS = 120
+export type { PinnedExport, PinnedExportImage, PinnedExportItem } from './pinnedBackup'
+
 const MAX_OCR_TEXT_CHARS = 20_000
 const MAX_CORRUPTED_COPIES = 3
-const MAX_IMPORT_ITEMS = 5000
 const RECONCILE_MIN_AGE_MS = 60_000
-const MAX_IMPORT_TEXT_CHARS = 10_000_000
-const MAX_IMPORT_PATHS = 1000
-const MAX_IMPORT_DIMENSION = 100_000
-const PINNED_EXPORT_FORMAT = 'edge-drop-pinned'
-const PINNED_EXPORT_VERSION = 1
 
 type TextPayloadKind = 'txt' | 'html' | 'rtf'
 const TEXT_PAYLOAD_KINDS: readonly TextPayloadKind[] = ['txt', 'html', 'rtf']
@@ -48,65 +43,6 @@ const TEXT_PAYLOAD_KINDS: readonly TextPayloadKind[] = ['txt', 'html', 'rtf']
 export interface ItemMeta {
   sourceApp?: SourceApp
   rtf?: string
-}
-
-interface PinnedExportCommon {
-  capturedAt: number
-  title?: string
-  sourceApp?: SourceApp
-}
-
-export interface PinnedExportImage {
-  width: number
-  height: number
-  bytes: number
-  source?: ClipboardImageFields['source']
-  fileName?: string
-  png: string
-}
-
-export type PinnedExportItem = PinnedExportCommon &
-  (
-    | { kind: 'text'; text: string; html?: string; rtf?: string; isUrl: boolean; isColor?: boolean }
-    | ({ kind: 'image' } & PinnedExportImage)
-    | { kind: 'image-collection'; images: PinnedExportImage[] }
-    | { kind: 'files'; paths: string[] }
-  )
-
-export interface PinnedExport {
-  format: typeof PINNED_EXPORT_FORMAT
-  version: typeof PINNED_EXPORT_VERSION
-  exportedAt: string
-  items: PinnedExportItem[]
-}
-
-function resolveImportedPath(p: string): string | null {
-  try {
-    const real = realpathSync.native(p)
-    const st = statSync(real)
-    return st.isFile() || st.isDirectory() ? real : null
-  } catch {
-    return null
-  }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-function cleanTitle(value: unknown): string {
-  return typeof value === 'string' ? value.trim().slice(0, MAX_TITLE_CHARS) : ''
-}
-
-function cleanSourceApp(value: unknown): SourceApp | undefined {
-  if (!isRecord(value)) return undefined
-  const { bundleId, name } = value
-  if (typeof bundleId !== 'string' || !bundleId || bundleId.length > 255) return undefined
-  return typeof name === 'string' && name && name.length <= 255 ? { bundleId, name } : { bundleId }
-}
-
-function isDimension(value: unknown): value is number {
-  return typeof value === 'number' && Number.isInteger(value) && value > 0 && value <= MAX_IMPORT_DIMENSION
 }
 
 /** Maps a signature -> item id so dedup is O(1). */
@@ -126,8 +62,7 @@ export class ItemStore {
   private items: ClipboardItem[] = []
   private sigToId = new Map<string, string>()
   private payloadSigs = new Map<string, string>()
-  /** Small, bounded thumbnails for renderer DTOs. Original image bytes stay on disk. */
-  private previewCache = new Map<string, string>()
+  private mutations = 0
 
   constructor(private readonly onRemoved?: ItemsRemovedListener) {}
 
@@ -140,8 +75,13 @@ export class ItemStore {
     }
   }
 
+  get revision(): number {
+    return this.mutations
+  }
+
   /** Load persisted state from disk. Called once at startup. */
-  load(): void {
+  load(options?: { deferReconcile?: boolean }): void {
+    this.mutations++
     try {
       const file = PATHS.indexFile()
       if (!existsSync(file)) {
@@ -224,7 +164,10 @@ export class ItemStore {
           }
         }
 
-        if (mac && droppedEntries === 0 && !existsSync(this.encryptedBackupPath(file))) this.reconcileStorage()
+        if (mac && droppedEntries === 0 && !existsSync(this.encryptedBackupPath(file))) {
+          if (options?.deferReconcile) setImmediate(() => this.reconcileStorageSafely())
+          else this.reconcileStorage()
+        }
       } else if (mac && encryptedOnDisk) {
         console.warn('[ItemStore] items.json is encrypted and cannot be decrypted; starting with an empty history')
         this.items = []
@@ -241,6 +184,16 @@ export class ItemStore {
       this.items = []
       this.sigToId.clear()
       this.payloadSigs.clear()
+    } finally {
+      this.mutations++
+    }
+  }
+
+  private reconcileStorageSafely(): void {
+    try {
+      this.reconcileStorage()
+    } catch (err) {
+      console.error('[ItemStore] Storage reconcile failed:', err)
     }
   }
 
@@ -339,6 +292,7 @@ export class ItemStore {
 
   /** Persist the current index to disk. Debounced to prevent main thread blocking during UI transitions. */
   private persist(): void {
+    this.mutations++
     if (this.persistTimer) {
       clearTimeout(this.persistTimer)
     }
@@ -350,6 +304,7 @@ export class ItemStore {
 
   /** Synchronous disk write (called by debounced timer or on app shutdown). */
   public persistSync(): void {
+    this.mutations++
     if (this.persistTimer) {
       clearTimeout(this.persistTimer)
       this.persistTimer = null
@@ -386,16 +341,12 @@ export class ItemStore {
     const need = this.items.length - limit
     const survivors: ClipboardItem[] = []
     const evicted: ClipboardItem[] = []
+    const imageFiles = this.imageFileLister()
     let stillNeed = need
     for (let i = this.items.length - 1; i >= 0; i--) {
       const it = this.items[i]
       if (stillNeed > 0 && !it.pinned) {
-        this.sigToId.delete(this.signatureOf(it))
-        if (it.data.kind === 'image') this.removeImageFile(it.data.imageId)
-        if (it.data.kind === 'image-collection') {
-          it.data.images.forEach((img) => this.removeImageFile(img.imageId))
-        }
-        if (it.data.kind === 'text') this.removeTextPayload(it.id)
+        this.releaseItem(it, imageFiles)
         evicted.push(it)
         stillNeed--
       } else {
@@ -404,6 +355,15 @@ export class ItemStore {
     }
     this.items = survivors
     this.notifyRemoved(evicted)
+  }
+
+  private releaseItem(it: ClipboardItem, imageFiles?: () => string[]): void {
+    this.sigToId.delete(this.signatureOf(it))
+    if (it.data.kind === 'image') this.removeImageFile(it.data.imageId, imageFiles)
+    if (it.data.kind === 'image-collection') {
+      it.data.images.forEach((img) => this.removeImageFile(img.imageId, imageFiles))
+    }
+    if (it.data.kind === 'text') this.removeTextPayload(it.id)
   }
 
   /**
@@ -444,7 +404,6 @@ export class ItemStore {
     if (meta?.sourceApp) item.sourceApp = meta.sourceApp
     this.items.unshift(item)
     this.sigToId.set(sig, id)
-    if (data.kind === 'image') this.writeImageFile(data.imageId)
     this.trim(limit)
     this.persist()
     return true
@@ -536,12 +495,7 @@ export class ItemStore {
     const idx = this.items.findIndex((x) => x.id === id)
     if (idx < 0) return
     const [removed] = this.items.splice(idx, 1)
-    this.sigToId.delete(this.signatureOf(removed))
-    if (removed.data.kind === 'image') this.removeImageFile(removed.data.imageId)
-    if (removed.data.kind === 'image-collection') {
-      removed.data.images.forEach((img) => this.removeImageFile(img.imageId))
-    }
-    if (removed.data.kind === 'text') this.removeTextPayload(removed.id)
+    this.releaseItem(removed)
     this.persistSync()
     this.notifyRemoved([removed])
   }
@@ -558,13 +512,9 @@ export class ItemStore {
       return true
     })
 
+    const imageFiles = this.imageFileLister()
     for (const removed of toRemove) {
-      this.sigToId.delete(this.signatureOf(removed))
-      if (removed.data.kind === 'image') this.removeImageFile(removed.data.imageId)
-      if (removed.data.kind === 'image-collection') {
-        removed.data.images.forEach((img) => this.removeImageFile(img.imageId))
-      }
-      if (removed.data.kind === 'text') this.removeTextPayload(removed.id)
+      this.releaseItem(removed, imageFiles)
     }
     this.persistSync()
     this.notifyRemoved(toRemove)
@@ -601,18 +551,14 @@ export class ItemStore {
 
     if (isPureImage(src) && isPureImage(tgt)) {
       // Pure Image(s) + Pure Image(s) -> Image Collection
-      const srcData = src.data
-      const tgtData = tgt.data
-      const srcImages = srcData.kind === 'image-collection'
-        ? srcData.images
-        : srcData.kind === 'image'
-          ? [{ imageId: srcData.imageId, width: srcData.width, height: srcData.height, bytes: srcData.bytes, fileBytes: srcData.fileBytes, ext: srcData.ext, source: srcData.source, fileName: srcData.fileName }]
-          : []
-      const tgtImages = tgtData.kind === 'image-collection'
-        ? tgtData.images
-        : tgtData.kind === 'image'
-          ? [{ imageId: tgtData.imageId, width: tgtData.width, height: tgtData.height, bytes: tgtData.bytes, fileBytes: tgtData.fileBytes, ext: tgtData.ext, source: tgtData.source, fileName: tgtData.fileName }]
-          : []
+      const imagesOf = (data: ItemData): ClipboardImageFields[] =>
+        data.kind === 'image-collection'
+          ? data.images
+          : data.kind === 'image'
+            ? [{ imageId: data.imageId, width: data.width, height: data.height, bytes: data.bytes, fileBytes: data.fileBytes, ext: data.ext, source: data.source, fileName: data.fileName }]
+            : []
+      const srcImages = imagesOf(src.data)
+      const tgtImages = imagesOf(tgt.data)
       const seen = new Set(tgtImages.map((i) => i.imageId))
       const combined = [...tgtImages, ...srcImages.filter((i) => !seen.has(i.imageId))]
 
@@ -786,15 +732,11 @@ export class ItemStore {
   clearUnpinned(): void {
     const kept: ClipboardItem[] = []
     const removed: ClipboardItem[] = []
+    const imageFiles = this.imageFileLister()
     for (const it of this.items) {
       if (it.pinned) kept.push(it)
       else {
-        this.sigToId.delete(this.signatureOf(it))
-        if (it.data.kind === 'image') this.removeImageFile(it.data.imageId)
-        if (it.data.kind === 'image-collection') {
-          it.data.images.forEach((img) => this.removeImageFile(img.imageId))
-        }
-        if (it.data.kind === 'text') this.removeTextPayload(it.id)
+        this.releaseItem(it, imageFiles)
         removed.push(it)
       }
     }
@@ -808,17 +750,13 @@ export class ItemStore {
     const cutoff = Date.now() - hours * 3600 * 1000
     const kept: ClipboardItem[] = []
     const expired: ClipboardItem[] = []
+    const imageFiles = this.imageFileLister()
     for (const it of this.items) {
       if (it.pinned || it.capturedAt >= cutoff) {
         kept.push(it)
       } else {
         expired.push(it)
-        this.sigToId.delete(this.signatureOf(it))
-        if (it.data.kind === 'image') this.removeImageFile(it.data.imageId)
-        if (it.data.kind === 'image-collection') {
-          it.data.images.forEach((img) => this.removeImageFile(img.imageId))
-        }
-        if (it.data.kind === 'text') this.removeTextPayload(it.id)
+        this.releaseItem(it, imageFiles)
       }
     }
     if (expired.length > 0) {
@@ -839,50 +777,6 @@ export class ItemStore {
 
   /* ----------------------------- image files ----------------------------- */
 
-  /**
-   * Build a display-sized image preview. Sending originals as base64 data URLs
-   * duplicates every image in the main process, IPC payload and renderer heap.
-   */
-  imageToDataUrl(imageId: string, ext?: string): string | null {
-    const THUMB_SIZE = 240
-    const PREVIEW_CACHE_MAX = 20
-    const cacheKey = `${imageId}.${ext || ''}`
-    const cached = this.previewCache.get(cacheKey)
-    if (cached) {
-      this.previewCache.delete(cacheKey)
-      this.previewCache.set(cacheKey, cached)
-      return cached
-    }
-    try {
-      let img: any = nativeImage.createFromPath(this.imagePath(imageId, ext))
-      if (img.isEmpty()) return null
-      const size = img.getSize()
-      let thumb: any = size.width > THUMB_SIZE || size.height > THUMB_SIZE
-        ? img.resize({ width: THUMB_SIZE, quality: 'good' })
-        : img
-      const url = thumb.toDataURL({ scaleFactor: 1 })
-      img = null
-      thumb = null
-      if (this.previewCache.size >= PREVIEW_CACHE_MAX) {
-        this.previewCache.delete(this.previewCache.keys().next().value!)
-      }
-      this.previewCache.set(cacheKey, url)
-      return url
-    } catch {
-      return null
-    }
-  }
-
-  /**
-   * Stage an image's bytes from a clipboard capture. The image was already
-   * written to userData/images by the clipboard watcher (which has the raw
-   * nativeImage); here we just no-op because the file already exists.
-   * Kept for symmetry / future use.
-   */
-  private writeImageFile(_imageId: string): void {
-    /* no-op: bytes already on disk from capture */
-  }
-
   public getImagePath(imageId: string, ext?: string): string {
     return this.imagePath(imageId, ext)
   }
@@ -893,6 +787,8 @@ export class ItemStore {
       return join(PATHS.imagesDir(), `${imageId}.${cleanExt}`)
     }
     const dir = PATHS.imagesDir()
+    const png = join(dir, `${imageId}.png`)
+    if (existsSync(png)) return png
     if (existsSync(dir)) {
       try {
         const files = readdirSync(dir)
@@ -903,7 +799,7 @@ export class ItemStore {
         }
       } catch { /* ignore */ }
     }
-    return join(PATHS.imagesDir(), `${imageId}.png`)
+    return png
   }
 
   /**
@@ -937,17 +833,28 @@ export class ItemStore {
     return images.some((img) => this.resolveStoredImagePath(img.imageId, img.ext) !== null)
   }
 
-  private removeImageFile(imageId: string): void {
-    for (const key of this.previewCache.keys()) {
-      if (key.startsWith(imageId)) this.previewCache.delete(key)
+  private listImageFiles(): string[] {
+    const dir = PATHS.imagesDir()
+    if (!existsSync(dir)) return []
+    try {
+      return readdirSync(dir)
+    } catch {
+      return []
     }
+  }
+
+  private imageFileLister(): () => string[] {
+    let files: string[] | null = null
+    return () => (files ??= this.listImageFiles())
+  }
+
+  private removeImageFile(imageId: string, imageFiles: () => string[] = () => this.listImageFiles()): void {
     try {
       rmSync(join(PATHS.thumbnailsDir(), `${imageId}.png`), { force: true })
     } catch {}
     const dir = PATHS.imagesDir()
-    if (!existsSync(dir)) return
     try {
-      const files = readdirSync(dir)
+      const files = imageFiles()
       for (const f of files) {
         if (f.startsWith(`${imageId}.`)) {
           rmSync(join(dir, f), { force: true })
@@ -1194,70 +1101,6 @@ export class ItemStore {
     return { format: PINNED_EXPORT_FORMAT, version: PINNED_EXPORT_VERSION, exportedAt: new Date().toISOString(), items }
   }
 
-  private importImage(raw: unknown): { fields: ClipboardImageFields; png: Buffer } | null {
-    if (!isRecord(raw)) return null
-    const { width, height, bytes, source, fileName, png } = raw
-    if (!isDimension(width) || !isDimension(height)) return null
-    if (typeof png !== 'string' || !png || png.length > Math.ceil(MAX_ORIGINAL_IMAGE_BYTES / 3) * 4) return null
-    if (!/^[A-Za-z0-9+/]+={0,2}$/.test(png)) return null
-    const buffer = Buffer.from(png, 'base64')
-    if (!isPngBytes(buffer)) return null
-    try {
-      if (nativeImage.createFromBuffer(buffer).isEmpty()) return null
-    } catch {
-      return null
-    }
-    const fields: ClipboardImageFields = {
-      imageId: createId(),
-      width,
-      height,
-      bytes: typeof bytes === 'number' && Number.isInteger(bytes) && bytes > 0 ? bytes : buffer.length,
-      ext: 'png'
-    }
-    if (source === 'screenshot' || source === 'image') fields.source = source
-    if (typeof fileName === 'string' && fileName && fileName.length <= 255 && !/[\\/\x00-\x1f]/.test(fileName)) {
-      fields.fileName = fileName
-    }
-    return { fields, png: buffer }
-  }
-
-  private importItem(raw: unknown): { data: ItemData; images: Array<{ imageId: string; png: Buffer }>; html?: string; rtf?: string } | null {
-    if (!isRecord(raw)) return null
-    if (raw.kind === 'text') {
-      const { text, html, rtf } = raw
-      if (typeof text !== 'string' || !text.trim() || text.length > MAX_IMPORT_TEXT_CHARS) return null
-      return {
-        data: { kind: 'text', text, isUrl: raw.isUrl === true, ...(raw.isColor === true ? { isColor: true } : {}) },
-        images: [],
-        html: typeof html === 'string' && html && html.length <= MAX_PAYLOAD_CHARS ? html : undefined,
-        rtf: typeof rtf === 'string' && rtf && rtf.length <= MAX_PAYLOAD_CHARS ? rtf : undefined
-      }
-    }
-    if (raw.kind === 'image') {
-      const image = this.importImage(raw)
-      return image ? { data: { kind: 'image', ...image.fields }, images: [{ imageId: image.fields.imageId, png: image.png }] } : null
-    }
-    if (raw.kind === 'image-collection') {
-      if (!Array.isArray(raw.images) || raw.images.length === 0 || raw.images.length > MAX_STACK) return null
-      const images = raw.images.map((img) => this.importImage(img))
-      if (images.some((img) => img === null)) return null
-      const valid = images as Array<{ fields: ClipboardImageFields; png: Buffer }>
-      return {
-        data: { kind: 'image-collection', images: valid.map((img) => img.fields) },
-        images: valid.map((img) => ({ imageId: img.fields.imageId, png: img.png }))
-      }
-    }
-    if (raw.kind === 'files') {
-      const { paths } = raw
-      if (!Array.isArray(paths) || paths.length === 0 || paths.length > MAX_IMPORT_PATHS) return null
-      if (!paths.every((p) => isValidFilePath(p))) return null
-      const resolved = (paths as string[]).map(resolveImportedPath).filter((p): p is string => p !== null)
-      if (resolved.length === 0) return null
-      return { data: { kind: 'files', paths: [...new Set(resolved)] }, images: [] }
-    }
-    return null
-  }
-
   importPinned(doc: unknown): number {
     if (!isRecord(doc) || doc.format !== PINNED_EXPORT_FORMAT || doc.version !== PINNED_EXPORT_VERSION) return 0
     if (!Array.isArray(doc.items) || doc.items.length > MAX_IMPORT_ITEMS) return 0
@@ -1265,7 +1108,7 @@ export class ItemStore {
     let added = 0
     let changed = false
     for (const raw of doc.items) {
-      const parsed = this.importItem(raw)
+      const parsed = importItem(raw)
       if (!parsed) continue
       const sig = contentSignature(parsed.data)
       const existingId = this.sigToId.get(sig)
@@ -1299,49 +1142,4 @@ export class ItemStore {
     if (changed) this.persistSync()
     return added
   }
-}
-
-/** Check if a file path points to an image by extension. */
-function isImageExt(p: string): boolean {
-  return /\.(png|jpe?g|gif|webp|bmp|svg|avif|ico|tiff?|jfif|pjpeg|pjp)$/i.test(p)
-}
-
-function isPreviewableImage(p: string): boolean {
-  return isImageExt(p) || (process.platform === 'darwin' && /\.hei[cf]$/i.test(p))
-}
-
-/**
- * Build display metadata for a single file path. `size` is best-effort (0 when
- * the file can't be stat'd — e.g. a path on a disconnected drive); the renderer
- * hides the size label when it's 0.
- */
-const fileEntryCache = new Map<string, FileEntry>()
-
-function buildFileEntry(p: string): FileEntry {
-  if (fileEntryCache.has(p)) return fileEntryCache.get(p)!
-  let size = 0
-  let isDirectory = false
-  try {
-    const st = statSync(p)
-    size = st.size
-    isDirectory = st.isDirectory()
-    if (isDirectory && process.platform === 'darwin' && /\.app\/*$/i.test(p)) {
-      isDirectory = false
-      size = 0
-    }
-  } catch {
-    /* file missing / unreadable — size stays 0 */
-  }
-  const ext = isDirectory ? '' : (extname(p).slice(1) || '').toLowerCase()
-  const name = pathBasename(p)
-  const entry: FileEntry = {
-    name,
-    ext,
-    size,
-    isImage: !isDirectory && isPreviewableImage(p),
-    isDirectory
-  }
-  if (fileEntryCache.size > 500) fileEntryCache.clear()
-  fileEntryCache.set(p, entry)
-  return entry
 }

@@ -73,10 +73,6 @@ function merge(base: Settings, patch: Partial<Settings>): Settings {
   return out
 }
 
-export function getSettings(): Settings {
-  return loadSettings()
-}
-
 export function loadSettings(): Settings {
   if (cache) return cache
   let file: Partial<Settings> = {}

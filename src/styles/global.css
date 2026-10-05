@@ -67,14 +67,11 @@ svg {
 .act,
 .icon-btn,
 .preview-flyout,
-.indicator-flyout,
-.settings-sheet,
 .pinned-count-badge,
 .thumb-wrap,
 .thumb,
 .kind-badge,
-.copy-curve-container,
-.style-card {
+.copy-curve-container {
   -webkit-background-clip: padding-box;
   background-clip: padding-box;
 }
@@ -103,8 +100,7 @@ a {
 }
 
 /* Draggable surfaces opt into dragging only when explicitly marked draggable */
-.item-main[draggable="true"],
-.file-row {
+.item-main[draggable="true"] {
   -webkit-user-drag: element;
 }
 

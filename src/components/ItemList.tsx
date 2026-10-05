@@ -32,6 +32,12 @@ const getVerticalPinnedLabelStyle = (text: string): React.CSSProperties => {
   return { fontSize: 'calc(7.0px * var(--font-scale, 1))', letterSpacing: '0em' }
 }
 
+function setListScroll(list: HTMLElement | null, horizontal: boolean, position = 0): void {
+  if (!list) return
+  if (horizontal) list.scrollLeft = position
+  else list.scrollTop = position
+}
+
 export function ItemList() {
   const { t } = useTranslation()
   const isHorizontal = useStore((s) => isHorizontalEdge(s.settings.stickPosition))
@@ -110,7 +116,9 @@ function ItemListBody() {
   const setPinnedCollapsed = (val: boolean) => {
     setCollapsedMap((prev) => {
       const next = { ...prev, [typeFilter]: val }
-      localStorage.setItem('edge_drop_pinned_collapsed_map', JSON.stringify(next))
+      try {
+        localStorage.setItem('edge_drop_pinned_collapsed_map', JSON.stringify(next))
+      } catch {}
       return next
     })
   }
@@ -166,10 +174,7 @@ function ItemListBody() {
 
           if (timeSinceClosed >= 60000 || hasNewCopyWhileClosed) {
             filterScrollMap.current = {}
-            if (listRef.current) {
-              if (isHorizontal) listRef.current.scrollLeft = 0
-              else listRef.current.scrollTop = 0
-            }
+            setListScroll(listRef.current, isHorizontal)
           }
         }
         lastOpen = isNowOpen
@@ -187,10 +192,7 @@ function ItemListBody() {
 
       if (isNewRecent || isNewPinned) {
         filterScrollMap.current[typeFilter] = { top: 0, left: 0 }
-        if (listRef.current) {
-          if (isHorizontal) listRef.current.scrollLeft = 0
-          else listRef.current.scrollTop = 0
-        }
+        setListScroll(listRef.current, isHorizontal)
       }
     }
 
@@ -214,11 +216,7 @@ function ItemListBody() {
 
       // Restore incoming filter's saved scroll position (defaulting to 0)
       const saved = filterScrollMap.current[typeFilter]
-      if (isHorizontal) {
-        el.scrollLeft = saved?.left ?? 0
-      } else {
-        el.scrollTop = saved?.top ?? 0
-      }
+      setListScroll(el, isHorizontal, (isHorizontal ? saved?.left : saved?.top) ?? 0)
     }
   }, [typeFilter, isHorizontal])
 
@@ -227,10 +225,7 @@ function ItemListBody() {
   useLayoutEffect(() => {
     if (prevQueryRef.current !== query) {
       prevQueryRef.current = query
-      if (listRef.current) {
-        if (isHorizontal) listRef.current.scrollLeft = 0
-        else listRef.current.scrollTop = 0
-      }
+      setListScroll(listRef.current, isHorizontal)
     }
   }, [query, isHorizontal])
 

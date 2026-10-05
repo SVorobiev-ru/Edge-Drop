@@ -6,12 +6,13 @@
  * streams that placement here while the button is held. Release saves the
  * placement; nothing about the window changes when the drag starts.
  */
-import { useSyncExternalStore } from 'react'
 import type React from 'react'
 import { edge, IS_DARWIN } from '../lib/edge'
 import { useStore } from '../store/appStore'
 import { playEdgeExpandSound } from '../lib/soundEffects'
 import { applyPanelPosition, currentLivePlacement, noteEdgeChange, setLivePlacement } from '../lib/panelPosition'
+import { startPointerSession } from '../lib/pointerSession'
+import { createSignal, useSignalValue } from '../lib/signal'
 import type { PanelDragPlacement, SolidRect, StickPosition } from '../../shared/types'
 
 const DRAG_THRESHOLD_PX = 4
@@ -58,22 +59,17 @@ export function isPanelDragTarget(target: unknown, handle?: DragHandle): boolean
 
 let snapping = false
 let ending = false
-const snapListeners = new Set<() => void>()
+const snapSignal = createSignal()
 
 function setSnapping(value: boolean): void {
   if (snapping === value) return
   snapping = value
-  snapListeners.forEach((fn) => fn())
-}
-
-function subscribeSnapping(fn: () => void): () => void {
-  snapListeners.add(fn)
-  return () => snapListeners.delete(fn)
+  snapSignal.emit()
 }
 
 /** True between the drop and the reveal: the panel re-lays out without transitions. */
 export function usePanelSnapping(): boolean {
-  return useSyncExternalStore(subscribeSnapping, () => snapping, () => false)
+  return useSignalValue(snapSignal, () => snapping, () => false)
 }
 
 function nextFrame(): Promise<void> {
@@ -176,17 +172,8 @@ export function onPanelDragPointerDown(e: React.PointerEvent<HTMLElement>): void
   const startY = e.screenY
   let started: Promise<boolean> | null = null
 
-  try { el.setPointerCapture(pointerId) } catch { /* ignore */ }
-
-  const cleanup = () => {
-    el.removeEventListener('pointermove', onMove)
-    el.removeEventListener('pointerup', onUp)
-    el.removeEventListener('pointercancel', onCancel)
-    el.removeEventListener('lostpointercapture', onUp)
-    try { el.releasePointerCapture(pointerId) } catch { /* ignore */ }
-  }
   const onMove = (ev: PointerEvent) => {
-    if (started || ev.pointerId !== pointerId) return
+    if (started) return
     if (Math.abs(ev.screenX - startX) + Math.abs(ev.screenY - startY) < DRAG_THRESHOLD_PX) return
     const rect = bladeRect(el)
     if (!rect) return
@@ -204,23 +191,13 @@ export function onPanelDragPointerDown(e: React.PointerEvent<HTMLElement>): void
       started = Promise.resolve(false)
     }
   }
-  const end = (commit: boolean) => {
-    cleanup()
+  const onEnd = (commit: boolean) => {
     if (!started) return
     ending = true
     void finishDrag(started, commit)
   }
-  const onUp = (ev: PointerEvent) => {
-    if (ev.pointerId === pointerId) end(true)
-  }
-  const onCancel = (ev: PointerEvent) => {
-    if (ev.pointerId === pointerId) end(false)
-  }
 
-  el.addEventListener('pointermove', onMove)
-  el.addEventListener('pointerup', onUp)
-  el.addEventListener('pointercancel', onCancel)
-  el.addEventListener('lostpointercapture', onUp)
+  startPointerSession(el, pointerId, { onMove, onEnd })
 }
 
 /** Pointer-down handler for the header; undefined where the panel cannot be moved. */

@@ -23,12 +23,9 @@
  *    refresh() - zero recurring cost, zero retained growth.
  */
 
-export interface WorkAreaRect {
-  x: number
-  y: number
-  width: number
-  height: number
-}
+import type { Rect } from '../../shared/types'
+
+export type WorkAreaRect = Rect
 
 export interface ResolvedWorkArea {
   displayId: number

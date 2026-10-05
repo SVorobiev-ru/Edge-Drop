@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { readSettingsSource } from './helpers/splitSources'
 import { STORE_STARTUP_TASK_ID } from '../electron/main/config'
 
 const root = join(__dirname, '..')
@@ -76,10 +77,21 @@ describe('GitHub vs Store packaging contracts (on-disk, not assumed)', () => {
     expect(Object.keys(pkg.dependencies).sort()).toEqual([
       '@resvg/resvg-js',
       'electron-updater',
-      'koffi',
-      'react',
-      'zustand'
+      'koffi'
     ])
+  })
+
+  it('keeps renderer code out of the main and preload sources', () => {
+    const files = readdirSync(join(root, 'electron'), { recursive: true, encoding: 'utf8' }).filter((file) => file.endsWith('.ts'))
+    expect(files.length).toBeGreaterThan(0)
+    for (const file of files) {
+      const source = readFileSync(join(root, 'electron', file), 'utf8')
+      const specs = [...source.matchAll(/['"]((?:\.\.\/)+src\/[^'"]+)['"]/g)].map((m) => m[1].replace(/^(\.\.\/)+/, ''))
+      for (const spec of specs) {
+        expect(spec, file).toMatch(/^src\/i18n\/types$/)
+      }
+      expect(source, file).not.toMatch(/from ['"](react|zustand)(\/[^'"]*)?['"]/)
+    }
   })
 
   it('does not pack README media, Store tiles, or the full Twemoji npm tree into the asar', () => {
@@ -185,7 +197,7 @@ describe('GitHub vs Store packaging contracts (on-disk, not assumed)', () => {
   })
 
   it('Settings hides the in-app updater on Store builds', () => {
-    const src = read('src/components/Settings.tsx')
+    const src = readSettingsSource()
     expect(src).toContain('{!isStoreBuild && (')
     expect(src).toContain('behaviour.autoUpdatesTitle')
     expect(src).toContain('hasPromotedTopUpdate = !isStoreBuild &&')
@@ -193,7 +205,7 @@ describe('GitHub vs Store packaging contracts (on-disk, not assumed)', () => {
   })
 
   it('Settings renders Store review button on Store builds and GitHub star on GitHub builds', () => {
-    const src = read('src/components/Settings.tsx')
+    const src = readSettingsSource()
     expect(src).toContain('isStoreBuild ? (')
     expect(src).toContain('store-review-promo-btn')
     expect(src).toContain('ms-windows-store://review/?ProductId=9P3JMHN9M4NR')

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { readFileSync, readdirSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
+import ts from 'typescript'
 import { LANGUAGES, TRANSLATIONS, en } from '../src/i18n/translations'
 import { MAC_KEY_ALIASES, resolveText } from '../shared/platformText'
 
@@ -66,21 +67,47 @@ describe('translation completeness', () => {
 })
 
 describe('translation pipeline', () => {
-  it.each(LANGS)('%s locale module matches its JSON source', (lang) => {
+  it.each(LANGS)('%s dictionary matches its JSON source', (lang) => {
     const json = JSON.parse(readFileSync(join(root, 'edge-drop-translations', `${lang}.json`), 'utf8'))
     expect(json).toEqual(TRANSLATIONS[lang])
   })
 
-  it('has one locale module per language', () => {
-    const files = readdirSync(join(root, 'src/i18n/locales')).map((f) => f.replace(/\.ts$/, '')).sort()
+  it('has one JSON source per language and no generated locale modules', () => {
+    const files = readdirSync(join(root, 'edge-drop-translations')).filter((f) => f.endsWith('.json')).map((f) => f.replace(/\.json$/, '')).sort()
     expect(files).toEqual([...LANGS].sort())
+    expect(existsSync(join(root, 'src/i18n/locales'))).toBe(false)
   })
 
-  it('renderer loads only English statically', () => {
-    const index = readFileSync(join(root, 'src/i18n/index.ts'), 'utf8')
-    expect(index).not.toMatch(/from '\.\/translations'/)
-    expect(index).toContain("import en from './locales/en'")
-    expect(index).toContain("import.meta.glob<TranslationKeys>(['./locales/*.ts', '!./locales/en.ts']")
+  it('English JSON has only keys declared in TranslationKeys and every required one', () => {
+    const source = ts.createSourceFile('types.ts', readFileSync(join(root, 'src/i18n/types.ts'), 'utf8'), ts.ScriptTarget.ES2022, true)
+    const declared: string[] = []
+    const required: string[] = []
+    const walk = (members: ts.NodeArray<ts.TypeElement>, prefix: string) => {
+      for (const member of members) {
+        if (!ts.isPropertySignature(member) || !member.type) continue
+        const name = (member.name as ts.Identifier | ts.StringLiteral).text
+        if (ts.isTypeLiteralNode(member.type)) walk(member.type.members, `${prefix}${name}.`)
+        else {
+          declared.push(prefix + name)
+          if (!member.questionToken) required.push(prefix + name)
+        }
+      }
+    }
+    const keys = source.statements.find((node): node is ts.InterfaceDeclaration => ts.isInterfaceDeclaration(node) && node.name.text === 'TranslationKeys')
+    expect(keys).toBeDefined()
+    walk(keys!.members, '')
+    expect(declared.length).toBeGreaterThan(0)
+    expect(Object.keys(EN).filter((key) => !declared.includes(key))).toEqual([])
+    expect(required.filter((key) => !(key in EN))).toEqual([])
+  })
+
+  it.each(['src/i18n/index.ts', 'electron/main/language.ts'])('%s loads only English statically', (file) => {
+    const source = readFileSync(join(root, file), 'utf8')
+    expect(source).not.toMatch(/from ['"][^'"]*\/translations['"]/)
+    const staticJson = [...source.matchAll(/^import\s+\w+\s+from\s+'([^']+\.json)'/gm)].map((m) => m[1])
+    expect(staticJson).toEqual(['../../edge-drop-translations/en.json'])
+    expect(source).toContain("import.meta.glob<TranslationKeys>(['../../edge-drop-translations/*.json', '!../../edge-drop-translations/en.json'], { import: 'default' })")
+    expect(source).not.toMatch(/eager/)
   })
 })
 

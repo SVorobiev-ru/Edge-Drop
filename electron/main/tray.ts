@@ -16,8 +16,8 @@ import type { StickPosition, ToggleSource } from '../../shared/types'
 import { DEFAULT_TOGGLE_HOTKEY } from '../../shared/types'
 import { pushState, getStore } from './state'
 import type { ClipboardItem } from '../../shared/types'
-import { en } from '../../src/i18n/translations'
-import { mainText } from './language'
+import type { TranslationKeys } from '../../src/i18n/types'
+import { isMainLanguageLoaded, mainText, onMainLanguageLoaded, warmMainLanguage } from './language'
 
 let tray: Tray | null = null
 let themeListenerRegistered = false
@@ -110,7 +110,7 @@ export function updateTrayIcon(): void {
   }
 }
 
-export function getTrayText(settingsLang: string | undefined, key: keyof typeof en['tray']): string {
+export function getTrayText(settingsLang: string | undefined, key: keyof TranslationKeys['tray']): string {
   return mainText(settingsLang, `tray.${key}`, undefined, { hotkey: loadSettings().toggleHotkey || DEFAULT_TOGGLE_HOTKEY, missing: key })
 }
 
@@ -206,11 +206,17 @@ export function createTray(): Tray {
     try {
       if (Notification.isSupported()) {
         const initialSettings = loadSettings()
-        new Notification({
-          title: getTrayText(initialSettings.language, 'welcomeTitle'),
-          body: getTrayText(initialSettings.language, 'welcomeBody'),
-          icon: PATHS.icon()
-        }).show()
+        const showWelcome = () => {
+          try {
+            new Notification({
+              title: getTrayText(initialSettings.language, 'welcomeTitle'),
+              body: getTrayText(initialSettings.language, 'welcomeBody'),
+              icon: PATHS.icon()
+            }).show()
+          } catch { /* ignore */ }
+        }
+        if (isMainLanguageLoaded(initialSettings.language)) showWelcome()
+        else void warmMainLanguage(initialSettings.language).then(showWelcome)
       }
     } catch { /* ignore */ }
   }
@@ -263,7 +269,7 @@ export function createTray(): Tray {
 
   const rebuild = () => {
     const settings = loadSettings()
-    const t = (k: keyof typeof en['tray']) => getTrayText(settings.language, k)
+    const t = (k: keyof TranslationKeys['tray']) => getTrayText(settings.language, k)
 
     let recentItems: Electron.MenuItemConstructorOptions[] = []
     if (process.platform === 'darwin') {
@@ -390,6 +396,8 @@ let trayMenuRebuilder: (() => void) | null = null
 export function rebuildTrayMenu(): void {
   trayMenuRebuilder?.()
 }
+
+onMainLanguageLoaded(rebuildTrayMenu)
 
 /**
  * Destroys and safely recreates the tray icon.

@@ -1,0 +1,129 @@
+/* ==========================================================================
+   Split Drop Zone (Detach/Ungroup sub-items from expanded stacks on drag)
+   ========================================================================== */
+
+.split-dropzone {
+  position: absolute;
+  z-index: 300;
+  display: flex;
+  pointer-events: auto;
+  box-sizing: border-box;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Top Dock: Attached to top screen edge */
+.split-dropzone.pos-top {
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 56px;
+  align-items: flex-start;
+  justify-content: center;
+}
+
+.split-dropzone.pos-bottom {
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 56px;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+/* Left Dock: Attached to left screen edge */
+.split-dropzone.pos-left {
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 80px;
+  align-items: center;
+  justify-content: flex-start;
+}
+
+/* Right Dock: Attached to right screen edge */
+.split-dropzone.pos-right {
+  top: 0;
+  bottom: 0;
+  right: 0;
+  width: 80px;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+/* The neon laser capsule glow bar */
+.split-dropzone .glow-line {
+  position: absolute;
+  pointer-events: none;
+  border-radius: 9999px;
+  background: linear-gradient(180deg, transparent 0%, rgba(249, 115, 22, 0.85) 30%, rgba(249, 115, 22, 0.85) 70%, transparent 100%);
+  box-shadow: 0 0 16px rgba(249, 115, 22, 0.45), 0 0 32px rgba(249, 115, 22, 0.2);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Horizontal line for Top/Bottom docks */
+.split-dropzone.pos-top .glow-line,
+.split-dropzone.pos-bottom .glow-line {
+  width: 55%;
+  max-width: 360px;
+  height: 2px;
+  background: linear-gradient(90deg, transparent 0%, rgba(249, 115, 22, 0.85) 30%, rgba(249, 115, 22, 0.85) 70%, transparent 100%);
+}
+
+.split-dropzone.pos-top .glow-line {
+  top: 4px;
+}
+
+.split-dropzone.pos-bottom .glow-line {
+  bottom: 4px;
+}
+
+/* Vertical line for Left/Right docks */
+.split-dropzone.pos-left .glow-line,
+.split-dropzone.pos-right .glow-line {
+  height: 55%;
+  max-height: 260px;
+  width: 2px;
+  background: linear-gradient(180deg, transparent 0%, rgba(249, 115, 22, 0.85) 30%, rgba(249, 115, 22, 0.85) 70%, transparent 100%);
+}
+
+.split-dropzone.pos-left .glow-line {
+  left: 4px;
+}
+
+.split-dropzone.pos-right .glow-line {
+  right: 4px;
+}
+
+/* Active / Drag-over States */
+.split-dropzone.active.pos-left,
+.split-dropzone.active.pos-right {
+  width: 100px;
+}
+
+.split-dropzone.active.pos-top,
+.split-dropzone.active.pos-bottom {
+  height: 72px;
+}
+
+.split-dropzone.active .glow-line {
+  background: linear-gradient(180deg, transparent 0%, #f97316 25%, #ff8a3d 50%, #f97316 75%, transparent 100%);
+  box-shadow: 0 0 24px rgba(249, 115, 22, 0.9), 0 0 48px rgba(249, 115, 22, 0.45);
+}
+
+.split-dropzone.pos-left.active .glow-line,
+.split-dropzone.pos-right.active .glow-line {
+  width: 3.5px;
+  height: 68%;
+  max-height: 320px;
+}
+
+.split-dropzone.pos-top.active .glow-line,
+.split-dropzone.pos-bottom.active .glow-line {
+  height: 3.5px;
+  width: 68%;
+  max-width: 440px;
+  background: linear-gradient(90deg, transparent 0%, #f97316 25%, #ff8a3d 50%, #f97316 75%, transparent 100%);
+}
+
+
+

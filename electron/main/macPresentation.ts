@@ -1,6 +1,6 @@
 import koffi from 'koffi'
-
-type Ptr = unknown
+import type { Rect } from '../../shared/types'
+import { objcClass, objcLib, objcMsgSend, objcSel, type Ptr } from './macObjc'
 
 export const NS_PRESENTATION_FULLSCREEN = 1 << 10
 
@@ -12,14 +12,11 @@ let selPresentationOptions: Ptr = null
 
 if (process.platform === 'darwin') {
   try {
-    const objc = koffi.load('/usr/lib/libobjc.A.dylib')
-    const getClass = objc.func('void *objc_getClass(const char *name)') as (n: string) => Ptr
-    const sel = objc.func('void *sel_registerName(const char *name)') as (n: string) => Ptr
-    msgPtr = objc.func('objc_msgSend', 'void *', ['void *', 'void *']) as unknown as (a: Ptr, b: Ptr) => Ptr
-    msgULong = objc.func('objc_msgSend', 'unsigned long', ['void *', 'void *']) as unknown as (a: Ptr, b: Ptr) => number | bigint
-    NSApplication = getClass('NSApplication')
-    selSharedApplication = sel('sharedApplication')
-    selPresentationOptions = sel('currentSystemPresentationOptions')
+    msgPtr = objcMsgSend('void *', ['void *', 'void *'])
+    msgULong = objcMsgSend('unsigned long', ['void *', 'void *'])
+    NSApplication = objcClass('NSApplication')
+    selSharedApplication = objcSel('sharedApplication')
+    selPresentationOptions = objcSel('currentSystemPresentationOptions')
   } catch (err) {
     console.error('[macPresentation] ObjC runtime unavailable:', err)
   }
@@ -41,12 +38,7 @@ export function isFullscreenPresentation(options: number): boolean {
   return (options & NS_PRESENTATION_FULLSCREEN) !== 0
 }
 
-export interface PresentationRect {
-  x: number
-  y: number
-  width: number
-  height: number
-}
+export type PresentationRect = Rect
 
 export interface OnScreenWindow {
   pid: number
@@ -76,21 +68,20 @@ const windowKeys: Record<string, Ptr> = {}
 
 if (process.platform === 'darwin') {
   try {
-    const objc = koffi.load('/usr/lib/libobjc.A.dylib')
+    objcLib()
     const cg = koffi.load('/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics')
     const cf = koffi.load('/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation')
-    const sel = objc.func('void *sel_registerName(const char *name)') as (n: string) => Ptr
     const cfString = cf.func('CFStringCreateWithCString', 'void *', ['void *', 'str', 'uint32']) as unknown as (alloc: Ptr, text: string, encoding: number) => Ptr
-    msgCount = objc.func('objc_msgSend', 'unsigned long', ['void *', 'void *']) as unknown as (a: Ptr, b: Ptr) => number | bigint
-    msgObjectAtIndex = objc.func('objc_msgSend', 'void *', ['void *', 'void *', 'unsigned long']) as unknown as (a: Ptr, b: Ptr, c: number) => Ptr
-    msgObjectForKey = objc.func('objc_msgSend', 'void *', ['void *', 'void *', 'void *']) as unknown as (a: Ptr, b: Ptr, c: Ptr) => Ptr
-    msgIntValue = objc.func('objc_msgSend', 'int', ['void *', 'void *']) as unknown as (a: Ptr, b: Ptr) => number
-    msgDoubleValue = objc.func('objc_msgSend', 'double', ['void *', 'void *']) as unknown as (a: Ptr, b: Ptr) => number
-    selCount = sel('count')
-    selObjectAtIndex = sel('objectAtIndex:')
-    selObjectForKey = sel('objectForKey:')
-    selIntValue = sel('intValue')
-    selDoubleValue = sel('doubleValue')
+    msgCount = objcMsgSend('unsigned long', ['void *', 'void *'])
+    msgObjectAtIndex = objcMsgSend('void *', ['void *', 'void *', 'unsigned long'])
+    msgObjectForKey = objcMsgSend('void *', ['void *', 'void *', 'void *'])
+    msgIntValue = objcMsgSend('int', ['void *', 'void *'])
+    msgDoubleValue = objcMsgSend('double', ['void *', 'void *'])
+    selCount = objcSel('count')
+    selObjectAtIndex = objcSel('objectAtIndex:')
+    selObjectForKey = objcSel('objectForKey:')
+    selIntValue = objcSel('intValue')
+    selDoubleValue = objcSel('doubleValue')
     for (const key of ['kCGWindowOwnerPID', 'kCGWindowLayer', 'kCGWindowBounds', 'X', 'Y', 'Width', 'Height']) {
       windowKeys[key] = cfString(null, key, CF_STRING_ENCODING_UTF8)
     }

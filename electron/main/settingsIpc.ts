@@ -4,7 +4,7 @@ import { registerGlobalHotkey, onToggleHotkey } from './index'
 import { rebuildTrayMenu } from './tray'
 import { validateAccelerator, sameAccelerator, trySwapGlobalShortcut } from './hotkeys'
 import { handle } from './ipcHandle'
-import { pasteQueue } from './ipc'
+import { pasteQueue } from './pastePipeline'
 
 export function reregisterGlobalShortcuts(hotkey?: string): boolean {
   const registered = registerGlobalHotkey(hotkey)

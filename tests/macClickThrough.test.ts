@@ -66,7 +66,9 @@ vi.mock('../electron/store/paths', async () => (await import('./helpers/pathsMoc
 
 vi.mock('../electron/main/fullscreen', () => ({
   isFullscreenAppActive: () => false,
-  registerFullscreenActiveListener: () => {}
+  registerFullscreenActiveListener: () => {},
+  pauseFullscreenMonitor: () => {},
+  resumeFullscreenMonitor: () => {}
 }))
 
 vi.mock('../electron/main/macScreen', async (importOriginal) => {

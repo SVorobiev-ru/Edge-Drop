@@ -40,23 +40,3 @@ export function useAdaptiveSpring() {
     } as const
   }, [])
 }
-
-/**
- * A gentler spring for secondary surfaces (flyout content, settings panes).
- * Slightly slower stiffness so it doesn't feel abrupt against the blade motion.
- */
-export function useSubtleSpring() {
-  return useMemo(() => {
-    const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
-    if (prefersReducedMotion) return { type: 'tween', duration: 0.01 } as const
-
-    return {
-      type: 'spring',
-      stiffness: 480,
-      damping: 40,
-      mass: 0.5,
-      restDelta: 0.4,
-      restSpeed: 10
-    } as const
-  }, [])
-}

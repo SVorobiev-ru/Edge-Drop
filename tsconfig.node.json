@@ -22,6 +22,7 @@
   "include": [
     "electron/**/*.ts",
     "shared/**/*.ts",
-    "electron.vite.config.ts"
+    "electron.vite.config.ts",
+    "scripts/viteAssetPlugins.ts"
   ]
 }

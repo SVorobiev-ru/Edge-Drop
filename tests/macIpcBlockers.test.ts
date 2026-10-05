@@ -972,9 +972,10 @@ describe('simulatePaste on darwin', () => {
     expect(mocks.toasts).toEqual([{ message: 'toast.pasteNeedsAccessibility', tone: 'info' }])
   })
 
-  it('uses the Russian notification texts for a Russian setting', () => {
+  it('uses the Russian notification texts for a Russian setting', async () => {
     mocks.trusted = false
     mocks.language = 'ru'
+    await (await import('../electron/main/language')).warmMainLanguage('ru')
 
     simulatePaste()
 
@@ -987,6 +988,7 @@ describe('simulatePaste on darwin', () => {
     mocks.trusted = false
     mocks.language = 'system'
     mocks.systemLanguages = ['ru-RU']
+    await (await import('../electron/main/language')).warmMainLanguage('system')
     simulatePaste()
     expect(mocks.notifications[0].options.body).toContain('Универсальный доступ')
 

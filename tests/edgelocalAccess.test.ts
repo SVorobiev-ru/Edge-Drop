@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -103,6 +103,28 @@ describe('edgelocal allow-list on the real file system', () => {
     expect(isServableLocalPath(join(root, 'abc.png'), allowed)).toBe(true)
     expect(isServableLocalPath(join(root, 'evil.png'), allowed)).toBe(false)
     expect(isServableLocalPath(join(root, 'dir', 'key'), allowed)).toBe(false)
+  })
+
+  it('uses a supplied root resolver once per root and keeps the same verdicts', () => {
+    const { root, outside } = setup()
+    symlinkSync(join(outside, 'key'), join(root, 'evil.png'))
+    const linkedRoot = join(base, 'linked')
+    symlinkSync(root, linkedRoot)
+    const resolved = new Map<string, string>()
+    const resolveRoot = vi.fn((rootDir: string) => {
+      let real = resolved.get(rootDir)
+      if (real === undefined) {
+        real = resolveRealPath(rootDir)
+        resolved.set(rootDir, real)
+      }
+      return real
+    })
+    const allowed = { itemPaths: new Set<string>(), roots: ['', linkedRoot], resolveRoot }
+    expect(isServableLocalPath(join(linkedRoot, 'abc.png'), allowed)).toBe(true)
+    expect(isServableLocalPath(join(root, 'evil.png'), allowed)).toBe(false)
+    expect(isServableLocalPath(join(outside, 'key'), allowed)).toBe(false)
+    expect(resolveRoot.mock.calls.every(([rootDir]) => rootDir === linkedRoot)).toBe(true)
+    expect(resolved.size).toBe(1)
   })
 
   it('accepts a root given through a symlink and a file that does not exist yet', () => {

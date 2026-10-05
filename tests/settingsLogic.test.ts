@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { readSettingsSource } from './helpers/splitSources'
 import { displayedUpdateMode, visibleUpdateModes } from '../src/components/settings/updateMode'
 
 const read = (rel: string) => readFileSync(join(__dirname, '..', rel), 'utf8')
@@ -20,7 +21,7 @@ describe('mac update mode selector', () => {
 })
 
 describe('settings source', () => {
-  const src = read('src/components/Settings.tsx')
+  const src = readSettingsSource()
 
   it('no longer hardcodes placeholder versions', () => {
     expect(src).not.toMatch(/0\.3\.[12]/)

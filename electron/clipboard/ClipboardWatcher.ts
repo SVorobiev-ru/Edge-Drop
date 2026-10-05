@@ -92,10 +92,14 @@ export class ClipboardWatcher {
     this.onHint = onHint ?? null
     // Seed the signature so we don't re-fire for whatever is already on the
     // clipboard at startup (the user didn't "just" copy it).
-    this.lastSeq = getClipboardSequenceNumber()
-    this.lastSig = this.lastSeq > 0 ? `seq:${this.lastSeq}` : clipboardSignature()
+    this.reseed()
 
     this.timer = setInterval(() => this.pollTick(), this.intervalMs)
+  }
+
+  private reseed(): void {
+    this.lastSeq = getClipboardSequenceNumber()
+    this.lastSig = this.lastSeq > 0 ? `seq:${this.lastSeq}` : clipboardSignature()
   }
 
   setCapturePolicy(policy: CapturePolicy | null): void {
@@ -237,8 +241,7 @@ export class ClipboardWatcher {
     try {
       const data = await readClipboard()
       // Absorb sequence bumps caused by our own OpenClipboard / format requests.
-      this.lastSeq = getClipboardSequenceNumber()
-      this.lastSig = this.lastSeq > 0 ? `seq:${this.lastSeq}` : clipboardSignature()
+      this.reseed()
       if (!data) {
         if (this.incompleteTries < MAX_INCOMPLETE_RETRIES) {
           this.incompleteTries++
@@ -319,8 +322,7 @@ export class ClipboardWatcher {
     // When resuming, refresh the signature so we ignore whatever was copied
     // during the paused state (e.g. self-copies or incognito copies).
     if (!paused) {
-      this.lastSeq = getClipboardSequenceNumber()
-      this.lastSig = this.lastSeq > 0 ? `seq:${this.lastSeq}` : clipboardSignature()
+      this.reseed()
     }
   }
 
@@ -352,8 +354,7 @@ export class ClipboardWatcher {
       this.settleTimer = null
     }
     this.incompleteTries = 0
-    this.lastSeq = getClipboardSequenceNumber()
-    this.lastSig = this.lastSeq > 0 ? `seq:${this.lastSeq}` : clipboardSignature()
+    this.reseed()
     if (process.platform === 'darwin') {
       this.lastCapturedKey = ''
       this.lastCapturedAt = 0

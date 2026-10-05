@@ -73,6 +73,7 @@ if (process.platform === 'win32') {
 let isFullscreenActiveCache = false
 let macFullscreenDisplayId: number | null = null
 let checkTimer: ReturnType<typeof setInterval> | null = null
+let checkPaused = false
 let onFullscreenDetectedFn: ((fullscreenDisplayId: number | null) => void) | null = null
 
 export function registerFullscreenActiveListener(fn: (fullscreenDisplayId: number | null) => void): void {
@@ -217,7 +218,7 @@ function unsubscribeMacSpaceChange(): void {
 
 export function startFullscreenMonitor(): void {
   if (process.platform !== 'win32' && process.platform !== 'darwin') return
-  if (checkTimer !== null) return
+  if (checkTimer !== null || checkPaused) return
 
   if (process.platform === 'darwin') subscribeMacSpaceChange()
 
@@ -225,7 +226,23 @@ export function startFullscreenMonitor(): void {
   checkTimer = setInterval(triggerFullscreenCheck, FULLSCREEN_CHECK_INTERVAL_MS)
 }
 
+export function pauseFullscreenMonitor(): void {
+  if (checkTimer === null) return
+  clearInterval(checkTimer)
+  checkTimer = null
+  checkPaused = true
+}
+
+export function resumeFullscreenMonitor(): void {
+  if (!checkPaused) return
+  checkPaused = false
+  if (checkTimer !== null) return
+  triggerFullscreenCheck()
+  checkTimer = setInterval(triggerFullscreenCheck, FULLSCREEN_CHECK_INTERVAL_MS)
+}
+
 export function stopFullscreenMonitor(): void {
+  checkPaused = false
   if (checkTimer !== null) {
     clearInterval(checkTimer)
     checkTimer = null

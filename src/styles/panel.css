@@ -544,17 +544,6 @@
   align-items: center;
   gap: 6px;
 }
-.pinned-toggle-hint {
-  font-size: calc(10.5px * var(--font-scale, 1));
-  font-weight: 500;
-  color: rgb(var(--ink) / max(0.6, var(--text-alpha-floor)));
-  text-transform: none;
-  letter-spacing: 0;
-  transition: color 0.2s ease;
-}
-.pinned-header-interactive:hover .pinned-toggle-hint {
-  color: var(--text-primary);
-}
 .pinned-header-interactive .bundle-collapse-btn {
   background: transparent;
   padding: 0;
@@ -647,58 +636,6 @@
   letter-spacing: 0.02em;
   padding-inline-end: 0;
   user-select: none;
-}
-.footer-capsule-divider {
-  width: 1px;
-  height: 14px;
-  background: rgb(var(--ink) / 0.12);
-  margin-inline-end: 3px;
-}
-.footer-capsule-btn {
-  width: 22px;
-  height: 22px;
-  border-radius: 999px;
-  display: grid;
-  place-items: center;
-  background: transparent;
-  border: none;
-  color: rgb(var(--ink) / max(0.75, var(--text-alpha-floor)));
-  cursor: pointer;
-  padding: 0;
-  transition: all 0.15s ease;
-}
-.footer-capsule-btn:hover {
-  background: rgb(var(--ink) / 0.16);
-  color: var(--text-primary);
-  transform: scale(1.08);
-}
-.footer-capsule-btn:active {
-  transform: scale(0.94);
-}
-
-/* Return to clipboard pill */
-.footer-back-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  height: 28px;
-  background: var(--bg-chip);
-  border: none;
-  border-radius: 999px;
-  padding: 0 12px 0 8px;
-  color: var(--text-zinc-100);
-  font-size: calc(12px * var(--font-scale, 1));
-  font-weight: 600;
-  cursor: pointer;
-  box-shadow: none;
-  transition: background 0.18s cubic-bezier(0.22, 1, 0.36, 1);
-}
-.footer-back-pill:hover {
-  background: var(--bg-3);
-  color: var(--text-primary);
-}
-.footer-back-pill:active {
-  transform: scale(0.96);
 }
 
 /* Clear button */
@@ -826,116 +763,10 @@
   min-width: 0;
 }
 
-.jelly-filters {
-  --jf-chip: var(--bg-chip-zinc);
-  --jf-active: var(--surface-inverse);
-  --jf-text: rgb(var(--ink) / max(0.72, var(--text-alpha-floor)));
-  --jf-active-text: var(--on-inverse-zinc);
-  --jf-ease-out: cubic-bezier(0.23, 1, 0.32, 1);
-
-  display: inline-flex;
-  align-items: center;
-  user-select: none;
-  -webkit-user-select: none;
-  -webkit-touch-callout: none;
-  overflow: visible;
-}
-
-.filter-chip {
-  position: relative;
-  margin: 0;
-  padding: 0;
-  border: 0 !important;
-  background: none !important;
-  color: inherit;
-  font: inherit;
-  cursor: pointer;
-  outline: none;
-  transform-origin: 50% 50%;
-  touch-action: manipulation;
-  -webkit-tap-highlight-color: transparent;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  will-change: transform;
-  /* Transform is driven strictly per-frame by Jelly MotionValues (inline) - no CSS transform transition */
-}
-
-.filter-chip[data-on='true'],
-.filter-chip.active {
-  cursor: default;
-}
-
-.filter-chip__skin {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 9999px;
-  overflow: hidden;
-  background: var(--bg-chip-zinc);
-  color: rgb(var(--ink) / max(0.72, var(--text-alpha-floor)));
-  line-height: 1;
-  white-space: nowrap;
-  border: none;
-  box-shadow: none;
-  transition:
-    transform 160ms cubic-bezier(0.23, 1, 0.32, 1),
-    background-color 200ms ease,
-    color 200ms ease,
-    box-shadow 200ms ease;
-}
-
-.filter-chip__skin::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: var(--surface-inverse);
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 160ms ease;
-}
-
-@media (hover: hover) and (pointer: fine) {
-  .filter-chip[data-on='false']:not(:disabled):hover .filter-chip__skin::before,
-  .filter-chip:not(.active):not(:disabled):hover .filter-chip__skin::before {
-    opacity: 0.12;
-  }
-  .filter-chip[data-on='false']:not(:disabled):hover .filter-chip__skin,
-  .filter-chip:not(.active):not(:disabled):hover .filter-chip__skin {
-    color: var(--text-primary);
-  }
-}
-
-.filter-chip:active .filter-chip__skin {
-  transform: scale(0.95);
-}
-
-.filter-chip[data-on='true'] .filter-chip__skin,
-.filter-chip.active .filter-chip__skin {
-  background: var(--surface-inverse);
-  color: var(--on-inverse-zinc);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.28);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .filter-chip:active .filter-chip__skin {
-    transform: none;
-  }
-}
-
 /* Copy Indicator Sine Curve Morph Styles */
 .copy-curve-container {
   pointer-events: none;
   z-index: 100;
-}
-
-.copy-indicator-badge {
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4), 0 0 20px rgba(255, 255, 255, 0.25);
-  user-select: none;
-  font-family: inherit;
-  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
 }
 
 

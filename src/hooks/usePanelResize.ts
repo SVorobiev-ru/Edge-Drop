@@ -1,24 +1,20 @@
-import { useSyncExternalStore } from 'react'
 import type React from 'react'
 import { edge } from '../lib/edge'
 import { useStore } from '../store/appStore'
 import { currentSizePatch, setSizePatch, type PanelSizePatch } from '../lib/panelPosition'
+import { startPointerSession } from '../lib/pointerSession'
+import { createSignal, useSignalValue } from '../lib/signal'
 import { isHorizontalEdge, lengthPatch, panelSizes, resizeCursor, thicknessPatch, type ResizeSide } from '../../shared/panelPlacement'
 import type { PanelCursor } from '../../shared/types'
 
-const liveListeners = new Set<() => void>()
+const liveSignal = createSignal()
 let resizing = false
 let shownCursor: PanelCursor = null
 
 function setLivePatch(patch: PanelSizePatch | null): void {
   if (currentSizePatch() === patch) return
   setSizePatch(patch)
-  liveListeners.forEach((fn) => fn())
-}
-
-function subscribeLive(fn: () => void): () => void {
-  liveListeners.add(fn)
-  return () => liveListeners.delete(fn)
+  liveSignal.emit()
 }
 
 /**
@@ -30,7 +26,7 @@ export function currentPanelLiveWidth(): number | null {
 }
 
 export function usePanelSizePatch(): PanelSizePatch | null {
-  return useSyncExternalStore(subscribeLive, currentSizePatch, () => null)
+  return useSignalValue(liveSignal, currentSizePatch, () => null)
 }
 
 function showCursor(cursor: PanelCursor): void {
@@ -60,13 +56,7 @@ function startResize(e: React.PointerEvent<HTMLElement>, side: ResizeSide): void
   let patch: PanelSizePatch | null = null
   let last = { x: startX, y: startY }
 
-  try { el.setPointerCapture(pointerId) } catch { /* ignore */ }
-  resizing = true
-  state.setSliderActive(true)
-  showCursor(resizeCursor(stick, side))
-
   const onMove = (ev: PointerEvent) => {
-    if (ev.pointerId !== pointerId) return
     last = { x: ev.clientX, y: ev.clientY }
     const dx = ev.clientX - startX
     const dy = ev.clientY - startY
@@ -75,12 +65,7 @@ function startResize(e: React.PointerEvent<HTMLElement>, side: ResizeSide): void
       : lengthPatch({ edge: stick, side, area: { width: window.innerWidth, height: window.innerHeight }, sizes, offset, delta: isHorizontalEdge(stick) ? dx : dy })
     setLivePatch(patch)
   }
-  const finish = (commit: boolean) => {
-    el.removeEventListener('pointermove', onMove)
-    el.removeEventListener('pointerup', onUp)
-    el.removeEventListener('pointercancel', onCancel)
-    el.removeEventListener('lostpointercapture', onUp)
-    try { el.releasePointerCapture(pointerId) } catch { /* ignore */ }
+  const onEnd = (commit: boolean) => {
     resizing = false
     const r = typeof el.getBoundingClientRect === 'function' ? el.getBoundingClientRect() : null
     if (!r || last.x < r.left || last.x > r.right || last.y < r.top || last.y > r.bottom) showCursor(null)
@@ -95,17 +80,11 @@ function startResize(e: React.PointerEvent<HTMLElement>, side: ResizeSide): void
       if (currentSizePatch() === final) setLivePatch(null)
     })
   }
-  const onUp = (ev: PointerEvent) => {
-    if (ev.pointerId === pointerId) finish(true)
-  }
-  const onCancel = (ev: PointerEvent) => {
-    if (ev.pointerId === pointerId) finish(false)
-  }
 
-  el.addEventListener('pointermove', onMove)
-  el.addEventListener('pointerup', onUp)
-  el.addEventListener('pointercancel', onCancel)
-  el.addEventListener('lostpointercapture', onUp)
+  startPointerSession(el, pointerId, { onMove, onEnd })
+  resizing = true
+  state.setSliderActive(true)
+  showCursor(resizeCursor(stick, side))
 }
 
 /** Puts the normal pointer back when the grips go away under it, e.g. when the panel closes. */

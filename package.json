@@ -1,7 +1,7 @@
 {
   "name": "edge-drop",
   "version": "0.3.2",
-  "macRevision": 1,
+  "macRevision": 2,
   "description": "Edge-Drop — a clipboard manager that lives on the left edge of your screen and expands on hover.",
   "author": "Edge-Drop",
   "license": "Apache-2.0",
@@ -24,9 +24,9 @@
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
     "test": "vitest run",
     "build:mac": "npm run build && MAC_VERSION=$(node scripts/mac-version.cjs) && electron-builder --mac dir --publish never -c.extraMetadata.version=$MAC_VERSION",
-    "dist:mac": "npm run build && node scripts/check-mac-native.cjs arm64 x64 && MAC_VERSION=$(node scripts/mac-version.cjs) && electron-builder --mac dmg zip --arm64 --x64 --publish never -c.extraMetadata.version=$MAC_VERSION",
-    "dist:mac:arm64": "npm run build && node scripts/check-mac-native.cjs arm64 && MAC_VERSION=$(node scripts/mac-version.cjs) && electron-builder --mac dmg zip --arm64 --publish never -c.extraMetadata.version=$MAC_VERSION",
-    "dist:mac:x64": "npm run build && node scripts/check-mac-native.cjs x64 && MAC_VERSION=$(node scripts/mac-version.cjs) && electron-builder --mac dmg zip --x64 --publish never -c.extraMetadata.version=$MAC_VERSION",
+    "dist:mac": "npm run build && node scripts/check-mac-native.cjs arm64 x64 && MAC_VERSION=$(node scripts/mac-version.cjs) && electron-builder --mac dmg zip --arm64 --x64 --publish never -c.extraMetadata.version=$MAC_VERSION && node scripts/mac-dmg-compress.cjs",
+    "dist:mac:arm64": "npm run build && node scripts/check-mac-native.cjs arm64 && MAC_VERSION=$(node scripts/mac-version.cjs) && electron-builder --mac dmg zip --arm64 --publish never -c.extraMetadata.version=$MAC_VERSION && node scripts/mac-dmg-compress.cjs",
+    "dist:mac:x64": "npm run build && node scripts/check-mac-native.cjs x64 && MAC_VERSION=$(node scripts/mac-version.cjs) && electron-builder --mac dmg zip --x64 --publish never -c.extraMetadata.version=$MAC_VERSION && node scripts/mac-dmg-compress.cjs",
     "install:mac": "bash scripts/install-mac.sh"
   },
   "build": {
@@ -39,6 +39,7 @@
     "afterPack": "./scripts/mac-adhoc-sign.cjs",
     "files": [
       "out/**/*",
+      "!out/ts/**",
       "!out/renderer/**/*.gif",
       "resources/**/*",
       "!resources/startup/**/*.exe",
@@ -176,6 +177,7 @@
       ],
       "files": [
         "out/**/*",
+        "!out/ts/**",
         "!out/renderer/**/*.gif",
         "resources/**/*",
         "!resources/startup/**/*.exe",
@@ -193,6 +195,10 @@
         "!**/node_modules/svg-path-bbox/**",
         "!**/node_modules/react-dom/**",
         "!**/node_modules/koffi/doc/**",
+        "!**/node_modules/koffi/vendor/**",
+        "!**/node_modules/koffi/lib/**",
+        "!**/node_modules/koffi/cnoke.cjs",
+        "!**/node_modules/koffi/src/**/*.{hh,inc,def,S,asm,txt}",
         "!**/node_modules/@koromix/koffi-!(darwin-${arch})/**",
         "!**/node_modules/@resvg/resvg-js-!(darwin-${arch})/**",
         "!**/node_modules/electron-updater/**",
@@ -241,33 +247,27 @@
   "devDependencies": {
     "@fontsource/jetbrains-mono": "^5.3.0",
     "@fontsource/plus-jakarta-sans": "^5.3.0",
-    "@iconify-json/cuida": "^1.2.5",
-    "@iconify/react": "^6.0.2",
-    "@radix-ui/react-scroll-area": "^1.2.13",
-    "@radix-ui/react-separator": "^1.1.11",
     "@types/node": "^20.11.30",
     "@types/react": "^18.2.73",
     "@types/react-dom": "^18.2.22",
-    "@vitalets/google-translate-api": "^9.2.1",
     "@vitejs/plugin-react": "^4.2.1",
     "electron": "^43.7.7",
     "electron-builder": "^26.15.3",
     "electron-vite": "^2.1.0",
     "emoji-datasource-twitter": "^16.0.0",
     "framer-motion": "^11.0.24",
-    "gsap": "^3.15.0",
     "lucide-react": "^1.26.0",
+    "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "svg-path-bbox": "^2.1.0",
     "typescript": "^5.4.3",
     "vite": "^5.2.6",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.10",
+    "zustand": "^4.5.2"
   },
   "dependencies": {
     "@resvg/resvg-js": "^2.6.2",
     "electron-updater": "^6.8.9",
-    "koffi": "^3.1.2",
-    "react": "^18.2.0",
-    "zustand": "^4.5.2"
+    "koffi": "^3.1.2"
   }
 }

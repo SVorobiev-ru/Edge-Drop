@@ -10,6 +10,7 @@
  */
 import { useEffect, useRef } from 'react'
 import { Panel } from './components/Panel'
+import { preloadLazyViews } from './components/lazyViews'
 import { useStore, selectReduceMotion } from './store/appStore'
 import { edge, IS_DARWIN } from './lib/edge'
 import { applyReduceMotion, applyTheme, resolveTheme } from './lib/theme'
@@ -127,6 +128,9 @@ export default function App() {
           })
           .catch(() => undefined)
       } catch { /* ignore */ }
+      try {
+        preloadLazyViews()
+      } catch { /* ignore */ }
       // 5. First viewport thumbnails — prefetch through the same
       // edgelocal/data URLs the cards use, warming both the main-process
       // thumbnail cache and Chromium's decoded-image cache.
@@ -227,6 +231,15 @@ export default function App() {
     }
   }, [panelOpen])
 
+  useEffect(() => {
+    const id = window.setTimeout(preloadLazyViews, 0)
+    return () => window.clearTimeout(id)
+  }, [])
+
+  useEffect(() => {
+    if (panelOpen) preloadLazyViews()
+  }, [panelOpen])
+
   // Hydrate once + subscribe to pushed updates.
   useEffect(() => {
     void hydrate()
@@ -264,9 +277,6 @@ export default function App() {
       useStore.getState().setSettingsOpen(true)
       edge.setInteractive(true)
     })
-    const offTutorialStep = edge.onTutorialStep((step) => {
-      useStore.getState().setTutorialStep(step)
-    })
     const offUpdateAvailable = edge.onUpdateAvailable((info) => {
       useStore.getState().setUpdateAvailable(info)
     })
@@ -302,7 +312,6 @@ export default function App() {
       offItemMenu()
       offQueue()
       offOpenSettings()
-      offTutorialStep()
       offUpdateAvailable()
       offUpdateProgress()
       offUpdateDownloaded()

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+import { readSettingsSource } from './helpers/splitSources'
 import { useStore } from '../src/store/appStore'
 import { DEFAULT_SETTINGS } from '../shared/types'
 
@@ -89,7 +90,7 @@ describe('Unified Open-State Retention Across All 4 Edges', () => {
   })
 
   it('verifies Settings.tsx preserves position tab on orientation toggle', () => {
-    const settingsSrc = read('src/components/Settings.tsx')
+    const settingsSrc = readSettingsSource()
     expect(settingsSrc).toContain("const currentTab = useStore.getState().settingsTab")
     expect(settingsSrc).toContain("const isTransitioning = !!useStore.getState().edgeTransition?.active")
     expect(settingsSrc).toContain("if (currentTab !== 'position' && !isTransitioning) {")

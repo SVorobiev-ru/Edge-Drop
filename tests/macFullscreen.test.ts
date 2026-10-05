@@ -145,6 +145,33 @@ describe('macOS fullscreen detection (fullscreen.ts)', () => {
     expect(mocks.options).toHaveBeenCalledTimes(1)
   })
 
+  it('pause stops polling but keeps the verdict, resume checks at once and polls again', () => {
+    mocks.options.mockReturnValue(FULLSCREEN)
+    fs.startFullscreenMonitor()
+    expect(fs.isFullscreenAppActive()).toBe(true)
+
+    fs.pauseFullscreenMonitor()
+    expect(mocks.unsubscribe).not.toHaveBeenCalled()
+    mocks.options.mockClear()
+    mocks.options.mockReturnValue(0)
+    vi.advanceTimersByTime(5000)
+    expect(mocks.options).not.toHaveBeenCalled()
+    expect(fs.isFullscreenAppActive()).toBe(true)
+
+    fs.resumeFullscreenMonitor()
+    expect(mocks.options).toHaveBeenCalledTimes(1)
+    expect(fs.isFullscreenAppActive()).toBe(false)
+    fs.resumeFullscreenMonitor()
+    vi.advanceTimersByTime(800)
+    expect(mocks.options).toHaveBeenCalledTimes(2)
+  })
+
+  it('resume does nothing when the monitor was not paused', () => {
+    fs.resumeFullscreenMonitor()
+    vi.advanceTimersByTime(5000)
+    expect(mocks.options).not.toHaveBeenCalled()
+  })
+
   it('stop unsubscribes, stops polling and clears the cache', () => {
     mocks.options.mockReturnValue(FULLSCREEN)
     fs.startFullscreenMonitor()

@@ -333,6 +333,29 @@ describe('launch at login toggle', () => {
   })
 })
 
+describe('launch at login refresh', () => {
+  it('keeps the settings object when main returns the same content', async () => {
+    const before = useStore.getState().settings
+    const refreshLaunchAtLogin = vi.fn().mockImplementation(async () => structuredClone(before))
+    installEdge({ refreshLaunchAtLogin })
+    const listener = vi.fn()
+    const off = useStore.subscribe(listener)
+    await useStore.getState().refreshLaunchAtLogin()
+    off()
+    expect(refreshLaunchAtLogin).toHaveBeenCalledTimes(1)
+    expect(useStore.getState().settings).toBe(before)
+    expect(listener).not.toHaveBeenCalled()
+  })
+
+  it('replaces the settings object when the content changed', async () => {
+    const before = useStore.getState().settings
+    const next = { ...structuredClone(before), launchAtLogin: !before.launchAtLogin }
+    installEdge({ refreshLaunchAtLogin: vi.fn().mockResolvedValue(next) })
+    await useStore.getState().refreshLaunchAtLogin()
+    expect(useStore.getState().settings).toBe(next)
+  })
+})
+
 describe('usage-only item pushes', () => {
   const item = (id: string, capturedAt: number): ClipboardItemDto => ({ id, data: { kind: 'text', text: id, isUrl: false }, capturedAt, hitCount: 1, pinned: false } as ClipboardItemDto)
 

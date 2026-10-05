@@ -1,0 +1,125 @@
+/* ==========================================================================
+   Color Swatch Cards (Dynamic Color Background & Intelligent Contrast)
+   ========================================================================== */
+
+.item.is-color-card {
+  background-color: var(--card-color) !important;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+  transition: transform 0.14s ease, box-shadow 0.14s ease, background-color 0.14s ease;
+}
+
+.item.is-color-card:hover {
+  background-color: var(--card-color) !important;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
+}
+
+.item.is-color-card.pinned {
+  background-color: var(--card-color) !important;
+}
+
+.item.is-color-card.pinned:hover {
+  background-color: var(--card-color) !important;
+}
+
+.item.is-color-card .item-main {
+  background: transparent !important;
+}
+
+.item.is-color-card .item-main:hover {
+  background: transparent !important;
+}
+
+.item.is-color-card .item-footer {
+  background: transparent !important;
+}
+
+/* Zero-border policy for color cards: pure flat swatch surface without specular reflections or outlines */
+.item.is-color-card::before {
+  display: none !important;
+  content: none !important;
+}
+
+/* Light color card contrast (black text, dark buttons, dark footer) */
+.item.is-color-card.is-light-color .color-swatch-code {
+  color: #000000;
+}
+
+.item.is-color-card.is-light-color .item-footer,
+.item.is-color-card.is-light-color .meta,
+.item.is-color-card.is-light-color .meta-time,
+.item.is-color-card.is-light-color .meta-detail,
+.item.is-color-card.is-light-color .meta-hit-count {
+  color: rgba(0, 0, 0, 0.62) !important;
+}
+
+.item.is-color-card.is-light-color .kind-badge {
+  color: rgba(0, 0, 0, 0.62) !important;
+  background: transparent !important;
+}
+
+.item.is-color-card.is-light-color .meta-hit-count {
+  background: rgba(0, 0, 0, 0.08);
+}
+
+.item.is-color-card.is-light-color .meta-copied {
+  color: #059669 !important;
+}
+
+/* Dark color card contrast (white text, light footer) */
+.item.is-color-card.is-dark-color .color-swatch-code {
+  color: #ffffff;
+}
+
+.item.is-color-card.is-dark-color .item-footer,
+.item.is-color-card.is-dark-color .meta,
+.item.is-color-card.is-dark-color .meta-time,
+.item.is-color-card.is-dark-color .meta-detail,
+.item.is-color-card.is-dark-color .meta-hit-count {
+  color: rgba(255, 255, 255, 0.68) !important;
+}
+
+.item.is-color-card.is-dark-color .kind-badge {
+  color: rgba(255, 255, 255, 0.68) !important;
+  background: transparent !important;
+}
+
+.item.is-color-card.is-dark-color .meta-hit-count {
+  background: rgba(255, 255, 255, 0.10);
+}
+
+.item.is-color-card.is-dark-color .meta-copied {
+  color: #34d399 !important;
+}
+
+/* Swatch Layout */
+.color-swatch-content {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  box-sizing: border-box;
+}
+
+.color-swatch-code {
+  font-family: var(--font-mono, 'Consolas', 'SF Mono', monospace);
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0.025em;
+  line-height: 1.2;
+  margin-bottom: 2px;
+}
+
+/* In horizontal mode: give breathing room above the code */
+.list.horizontal .item.is-color-card .item-content {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  padding-bottom: 0;
+}
+
+.list.horizontal .item.is-color-card .color-swatch-code {
+  font-size: 17px;
+  margin-bottom: 4px;
+}
+

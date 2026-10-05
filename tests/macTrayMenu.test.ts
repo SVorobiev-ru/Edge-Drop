@@ -97,6 +97,7 @@ vi.mock('../electron/main/macAppMenu', () => ({
 }))
 
 import { createTray, rebuildTrayMenu } from '../electron/main/tray'
+import { warmMainLanguage } from '../electron/main/language'
 
 function lastMenu(): { template: Array<Record<string, unknown>> } {
   return mocks.menus[mocks.menus.length - 1]
@@ -192,9 +193,10 @@ describe('menu bar icon on macOS', () => {
     expect(mocks.setVisible).not.toHaveBeenCalled()
   })
 
-  it('rebuilds the menu on settings changes and pops up the latest one', () => {
+  it('rebuilds the menu on settings changes and pops up the latest one', async () => {
     const tray = start('darwin')
     mocks.settings = { ...mocks.settings, language: 'ru' }
+    await warmMainLanguage('ru')
     rebuildTrayMenu()
     expect(tray.setContextMenu).not.toHaveBeenCalled()
     expect(lastMenu().template[0].label).toBe('Показать буфер обмена')
@@ -245,10 +247,11 @@ describe('menu bar icon on macOS', () => {
     expect(mocks.notifications[0].body).not.toMatch(/Alt/)
   })
 
-  it('shows the configured hotkey in the welcome notification', () => {
+  it('shows the configured hotkey in the welcome notification', async () => {
     mocks.indexExists = false
     mocks.settings = { ...mocks.settings, language: 'ru', toggleHotkey: 'Control+Shift+X' }
     start('darwin')
+    await warmMainLanguage('ru')
     expect(mocks.notifications[0].body).toContain('⌃⇧X')
     expect(mocks.notifications[0].body).not.toMatch(/Alt|⌥C/)
   })

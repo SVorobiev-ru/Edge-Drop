@@ -6,7 +6,7 @@
  */
 import { motion, AnimatePresence } from 'framer-motion'
 import { useStore, selectReduceMotion } from '../store/appStore'
-import { OCTO_PATH } from './LiquidOctopusLoader'
+import { OCTO_PATH } from './octoPath'
 import { panelRect } from '../lib/panelPosition'
 import { isHorizontalEdge } from '../../shared/panelPlacement'
 import type { Settings } from '../../shared/types'

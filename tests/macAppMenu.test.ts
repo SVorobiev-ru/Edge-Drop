@@ -30,6 +30,7 @@ describe('mac app menu labels', () => {
     setPlatform('darwin')
     mocks.language = language
     const { installMacAppMenu } = await import('../electron/main/macAppMenu')
+    await (await import('../electron/main/language')).warmMainLanguage(language)
     installMacAppMenu()
     const { template } = mocks.setApplicationMenu.mock.calls[0][0] as { template: Array<{ submenu: Array<{ label?: string }> }> }
     expect(template[0].submenu.map((i) => i.label).filter(Boolean)).toEqual([settings, quit])
@@ -42,6 +43,7 @@ describe('mac app menu labels', () => {
     setPlatform('darwin')
     mocks.language = language
     const { installMacAppMenu } = await import('../electron/main/macAppMenu')
+    await (await import('../electron/main/language')).warmMainLanguage(language)
     installMacAppMenu()
     const { template } = mocks.setApplicationMenu.mock.calls[0][0] as { template: Array<{ label: string; submenu: Array<{ label?: string; role?: string }> }> }
     expect(template[1].label).toBe(edit)

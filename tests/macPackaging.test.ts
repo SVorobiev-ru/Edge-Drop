@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
+import { readSettingsSource } from './helpers/splitSources'
 import { execFileSync } from 'node:child_process'
 import { createRequire } from 'node:module'
 
@@ -197,7 +198,7 @@ describe('macOS distribution build', () => {
     expect(script).toContain('npm run build && ')
     expect(script).toContain(`node scripts/check-mac-native.cjs ${archs.join(' ')} && `)
     expect(script).toContain(`${MAC_VERSION_STEP} && electron-builder --mac dmg zip `)
-    expect(script.endsWith(` --publish never ${MAC_VERSION_FLAG}`)).toBe(true)
+    expect(script.endsWith(` --publish never ${MAC_VERSION_FLAG} && node scripts/mac-dmg-compress.cjs`)).toBe(true)
     for (const arch of ['arm64', 'x64']) {
       expect(script.includes(`--${arch}`)).toBe(archs.includes(arch))
     }
@@ -365,14 +366,14 @@ describe('macOS documentation', () => {
 })
 
 describe('Settings links', () => {
-  const src = read('src/components/Settings.tsx')
+  const src = readSettingsSource()
   const links = read('src/lib/links.ts')
   const header = read('src/components/Header.tsx')
 
   it('point at the fork on macOS and at the original elsewhere', () => {
     expect(links).toContain("export const REPO_URL = IS_DARWIN ? 'https://github.com/SVorobiev-ru/Edge-Drop' : 'https://github.com/Deepender25/Edge-Drop'")
     expect(links).toContain("export const CHANGELOG_URL = IS_DARWIN ? `${REPO_URL}/releases` : 'https://www.edgedrop.app/changelog'")
-    expect(src).toContain("import { REPO_URL, CHANGELOG_URL, SUPPORT_URL } from '../lib/links'")
+    expect(src).toContain("import { REPO_URL, CHANGELOG_URL, SUPPORT_URL } from '../../lib/links'")
     expect(src).not.toMatch(/const (REPO_URL|CHANGELOG_URL) =/)
     expect(src.split("window.open(`${REPO_URL}/issues/new/choose`, '_blank')")).toHaveLength(3)
     expect(src.split("window.open(REPO_URL, '_blank')")).toHaveLength(3)
@@ -399,7 +400,7 @@ describe('Settings links', () => {
 })
 
 describe('macOS update block in Settings', () => {
-  const src = read('src/components/Settings.tsx')
+  const src = readSettingsSource()
 
   it('offers download and install with the release page as the secondary action', () => {
     const promoted = src.slice(src.indexOf('const renderPromotedUpdateCard'), src.indexOf('const renderManualUpdateCard'))
@@ -445,7 +446,7 @@ describe('mac app.asar contents', () => {
   })
 
   it('does not exclude the runtime dependencies the mac build needs', () => {
-    for (const name of ['koffi', '@resvg/resvg-js', 'react', 'zustand']) {
+    for (const name of ['koffi', '@resvg/resvg-js']) {
       expect(mac.files).not.toContain(`!**/node_modules/${name}/**`)
     }
   })

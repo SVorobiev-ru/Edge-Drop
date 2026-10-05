@@ -104,7 +104,7 @@ export function addScreenshotToHistory(png: Buffer, fileName?: string): boolean 
 
 /** Initialize persistence + start the clipboard watcher. */
 export function initState(): void {
-  store.load()
+  store.load({ deferReconcile: true })
 
   // Reconcile staged temp artifacts with the freshly loaded history: files
   // owned by living items survive, everything else (crash orphans, deleted

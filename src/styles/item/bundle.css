@@ -1,0 +1,313 @@
+/* ------------------------------------------------------------------ */
+/* Bundle-specific styles                                              */
+/* ------------------------------------------------------------------ */
+
+/* Bundle items use click for expand/collapse instead of double-click copy */
+.item.bundle .item-main {
+  cursor: pointer; /* click = expand/collapse */
+}
+
+.fluid-bundle {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
+.bundle-slot {
+  display: grid;
+  transition: grid-template-rows 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.bundle-slot-inner {
+  min-height: 0;
+  overflow: hidden;
+}
+.bundle-slot-stack {
+  grid-template-rows: 1fr;
+}
+.bundle-slot-list {
+  grid-template-rows: 0fr;
+  pointer-events: none;
+}
+.fluid-bundle.is-expanded .bundle-slot-stack {
+  grid-template-rows: 0fr;
+  pointer-events: none;
+}
+.fluid-bundle.is-expanded .bundle-slot-list {
+  grid-template-rows: 1fr;
+  pointer-events: auto;
+}
+
+.fluid-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  padding-top: 8px;
+}
+
+.fluid-card-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  background: rgb(var(--ink) / 0.04);
+  border: 1px solid rgb(var(--ink) / 0.06);
+  border-radius: 12px;
+  cursor: grab;
+  width: 100%;
+  transition: background 0.18s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  overflow: hidden;
+}
+
+.fluid-card-row:hover {
+  background: rgb(var(--ink) / 0.075);
+  border-color: rgb(var(--ink) / 0.14);
+}
+
+.fluid-card-row::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: 2;
+  opacity: 0.5;
+  transition: opacity 0.14s ease;
+  background: 
+    radial-gradient(
+      ellipse 70% 1px at 50% 0%,
+      rgb(var(--ink) / 0.2) 0%,
+      rgb(var(--ink) / 0.04) 45%,
+      transparent 80%
+    ) top / 100% 1px no-repeat;
+}
+
+.fluid-card-row:hover::before {
+  opacity: 1;
+}
+
+.fluid-card-row:active {
+  cursor: grabbing;
+}
+
+.fluid-row-icon {
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.25));
+}
+
+.fluid-row-img {
+  width: 44px;
+  height: 44px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid rgb(var(--ink) / 0.08);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+}
+
+.fluid-row-content {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  justify-content: center;
+  text-align: start;
+}
+
+.fluid-row-name {
+  font-size: calc(12.5px * var(--font-scale, 1));
+  font-weight: 500;
+  color: rgb(var(--ink) / max(0.92, var(--text-alpha-floor)));
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.3;
+}
+
+.fluid-row-sub {
+  font-size: calc(11px * var(--font-scale, 1));
+  color: rgb(var(--ink) / max(0.45, var(--text-alpha-floor)));
+  font-family: var(--font-mono);
+}
+
+.fluid-row-actions {
+  position: absolute;
+  inset-inline-end: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  opacity: 0;
+  pointer-events: none;
+  background: var(--bg-pill);
+  padding: 3px 4px;
+  border-radius: 8px;
+  border: 1px solid rgb(var(--ink) / 0.12);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+  transition: opacity 0.15s ease, transform 0.15s ease;
+  z-index: 5;
+}
+
+.fluid-card-row:hover .fluid-row-actions,
+.fluid-card-row:has(:focus-visible) .fluid-row-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.fluid-row-actions .act {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  color: rgb(var(--ink) / max(0.85, var(--text-alpha-floor)));
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.fluid-row-actions .act:hover {
+  background: var(--bg-3);
+  color: var(--text-primary);
+}
+
+/* "N / 10" capacity readout next to the bundle actions pill */
+.bundle-capacity {
+  font-size: calc(11px * var(--font-scale, 1));
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: rgb(var(--ink) / max(0.45, var(--text-alpha-floor)));
+  padding: 0 8px;
+  white-space: nowrap;
+}
+
+/* Single (non-image) file tile: hero icon on top, name on the bottom */
+.item:has(.single-file-preview) .item-content {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  padding: 10px 16px 4px 16px;
+}
+
+.single-file-preview {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 2px 0 2px;
+}
+
+.single-file-hero {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  padding: 0;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.single-file-hero svg {
+  width: 96px;
+  height: 96px;
+  display: block;
+  filter: drop-shadow(0 4px 12px rgba(0, 0, 0, 0.28));
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), filter 0.2s ease;
+}
+
+.item-main:hover .single-file-hero svg {
+  transform: translateY(-2px) scale(1.03);
+  filter: drop-shadow(0 6px 16px rgba(0, 0, 0, 0.38));
+}
+
+.single-file-meta {
+  width: 100%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+  padding: 0 4px;
+}
+
+.single-file-name {
+  font-size: calc(13px * var(--font-scale, 1));
+  font-weight: 500;
+  color: var(--text-primary);
+  line-height: 1.35;
+  text-align: center;
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  word-break: break-all;
+}
+
+.bundle-more-label {
+  color: var(--text-tertiary);
+  font-size: calc(12px * var(--font-scale, 1));
+  padding-inline-start: 4px;
+  margin-top: 8px;
+}
+
+/* Bundle actions (Collapse / Copy all / Delete) placed at the top when
+   expanded. The WHOLE bar collapses the stack on click — pills inside call
+   stopPropagation, so they keep their own actions. No hover fill: the cursor
+   + tooltip already communicate the target. */
+.bundle-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0 10px;
+  width: 100%;
+  border-bottom: 1px solid rgb(var(--ink) / 0.06);
+  margin-bottom: 6px;
+  cursor: pointer;
+}
+
+.bundle-collapse-hit {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  margin-inline-end: auto;
+  border-radius: 999px;
+  color: rgb(var(--ink) / max(0.75, var(--text-alpha-floor)));
+  background: rgb(var(--ink) / 0.06);
+  border: 1px solid rgb(var(--ink) / 0.06);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+.bundle-collapse-hit:hover {
+  background: rgb(var(--ink) / 0.12);
+  border-color: rgb(var(--ink) / 0.14);
+  color: var(--text-primary);
+}
+
+.actions-pill {
+  display: flex;
+  gap: 4px;
+  padding: 3px 4px;
+  background: rgb(var(--ink) / 0.06);
+  border: 1px solid rgb(var(--ink) / 0.06);
+  border-radius: 999px;
+  box-shadow: none;
+}
+

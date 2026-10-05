@@ -11,7 +11,7 @@
 import { app, BrowserWindow, protocol, session } from 'electron'
 import { APP_CONFIG, runtime } from './config'
 import { ensureDirs, PATHS, getUnpackagedTempDir } from '../store/paths'
-import { createWindow, getMainWindow, setInteractive, markExplicitOpen, setVisible, startCursorPoll, stopCursorPoll, stopHeartbeat, setHotZoneWidth, registerTaskbarCreatedListener, registerMacLockScreenHooks, syncMacEscapeCapture, registerPanelStateIpc, registerPanelDragIpc } from './window'
+import { createWindow, getMainWindow, markExplicitOpen, setVisible, startCursorPoll, stopCursorPoll, stopHeartbeat, setHotZoneWidth, registerTaskbarCreatedListener, registerMacLockScreenHooks, syncMacEscapeCapture, registerPanelStateIpc, registerPanelDragIpc } from './window'
 import { createTray, registerIncognitoApplier, refreshTray, openPanelFromShell } from './tray'
 import { registerIpc, registerSendListeners } from './ipc'
 import { reconcileLaunchAtLoginOnStartup } from './loginItems'
@@ -29,14 +29,15 @@ import { stopImageTextRecognition, wakeImageTextRecognition } from './ocr'
 import { closeQuickLook } from './quickLook'
 import { defaultToggleHotkey } from '../../shared/types'
 import { extname, normalize, join } from 'node:path'
-import { existsSync, createReadStream, mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, createReadStream, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import koffi from 'koffi'
 import { pasteboardChangeCount } from './macPasteboard'
-import { collectItemFilePaths, isServableLocalPath } from './edgelocalAccess'
+import { collectItemFilePaths, isServableLocalPath, resolveRealPath } from './edgelocalAccess'
 import { createHash } from 'node:crypto'
-import { resolveStoredImage, resolveEmojiAsset, emojiAssetDir } from './imageProtocol'
+import { resolveStoredImage, resolveEmojiAsset, emojiAssetDir, streamedFileContentType } from './imageProtocol'
 import { getThumbnailPayloadAsync, thumbnailCacheControl, isMacHeicPath, getHeicPreviewPng } from './thumbnailCache'
+import { warmMainLanguage } from './language'
 
 const smokeTestRun = process.platform === 'darwin' && process.argv.includes('--smoke-test')
 
@@ -83,6 +84,16 @@ const gotLock = smokeTestRun || app.requestSingleInstanceLock()
 if (!gotLock) {
   app.quit()
 } else {
+  if (!smokeTestRun) {
+    let savedLanguage: string | undefined
+    try {
+      const saved = JSON.parse(readFileSync(PATHS.settingsFile(), 'utf8')) as { language?: unknown }
+      if (typeof saved.language === 'string') savedLanguage = saved.language
+    } catch { /* ignore */ }
+    try {
+      void warmMainLanguage(savedLanguage)
+    } catch { /* ignore */ }
+  }
   app.on('second-instance', () => {
     // If a second copy launches, just reveal the existing panel.
     if (process.platform === 'darwin') {
@@ -277,11 +288,29 @@ app.on('activate', () => {
   if (process.platform === 'darwin') openPanelFromShell()
 })
 
+let servableItemPaths: { revision: number; paths: Set<string> } | null = null
+const resolvedServableRoots = new Map<string, string>()
+
+function resolveServableRoot(rootDir: string): string {
+  let resolved = resolvedServableRoots.get(rootDir)
+  if (resolved === undefined) {
+    resolved = resolveRealPath(rootDir)
+    resolvedServableRoots.set(rootDir, resolved)
+  }
+  return resolved
+}
+
 function canServeLocalPath(filePath: string): boolean {
   if (process.platform !== 'darwin') return true
+  const store = getStore()
+  const revision = store.revision
+  if (!servableItemPaths || servableItemPaths.revision !== revision) {
+    servableItemPaths = { revision, paths: collectItemFilePaths(store.list()) }
+  }
   return isServableLocalPath(filePath, {
-    itemPaths: collectItemFilePaths(getStore().list()),
-    roots: [PATHS.imagesDir(), PATHS.thumbnailsDir(), PATHS.tempDir(), getUnpackagedTempDir()]
+    itemPaths: servableItemPaths.paths,
+    roots: [PATHS.imagesDir(), PATHS.thumbnailsDir(), PATHS.tempDir(), getUnpackagedTempDir()],
+    resolveRoot: resolveServableRoot
   })
 }
 
@@ -341,14 +370,7 @@ function registerImageProtocol(): void {
               })
             })
           }
-          const ext = extname(filePath).toLowerCase()
-          let contentType = 'image/png'
-          if (ext === '.jpg' || ext === '.jpeg') contentType = 'image/jpeg'
-          else if (ext === '.gif') contentType = 'image/gif'
-          else if (ext === '.webp') contentType = 'image/webp'
-          else if (ext === '.svg') contentType = 'image/svg+xml'
-          else if (ext === '.bmp') contentType = 'image/bmp'
-          else if (ext === '.avif') contentType = 'image/avif'
+          const contentType = streamedFileContentType(filePath)
 
           const stream = createReadStream(filePath)
           const body = new Response(stream as unknown as ReadableStream<Uint8Array>).body
@@ -425,10 +447,6 @@ async function createThumbnailResponse(filePath: string, isStoredCapture: boolea
 
   return new Response(new Uint8Array(payload.body), { status: 200, headers })
 }
-
-// Silence unused import in environments where setVisible isn't referenced
-// after the refactor (kept for second-instance wiring above).
-void setInteractive
 
 let _lastHotkeyToggleTime = 0
 let _registeredToggleHotkey: string | null = null

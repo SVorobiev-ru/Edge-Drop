@@ -38,6 +38,14 @@ function finite(n: unknown): n is number {
   return typeof n === 'number' && Number.isFinite(n) && Math.abs(n) <= MAX_COORD
 }
 
+export function sanitizeRect(input: unknown): SolidRect | null {
+  if (!input || typeof input !== 'object') return null
+  const { x, y, width, height } = input as Record<string, unknown>
+  if (!finite(x) || !finite(y) || !finite(width) || !finite(height)) return null
+  if (width <= 0 || height <= 0) return null
+  return { x, y, width, height }
+}
+
 function sanitizePanelState(input: unknown): PanelStateReport | null {
   if (!input || typeof input !== 'object') return null
   const raw = input as { open?: unknown; rects?: unknown; edge?: unknown }
@@ -45,11 +53,8 @@ function sanitizePanelState(input: unknown): PanelStateReport | null {
   const rects: SolidRect[] = []
   if (raw.open && Array.isArray(raw.rects)) {
     for (const r of raw.rects.slice(0, MAX_RECTS)) {
-      if (!r || typeof r !== 'object') continue
-      const { x, y, width, height } = r as Record<string, unknown>
-      if (!finite(x) || !finite(y) || !finite(width) || !finite(height)) continue
-      if (width <= 0 || height <= 0) continue
-      rects.push({ x, y, width, height })
+      const rect = sanitizeRect(r)
+      if (rect) rects.push(rect)
     }
   }
   const report: PanelStateReport = { open: raw.open, rects }

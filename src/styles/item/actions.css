@@ -1,0 +1,150 @@
+/* Floating Actions Pill */
+.actions {
+  position: absolute;
+  top: 8px;
+  inset-inline-end: 8px;
+  transform: scale(0.96);
+  display: flex;
+  gap: 3px;
+  padding: 3px 5px;
+  background: var(--bg-2);
+  border: none;
+  border-radius: 999px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.14s ease, transform 0.14s ease;
+  will-change: opacity, transform;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.75);
+  z-index: 20;
+}
+
+.item-main:hover .actions,
+.item-main:focus-visible .actions,
+.item-main:has(:focus-visible) .actions,
+.item-main.force-actions .actions {
+  opacity: 1;
+  pointer-events: auto;
+  transform: scale(1);
+}
+
+.act {
+  position: relative;
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 6px; /* Square hit box for 100% full-area click detection */
+  color: rgb(var(--ink) / max(0.75, var(--text-alpha-floor)));
+  background: transparent;
+  cursor: pointer;
+  outline: none;
+  border: none;
+  transition: color 0.12s ease, transform 0.1s ease;
+}
+
+.act::before {
+  content: "";
+  position: absolute;
+  inset: 1px;
+  border-radius: 50%; /* Keeps visual hover highlight perfectly circular */
+  background: transparent;
+  transition: background 0.12s ease;
+  z-index: 0;
+  pointer-events: none;
+}
+
+.act > svg {
+  position: relative;
+  z-index: 1;
+}
+
+.act:hover {
+  color: var(--text-primary);
+}
+.act:hover::before {
+  background: rgb(var(--ink) / 0.18);
+}
+.act:active {
+  transform: scale(0.90);
+}
+.act.danger:hover {
+  color: #f87171;
+}
+.act.danger:hover::before {
+  background: rgba(239, 68, 68, 0.22);
+}
+.act.active {
+  color: var(--text-primary);
+}
+.act.active::before {
+  background: rgb(var(--ink) / 0.25);
+}
+
+.act-divider {
+  width: 1px;
+  height: 14px;
+  background: rgb(var(--ink) / 0.15);
+  margin: 0 2px;
+  align-self: center;
+  flex-shrink: 0;
+}
+
+/* ------------------------------------------------------------------ */
+/* Preview expand / contract button states                             */
+/* ------------------------------------------------------------------ */
+
+/* Card is actively being previewed — dim body so flyout takes focus */
+.item-main.previewing {
+  cursor: pointer;
+}
+
+.item-main.previewing .body {
+  opacity: 0.45;
+  pointer-events: auto;
+  user-select: none;
+  /* Use calc with --dpr to ensure consistent *visual* blur while saving GPU on 4K */
+  filter: blur(calc(3px / var(--dpr, 1)));
+  transition: opacity 0.3s ease, filter 0.3s ease;
+}
+
+/* In preview mode: keep the pill anchored in top-right corner without spatial jumping or obscuring center content */
+.item-main.previewing .actions {
+  top: 8px;
+  inset-inline-end: 8px;
+  transform: translateY(0) scale(1);
+  padding: 3px 5px;
+  gap: 3px;
+  opacity: 1;
+  pointer-events: auto;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.85);
+}
+
+/* Brief pointer-events freeze on the pill right after preview opens,
+   so a rapid second click on the repositioned pill doesn't misfire. */
+.item-main.previewing .actions {
+  animation: preview-pill-appear 0.35s ease forwards;
+}
+
+@keyframes preview-pill-appear {
+  0%, 80% { pointer-events: none; }
+  100%     { pointer-events: auto; }
+}
+
+/* Contract (close preview) button — accented with a pulsing glow ring */
+.act.preview-contract {
+  color: var(--text-primary);
+  background: rgb(var(--ink) / 0.12);
+  box-shadow: 0 0 0 1px rgb(var(--ink) / 0.22);
+  animation: preview-pulse 2s ease-in-out infinite;
+}
+.act.preview-contract:hover {
+  background: rgb(var(--ink) / 0.22);
+  box-shadow: 0 0 0 2px rgb(var(--ink) / 0.4);
+  animation: none;
+}
+
+@keyframes preview-pulse {
+  0%, 100% { box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.22); }
+  50%       { box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.1), 0 0 14px rgba(255, 255, 255, 0.08); }
+}
+

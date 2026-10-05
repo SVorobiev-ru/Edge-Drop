@@ -1,0 +1,248 @@
+/* Minimalist Pill Selector (Replaces Sliders!) */
+.setting-pills {
+  display: flex;
+  width: 100%;
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  padding: 0;
+  gap: 4px;
+}
+
+/* 3-Way Edge Placement Selector (Left, Top, Right) */
+.placement-3way-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 4px 0 2px;
+}
+
+.placement-3way-wrap .pill {
+  flex: 1;
+  max-width: 110px;
+  height: 32px;
+  font-size: calc(11.5px * var(--font-scale, 1));
+  font-weight: 500;
+  padding: 0 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  border-radius: 999px;
+  box-sizing: border-box;
+}
+
+/* Horizontal Shelf 3-Way Placement Selector */
+.placement-3way-wrap.shelf-placement-3way {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  width: 100%;
+  padding: 0;
+}
+
+.placement-3way-wrap.shelf-placement-3way .pill {
+  width: 100%;
+  height: 32px;
+  font-size: calc(11px * var(--font-scale, 1));
+  padding: 0 4px;
+  border-radius: 999px;
+  background: rgb(var(--ink) / 0.05);
+  border: 1px solid rgb(var(--ink) / 0.08);
+  color: rgb(var(--ink) / max(0.78, var(--text-alpha-floor)));
+  font-weight: 500;
+  transition: all 0.14s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  box-sizing: border-box;
+}
+
+.placement-3way-wrap.shelf-placement-3way .pill:hover:not(.active) {
+  background: rgb(var(--ink) / 0.09);
+  border-color: rgb(var(--ink) / 0.16);
+  color: var(--text-primary);
+}
+
+.placement-3way-wrap.shelf-placement-3way .pill.active {
+  background: var(--surface-inverse);
+  color: var(--on-inverse);
+  font-weight: 600;
+  border-color: var(--surface-inverse);
+  box-shadow: 0 2px 10px rgb(var(--ink) / 0.2);
+}
+
+/* Edge pill transition pulse */
+.placement-3way-wrap .pill.transitioning {
+  animation: edgePillPulse 0.44s ease-in-out infinite alternate;
+  box-shadow: 0 0 12px rgb(var(--ink) / 0.45);
+}
+
+@keyframes edgePillPulse {
+  0% {
+    transform: scale(0.96);
+    opacity: 0.85;
+  }
+  100% {
+    transform: scale(1.02);
+    opacity: 1;
+    box-shadow: 0 0 16px rgb(var(--ink) / 0.6);
+  }
+}
+
+/* Custom Range Slider Controls */
+.setting-slider-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+}
+
+.setting-slider-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+}
+
+.setting-slider-val {
+  font-size: calc(11px * var(--font-scale, 1));
+  font-weight: 600;
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+  background: rgb(var(--ink) / 0.1);
+  border: 1px solid rgb(var(--ink) / 0.18);
+  padding: 3px 9px;
+  border-radius: 999px;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* 3 Main Percentage Labels (0%, 50%, 100%) */
+.setting-slider-labels {
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+  padding: 0 2px;
+  margin-top: 3px;
+}
+
+.slider-label-btn {
+  font-size: 10.5px;
+  font-weight: 500;
+  font-family: var(--font-mono);
+  color: rgb(var(--ink) / max(0.45, var(--text-alpha-floor)));
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 1px 4px;
+  border-radius: 4px;
+  transition: color 0.15s ease;
+}
+
+.slider-label-btn:hover {
+  color: var(--text-primary);
+}
+
+.slider-label-btn.active {
+  color: var(--text-primary);
+  font-weight: 700;
+}
+
+.pill {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 2px;
+  border-radius: 999px;
+  font-size: calc(12px * var(--font-scale, 1));
+  font-weight: 500;
+  color: rgb(var(--ink) / max(0.72, var(--text-alpha-floor)));
+  background: var(--bg-2);
+  border: none;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: center;
+}
+
+.pill:hover:not(.active) {
+  color: var(--text-primary);
+  background: var(--bg-3);
+}
+
+.pill.active {
+  background: var(--surface-inverse);
+  color: var(--on-inverse);
+  font-weight: 600;
+  box-shadow: none;
+}
+
+.display-pill {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 0;
+  line-height: 1.2;
+}
+.display-pill .pill-name {
+  font-size: calc(12px * var(--font-scale, 1));
+  font-weight: 600;
+}
+.display-pill .pill-res {
+  font-size: calc(10px * var(--font-scale, 1));
+  opacity: 0.7;
+}
+
+/* Modern Flat Toggle Switch */
+.setting-toggle {
+  flex-shrink: 0;
+  width: 36px;
+  height: 20px;
+  border-radius: 999px;
+  background: rgb(var(--ink) / 0.12);
+  border: none;
+  position: relative;
+  cursor: pointer;
+  padding: 0;
+  outline: none;
+  transition: background 0.18s ease, opacity 0.18s ease;
+  box-shadow: none;
+}
+
+.setting-toggle:hover:not(:disabled) {
+  background: rgb(var(--ink) / 0.18);
+}
+
+.toggle-thumb {
+  position: absolute;
+  top: 3px;
+  left: 0;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--surface-inverse);
+  box-shadow: none;
+  pointer-events: none;
+}
+
+.setting-toggle.checked {
+  background: var(--surface-inverse);
+  border: none;
+}
+
+.setting-toggle.checked:hover:not(:disabled) {
+  background: var(--surface-inverse);
+}
+
+.setting-toggle.checked .toggle-thumb {
+  background: var(--on-inverse);
+}
+

@@ -2,11 +2,11 @@ import { useSyncExternalStore } from 'react'
 import { useStore } from '../store/appStore'
 import type { TranslationKeys } from './types'
 import { LANGUAGES } from './languages'
-import en from './locales/en'
+import en from '../../edge-drop-translations/en.json'
 import { RTL_LANGUAGES, macify, resolveText } from '../../shared/platformText'
 import { isDarwin } from '../lib/edge'
 
-const localeLoaders = import.meta.glob<TranslationKeys>(['./locales/*.ts', '!./locales/en.ts'], { import: 'default' })
+const localeLoaders = import.meta.glob<TranslationKeys>(['../../edge-drop-translations/*.json', '!../../edge-drop-translations/en.json'], { import: 'default' })
 const loadedLocales: Record<string, TranslationKeys> = { en }
 const pendingLocales = new Map<string, Promise<void>>()
 const localeListeners = new Set<() => void>()
@@ -31,7 +31,7 @@ export function loadLanguage(code: string): Promise<void> {
   if (loadedLocales[code]) return Promise.resolve()
   const pending = pendingLocales.get(code)
   if (pending) return pending
-  const loader = localeLoaders[`./locales/${code}.ts`]
+  const loader = localeLoaders[`../../edge-drop-translations/${code}.json`]
   if (!loader) return Promise.resolve()
   const loading = loader()
     .then((dict) => {

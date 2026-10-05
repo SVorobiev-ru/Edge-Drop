@@ -1,11 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
-
-const read = (rel: string): string => readFileSync(join(__dirname, '..', rel), 'utf8')
+import { readClipboardItemSource } from './helpers/splitSources'
 
 describe('card store subscriptions', () => {
-  const card = read('src/components/ClipboardItem.tsx')
+  const card = readClipboardItemSource()
 
   it('does not subscribe to the whole settings object or shared ids', () => {
     expect(card).not.toMatch(/useStore\(\(s\) => s\.settings\)/)

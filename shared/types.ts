@@ -91,12 +91,14 @@ export interface PasteOptions {
   plain?: boolean
 }
 
-export interface SolidRect {
+export interface Rect {
   x: number
   y: number
   width: number
   height: number
 }
+
+export type SolidRect = Rect
 
 export interface PanelDragResult {
   moved: boolean
@@ -153,9 +155,6 @@ export interface ClipboardItemDto extends Omit<ClipboardItem, 'data'> {
   | { kind: 'image-collection'; images: Array<ClipboardImageFields & { preview: string }> }
   | { kind: 'files'; paths: string[]; previews?: string[]; entries?: FileEntry[] }
 }
-
-/** Section the renderer groups items into. */
-export type ItemSection = 'pinned' | 'shelf'
 
 export type StickPosition = 'left' | 'right' | 'top' | 'bottom'
 

@@ -1,5 +1,6 @@
 import { useStore } from '../store/appStore'
 import { edge, IS_DARWIN } from './edge'
+import { findItemElement } from './listAnchor'
 
 const CLOSE_RELEASE_MS = 300
 
@@ -86,8 +87,7 @@ export function openShelf(): void {
 }
 
 function openPreviewFlyout(id: string): void {
-  const escaped = typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(id) : id
-  const rect = document.querySelector(`.item-main[data-id="${escaped}"]`)?.getBoundingClientRect()
+  const rect = findItemElement(document, id)?.getBoundingClientRect()
   useStore.getState().setPreviewItemId(id, rect ? { x: rect.x, y: rect.y, width: rect.width, height: rect.height } : undefined)
 }
 

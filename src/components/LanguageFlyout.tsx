@@ -5,54 +5,25 @@
  * with native scripts, English subnames, and smooth spring entry/exit animations.
  */
 import { useRef, useEffect } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
-import { useStore, selectReduceMotion } from '../store/appStore'
+import { useStore } from '../store/appStore'
 import { CloseIcon } from './icons'
 import { playButtonClickSound } from '../lib/soundEffects'
-import { createPortal } from 'react-dom'
-import { useAdaptiveSpring } from '../hooks/useAdaptiveSpring'
 import { useTranslation } from '../i18n'
-import { panelRect } from '../lib/panelPosition'
-import { isHorizontalEdge } from '../../shared/panelPlacement'
-import type { StickPosition } from '../../shared/types'
+import { SideFlyoutShell, flyoutVariants, type SideFlyoutMotion } from './SideFlyoutShell'
 
-const flyoutEaseOpen = [0.16, 1, 0.3, 1] as const
-const flyoutEaseClose = [0.3, 0, 0.2, 1] as const
-const FLYOUT_GAP = 12
+const reducedVariants = { hidden: flyoutVariants.reducedHidden, shown: flyoutVariants.reducedShown, exit: flyoutVariants.reducedHidden }
 
-const flyoutVariants = {
-  hidden: (dir: StickPosition) => ({
-    opacity: 0,
-    x: dir === 'right' ? 14 : dir === 'left' ? -14 : 0,
-    y: dir === 'top' ? -14 : dir === 'bottom' ? 14 : 0,
-    scale: 0.97,
-  }),
-  shown: {
-    opacity: 1,
-    x: 0,
-    y: 0,
-    scale: 1,
-    transition: {
-      x: { duration: 0.26, ease: flyoutEaseOpen },
-      y: { duration: 0.26, ease: flyoutEaseOpen },
-      scale: { duration: 0.26, ease: flyoutEaseOpen },
-      opacity: { duration: 0.18, ease: 'easeOut' as const },
-    },
-  },
-  exit: (dir: StickPosition) => ({
-    opacity: 0,
-    x: dir === 'right' ? 10 : dir === 'left' ? -10 : 0,
-    y: dir === 'top' ? -10 : dir === 'bottom' ? 10 : 0,
-    scale: 0.98,
-    transition: {
-      x: { duration: 0.18, ease: flyoutEaseClose },
-      y: { duration: 0.18, ease: flyoutEaseClose },
-      scale: { duration: 0.18, ease: flyoutEaseClose },
-      opacity: { duration: 0.14, ease: 'easeIn' as const },
-    },
-  }),
-  reducedHidden: { opacity: 0 },
-  reducedShown: { opacity: 1 },
+function languageFlyoutMotion(reduceMotion: boolean): SideFlyoutMotion {
+  return {
+    variants: reduceMotion ? reducedVariants : flyoutVariants,
+    initial: 'hidden',
+    animate: 'shown',
+    exit: 'exit'
+  }
+}
+
+function dismissLanguageFlyout(): void {
+  useStore.getState().setLanguageFlyoutOpen(false)
 }
 
 export function LanguageFlyout({ isRight }: { isRight: boolean }) {
@@ -61,83 +32,13 @@ export function LanguageFlyout({ isRight }: { isRight: boolean }) {
   const setLanguageFlyoutOpen = useStore((s) => s.setLanguageFlyoutOpen)
   const settingsOpen = useStore((s) => s.settingsOpen)
   const open = useStore((s) => s.open)
-  const settings = useStore((s) => s.settings)
   const patch = useStore((s) => s.patchSettings)
-  const adaptiveSpring = useAdaptiveSpring()
-
-  const stickPosition = (settings.stickPosition || (isRight ? 'right' : 'left')) as StickPosition
-  const isHorizontal = isHorizontalEdge(stickPosition)
-  const isTop = stickPosition === 'top'
 
   const isVisible = languageFlyoutOpen && settingsOpen && open
-  const reduceMotion = useStore(selectReduceMotion) || adaptiveSpring.type === 'tween'
 
-  const flyoutRef = useRef<HTMLDivElement | null>(null)
   const listRef = useRef<HTMLDivElement | null>(null)
 
-  const screenW = typeof window !== 'undefined' ? window.innerWidth : 1200
-  const screenH = typeof window !== 'undefined' ? window.innerHeight : 800
-  const pFrac = settings.panelHeight || 0.6
-  const panelH = screenH * pFrac
-  const minY = panelH / 2
-  const maxY = screenH - panelH / 2
-  const vOffset = settings.verticalOffset ?? 0.5
-  const midY = Math.round(minY + vOffset * (maxY - minY))
-  const panelTop = midY - panelH / 2
-
   const languageFlyoutAnchorRect = useStore((s) => s.languageFlyoutAnchorRect)
-
-  const dock = panelRect(settings, { width: screenW, height: screenH }, null, null)
-  const dockWidth = dock.width
-  const flyoutWidth = isHorizontal ? 270 : 280
-  const dockLeft = dock.x
-  const anchorCenterX = isHorizontal && languageFlyoutAnchorRect?.x !== undefined
-    ? (languageFlyoutAnchorRect.x + (languageFlyoutAnchorRect.width || 32) / 2) - dockLeft
-    : dockWidth / 2
-  const minLeft = 12
-  const maxLeft = Math.max(minLeft, dockWidth - flyoutWidth - 12)
-  const flyoutLeft = Math.max(minLeft, Math.min(maxLeft, Math.round(anchorCenterX - flyoutWidth / 2)))
-
-  const maxFlyoutHeight = isHorizontal ? 260 : Math.max(100, panelH - 24)
-
-  const originX = isHorizontal
-    ? Math.max(0.08, Math.min(0.92, (anchorCenterX - flyoutLeft) / flyoutWidth))
-    : (isRight ? 1 : 0)
-  const originY = isHorizontal ? (isTop ? 0 : 1) : 0.5
-
-  useEffect(() => {
-    if (!isVisible || !flyoutRef.current) {
-      useStore.getState().setPreviewFlyoutRect(null)
-      return
-    }
-
-    const updateRect = () => {
-      if (!flyoutRef.current) return
-      const h = flyoutRef.current.offsetHeight
-      if (isHorizontal) {
-        useStore.getState().setPreviewFlyoutRect({
-          top: isTop ? dock.y + dock.height : dock.y - FLYOUT_GAP - h,
-          bottom: isTop ? dock.y + dock.height + FLYOUT_GAP + h : dock.y,
-          left: flyoutLeft,
-          right: flyoutLeft + flyoutWidth
-        })
-      } else {
-        const top = panelTop + (panelH - h) / 2
-        useStore.getState().setPreviewFlyoutRect({ top, bottom: top + h })
-      }
-    }
-
-    updateRect()
-    const ro = new ResizeObserver(updateRect)
-    ro.observe(flyoutRef.current)
-    window.addEventListener('resize', updateRect)
-
-    return () => {
-      ro.disconnect()
-      window.removeEventListener('resize', updateRect)
-      useStore.getState().setPreviewFlyoutRect(null)
-    }
-  }, [isVisible, isHorizontal, isTop, screenH, flyoutLeft, flyoutWidth, panelTop, panelH, dock.y, dock.height])
 
   // Auto-scroll to active language on open
   useEffect(() => {
@@ -153,94 +54,35 @@ export function LanguageFlyout({ isRight }: { isRight: boolean }) {
     }
   }, [isVisible, language])
 
-  // Dismiss flyout when clicking outside
-  useEffect(() => {
-    if (!isVisible) return
-
-    const handlePointerDown = (e: PointerEvent) => {
-      const target = e.target as Element | null
-      if (!target || typeof target.closest !== 'function') return
-
-      if (target.closest('[data-language-flyout], .language-flyout, .language-toggle-btn')) {
-        return
-      }
-
-      const inBlade = Boolean(target.closest('.blade') || target.closest('.root') || target.closest('.settings-horizontal-shelf'))
-      if (inBlade) {
-        useStore.getState().setLanguageFlyoutOpen(false)
-      }
-    }
-
-    document.addEventListener('pointerdown', handlePointerDown, true)
-    return () => {
-      document.removeEventListener('pointerdown', handlePointerDown, true)
-    }
-  }, [isVisible])
-
-  return createPortal(
-    <AnimatePresence>
-      {isVisible && (
-        <motion.div
-          key="language-flyout-wrapper"
-          custom={stickPosition}
-          variants={reduceMotion ? { hidden: flyoutVariants.reducedHidden, shown: flyoutVariants.reducedShown, exit: flyoutVariants.reducedHidden } : flyoutVariants}
-          initial="hidden"
-          animate="shown"
-          exit="exit"
-          style={
-            isHorizontal
-              ? {
-                  position: 'absolute',
-                  ...(isTop ? { top: dock.y + dock.height + FLYOUT_GAP } : { bottom: screenH - dock.y + FLYOUT_GAP }),
-                  left: dockLeft + flyoutLeft,
-                  width: flyoutWidth,
-                  pointerEvents: 'none',
-                  zIndex: 9999,
-                  originX,
-                  originY,
-                  willChange: 'transform, opacity',
-                  backfaceVisibility: 'hidden',
-                }
-              : {
-                  position: 'absolute',
-                  top: panelTop,
-                  height: panelH,
-                  [isRight ? 'right' : 'left']: 'var(--panel-width)',
-                  marginLeft: isRight ? 0 : 12,
-                  marginRight: isRight ? 12 : 0,
-                  width: 280,
-                  display: 'flex',
-                  alignItems: 'center',
-                  pointerEvents: 'none',
-                  zIndex: 5,
-                  originX: isRight ? 1 : 0,
-                  originY: 0.5,
-                  willChange: 'transform, opacity',
-                  backfaceVisibility: 'hidden',
-                }
-          }
-        >
-          <div
-            ref={flyoutRef}
-            className="preview-flyout language-flyout"
-            data-language-flyout="true"
-            style={{
-              width: '100%',
-              maxHeight: maxFlyoutHeight,
-              background: 'var(--bg-2)',
-              borderRadius: 18,
-              border: 'none',
-              outline: 'none',
-              overflow: 'hidden',
-              display: 'flex',
-              flexDirection: 'column',
-              boxShadow: 'none',
-              pointerEvents: 'auto',
-              position: 'relative',
-              padding: '12px 10px 10px 10px',
-              boxSizing: 'border-box'
-            }}
-          >
+  return (
+    <SideFlyoutShell
+      isRight={isRight}
+      visible={isVisible}
+      motionKey="language-flyout-wrapper"
+      motionProps={languageFlyoutMotion}
+      horizontalWidth={270}
+      horizontalStyle={{ zIndex: 9999 }}
+      anchorRect={languageFlyoutAnchorRect}
+      insideSelector="[data-language-flyout], .language-flyout, .language-toggle-btn"
+      onDismiss={dismissLanguageFlyout}
+      panelProps={{ className: 'preview-flyout language-flyout', 'data-language-flyout': 'true' }}
+      panelStyle={{
+        background: 'var(--bg-2)',
+        borderRadius: 18,
+        border: 'none',
+        outline: 'none',
+        overflow: 'hidden',
+        display: 'flex',
+        flexDirection: 'column',
+        boxShadow: 'none',
+        pointerEvents: 'auto',
+        position: 'relative',
+        padding: '12px 10px 10px 10px',
+        boxSizing: 'border-box'
+      }}
+    >
+      {() => (
+          <>
             {/* Header */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 4px 8px 4px', borderBottom: 'none' }}>
               <div>
@@ -344,10 +186,8 @@ export function LanguageFlyout({ isRight }: { isRight: boolean }) {
                 )
               })}
             </div>
-          </div>
-        </motion.div>
+          </>
       )}
-    </AnimatePresence>,
-    document.body
+    </SideFlyoutShell>
   )
 }

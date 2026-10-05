@@ -1,4 +1,10 @@
-import type { FileKind } from '../../src/lib/fileType'
+import type { FileKind } from '../../shared/fileKind'
+
+function folderBody(back: string, tab: string, front: string): string {
+  return `<path d="M 56 378 L 56 128 C 56 112 68 100 84 100 L 162 100 C 178 100 190 108 200 120 C 208 130 218 136 232 136 L 428 136 C 444 136 456 148 456 164 L 456 378 C 456 396 442 410 424 410 L 88 410 C 70 410 56 396 56 378 Z" fill="${back}" />
+          <path d="M 74 162 L 74 152 C 74 147 78 143 83 143 L 429 143 C 434 143 438 147 438 152 L 438 162 Z" fill="${tab}" />
+          <path d="M 56 168 C 56 156 65 148 76 148 L 436 148 C 447 148 456 156 456 168 L 456 378 C 456 396 442 410 424 410 L 88 410 C 70 410 56 396 56 378 Z" fill="${front}" />`
+}
 
 /**
  * Generates the 1:1 exact vector SVG markup for the 3D pastel category folder icons
@@ -18,9 +24,7 @@ export function getFileKindSvgContent(kind: FileKind, uid = 'drag'): string {
           </filter>
         </defs>
         <g filter="url(#${folderShadowId})">
-          <path d="M 56 378 L 56 128 C 56 112 68 100 84 100 L 162 100 C 178 100 190 108 200 120 C 208 130 218 136 232 136 L 428 136 C 444 136 456 148 456 164 L 456 378 C 456 396 442 410 424 410 L 88 410 C 70 410 56 396 56 378 Z" fill="#FDE68A" />
-          <path d="M 74 162 L 74 152 C 74 147 78 143 83 143 L 429 143 C 434 143 438 147 438 152 L 438 162 Z" fill="#FFFDF5" />
-          <path d="M 56 168 C 56 156 65 148 76 148 L 436 148 C 447 148 456 156 456 168 L 456 378 C 456 396 442 410 424 410 L 88 410 C 70 410 56 396 56 378 Z" fill="#FBBF24" />
+          ${folderBody('#FDE68A', '#FFFDF5', '#FBBF24')}
         </g>
       `
 
@@ -36,9 +40,7 @@ export function getFileKindSvgContent(kind: FileKind, uid = 'drag'): string {
           </filter>
         </defs>
         <g filter="url(#${folderShadowId})">
-          <path d="M 56 378 L 56 128 C 56 112 68 100 84 100 L 162 100 C 178 100 190 108 200 120 C 208 130 218 136 232 136 L 428 136 C 444 136 456 148 456 164 L 456 378 C 456 396 442 410 424 410 L 88 410 C 70 410 56 396 56 378 Z" fill="#C7D2FE" />
-          <path d="M 74 162 L 74 152 C 74 147 78 143 83 143 L 429 143 C 434 143 438 147 438 152 L 438 162 Z" fill="#F5F7FF" />
-          <path d="M 56 168 C 56 156 65 148 76 148 L 436 148 C 447 148 456 156 456 168 L 456 378 C 456 396 442 410 424 410 L 88 410 C 70 410 56 396 56 378 Z" fill="#93A4FC" />
+          ${folderBody('#C7D2FE', '#F5F7FF', '#93A4FC')}
           <g filter="url(#${glyphShadowId})">
             <g stroke="#FFFFFF" stroke-width="8" stroke-linecap="round">
               <line x1="226" y1="235" x2="226" y2="218" />
@@ -72,9 +74,7 @@ export function getFileKindSvgContent(kind: FileKind, uid = 'drag'): string {
           </filter>
         </defs>
         <g filter="url(#${folderShadowId})">
-          <path d="M 56 378 L 56 128 C 56 112 68 100 84 100 L 162 100 C 178 100 190 108 200 120 C 208 130 218 136 232 136 L 428 136 C 444 136 456 148 456 164 L 456 378 C 456 396 442 410 424 410 L 88 410 C 70 410 56 396 56 378 Z" fill="#E2D0FE" />
-          <path d="M 74 162 L 74 152 C 74 147 78 143 83 143 L 429 143 C 434 143 438 147 438 152 L 438 162 Z" fill="#FAF5FF" />
-          <path d="M 56 168 C 56 156 65 148 76 148 L 436 148 C 447 148 456 156 456 168 L 456 378 C 456 396 442 410 424 410 L 88 410 C 70 410 56 396 56 378 Z" fill="#C495FD" />
+          ${folderBody('#E2D0FE', '#FAF5FF', '#C495FD')}
           <g transform="translate(167.8, 190.6) scale(12)" filter="url(#${glyphShadowId})" fill="#FFFFFF">
             <path d="M 10.888 2.518 L 6.132 3.477 C 5.98 3.508 5.86 3.565 5.76 3.65 C 5.66 3.735 5.6 3.86 5.6 4.02 C 5.596 4.047 5.59 4.1 5.59 4.18 L 5.59 10.132 C 5.59 10.272 5.578 10.407 5.484 10.522 C 5.389 10.637 5.274 10.672 5.137 10.699 L 4.827 10.762 C 4.434 10.842 4.177 10.895 3.946 10.985 C 3.738 11.066 3.555 11.186 3.427 11.318 C 3.25 11.5 3.12 11.75 3.095 12.313 C 3.126 12.61 3.261 12.895 3.49 13.105 C 3.646 13.247 3.84 13.355 4.068 13.401 C 4.304 13.448 4.558 13.432 4.926 13.358 C 5.122 13.318 5.306 13.256 5.481 13.153 C 5.656 13.05 5.81 12.89 5.919 12.748 C 6.028 12.606 6.12 12.36 6.152 12.198 C 6.194 11.996 6.204 11.812 6.204 11.61 L 6.204 6.347 C 6.204 6.071 6.284 5.997 6.506 5.943 C 6.53 5.938 10.46 5.146 10.644 5.11 C 10.901 5.061 11.022 5.135 11.022 5.404 L 11.022 8.928 C 11.022 9.068 11.021 9.208 10.926 9.324 C 10.832 9.439 10.715 9.474 10.578 9.502 L 10.268 9.564 C 9.875 9.644 9.619 9.697 9.388 9.787 C 9.18 9.868 8.997 9.988 8.868 10.121 C 8.69 10.3 8.56 10.55 8.528 11.115 C 8.558 11.412 8.702 11.697 8.932 11.907 C 9.088 12.049 9.282 12.157 9.51 12.203 C 9.745 12.25 10 12.234 10.367 12.16 C 10.564 12.12 10.747 12.058 10.923 11.955 C 11.098 11.852 11.251 11.692 11.361 11.55 C 11.467 11.393 11.546 11.206 11.594 11 C 11.636 10.798 11.646 10.614 11.646 10.412 L 11.646 2.812 C 11.646 2.666 11.593 2.562 11.486 2.502 C 11.38 2.44 11.19 2.456 10.888 2.518 Z" />
           </g>
@@ -93,9 +93,7 @@ export function getFileKindSvgContent(kind: FileKind, uid = 'drag'): string {
           </filter>
         </defs>
         <g filter="url(#${folderShadowId})">
-          <path d="M 56 378 L 56 128 C 56 112 68 100 84 100 L 162 100 C 178 100 190 108 200 120 C 208 130 218 136 232 136 L 428 136 C 444 136 456 148 456 164 L 456 378 C 456 396 442 410 424 410 L 88 410 C 70 410 56 396 56 378 Z" fill="#86DDFB" />
-          <path d="M 74 162 L 74 152 C 74 147 78 143 83 143 L 429 143 C 434 143 438 147 438 152 L 438 162 Z" fill="#F0FBFF" />
-          <path d="M 56 168 C 56 156 65 148 76 148 L 436 148 C 447 148 456 156 456 168 L 456 378 C 456 396 442 410 424 410 L 88 410 C 70 410 56 396 56 378 Z" fill="#53CAF7" />
+          ${folderBody('#86DDFB', '#F0FBFF', '#53CAF7')}
           <g filter="url(#${glyphShadowId})" fill="none" stroke="#FFFFFF" stroke-width="16" stroke-linecap="round" stroke-linejoin="round">
             <path d="M 200 240 L 156 289 L 200 338" />
             <line x1="282" y1="222" x2="230" y2="356" />
@@ -116,9 +114,7 @@ export function getFileKindSvgContent(kind: FileKind, uid = 'drag'): string {
           </filter>
         </defs>
         <g filter="url(#${folderShadowId})">
-          <path d="M 56 378 L 56 128 C 56 112 68 100 84 100 L 162 100 C 178 100 190 108 200 120 C 208 130 218 136 232 136 L 428 136 C 444 136 456 148 456 164 L 456 378 C 456 396 442 410 424 410 L 88 410 C 70 410 56 396 56 378 Z" fill="#9DC5FA" />
-          <path d="M 74 162 L 74 152 C 74 147 78 143 83 143 L 429 143 C 434 143 438 147 438 152 L 438 162 Z" fill="#F2F7FE" />
-          <path d="M 56 168 C 56 156 65 148 76 148 L 436 148 C 447 148 456 156 456 168 L 456 378 C 456 396 442 410 424 410 L 88 410 C 70 410 56 396 56 378 Z" fill="#7BAFF8" />
+          ${folderBody('#9DC5FA', '#F2F7FE', '#7BAFF8')}
           <g filter="url(#${sheetShadowId})">
             <path d="M 204 200 C 195 200 188 207 188 216 L 188 364 C 188 373 195 380 204 380 L 308 380 C 317 380 324 373 324 364 L 324 244 C 324 240 322 236 319 233 L 291 205 C 288 202 284 200 280 200 Z" fill="#F2F7FE" />
             <path d="M 281 201 L 281 232 C 281 238 286 243 292 243 L 323 243" fill="none" stroke="#7BAFF8" stroke-width="7" stroke-linecap="round" stroke-linejoin="round" />
@@ -142,9 +138,7 @@ export function getFileKindSvgContent(kind: FileKind, uid = 'drag'): string {
           </filter>
         </defs>
         <g filter="url(#${folderShadowId})">
-          <path d="M 56 378 L 56 128 C 56 112 68 100 84 100 L 162 100 C 178 100 190 108 200 120 C 208 130 218 136 232 136 L 428 136 C 444 136 456 148 456 164 L 456 378 C 456 396 442 410 424 410 L 88 410 C 70 410 56 396 56 378 Z" fill="#DFCEBC" />
-          <path d="M 74 162 L 74 152 C 74 147 78 143 83 143 L 429 143 C 434 143 438 147 438 152 L 438 162 Z" fill="#FFFDF9" />
-          <path d="M 56 168 C 56 156 65 148 76 148 L 436 148 C 447 148 456 156 456 168 L 456 378 C 456 396 442 410 424 410 L 88 410 C 70 410 56 396 56 378 Z" fill="#BA9B7B" />
+          ${folderBody('#DFCEBC', '#FFFDF9', '#BA9B7B')}
           <g filter="url(#${glyphShadowId})">
             <circle cx="272" cy="260" r="14" fill="#FFFFFF" />
             <path d="M 178 346 L 178 326 L 230 274 L 266 308 L 298 282 L 334 324 L 334 346 Z" fill="#FFFFFF" />
@@ -165,9 +159,7 @@ export function getFileKindSvgContent(kind: FileKind, uid = 'drag'): string {
           </filter>
         </defs>
         <g filter="url(#${folderShadowId})">
-          <path d="M 56 378 L 56 128 C 56 112 68 100 84 100 L 162 100 C 178 100 190 108 200 120 C 208 130 218 136 232 136 L 428 136 C 444 136 456 148 456 164 L 456 378 C 456 396 442 410 424 410 L 88 410 C 70 410 56 396 56 378 Z" fill="#FF92A0" />
-          <path d="M 74 162 L 74 152 C 74 147 78 143 83 143 L 429 143 C 434 143 438 147 438 152 L 438 162 Z" fill="#FFF0F2" />
-          <path d="M 56 168 C 56 156 65 148 76 148 L 436 148 C 447 148 456 156 456 168 L 456 378 C 456 396 442 410 424 410 L 88 410 C 70 410 56 396 56 378 Z" fill="#FF7C8E" />
+          ${folderBody('#FF92A0', '#FFF0F2', '#FF7C8E')}
           <g filter="url(#${sheetShadowId})">
             <path d="M 204 200 C 195 200 188 207 188 216 L 188 364 C 188 373 195 380 204 380 L 308 380 C 317 380 324 373 324 364 L 324 244 C 324 240 322 236 319 233 L 291 205 C 288 202 284 200 280 200 Z" fill="#FFF0F2" />
             <path d="M 281 201 L 281 232 C 281 238 286 243 292 243 L 323 243" fill="none" stroke="#FF7C8E" stroke-width="7" stroke-linecap="round" stroke-linejoin="round" />
@@ -194,9 +186,7 @@ export function getFileKindSvgContent(kind: FileKind, uid = 'drag'): string {
           </filter>
         </defs>
         <g filter="url(#${folderShadowId})">
-          <path d="M 56 378 L 56 128 C 56 112 68 100 84 100 L 162 100 C 178 100 190 108 200 120 C 208 130 218 136 232 136 L 428 136 C 444 136 456 148 456 164 L 456 378 C 456 396 442 410 424 410 L 88 410 C 70 410 56 396 56 378 Z" fill="#FFC492" />
-          <path d="M 74 162 L 74 152 C 74 147 78 143 83 143 L 429 143 C 434 143 438 147 438 152 L 438 162 Z" fill="#FFF8F2" />
-          <path d="M 56 168 C 56 156 65 148 76 148 L 436 148 C 447 148 456 156 456 168 L 456 378 C 456 396 442 410 424 410 L 88 410 C 70 410 56 396 56 378 Z" fill="#FFA25B" />
+          ${folderBody('#FFC492', '#FFF8F2', '#FFA25B')}
           <g filter="url(#${sheetShadowId})">
             <line x1="256" y1="306" x2="256" y2="368" stroke="#FFF8F2" stroke-width="8" stroke-linecap="round" />
             <line x1="256" y1="312" x2="222" y2="368" stroke="#FFF8F2" stroke-width="8" stroke-linecap="round" />
@@ -222,9 +212,7 @@ export function getFileKindSvgContent(kind: FileKind, uid = 'drag'): string {
           </filter>
         </defs>
         <g filter="url(#${folderShadowId})">
-          <path d="M 56 378 L 56 128 C 56 112 68 100 84 100 L 162 100 C 178 100 190 108 200 120 C 208 130 218 136 232 136 L 428 136 C 444 136 456 148 456 164 L 456 378 C 456 396 442 410 424 410 L 88 410 C 70 410 56 396 56 378 Z" fill="#7EE6BC" />
-          <path d="M 74 162 L 74 152 C 74 147 78 143 83 143 L 429 143 C 434 143 438 147 438 152 L 438 162 Z" fill="#F0FDF8" />
-          <path d="M 56 168 C 56 156 65 148 76 148 L 436 148 C 447 148 456 156 456 168 L 456 378 C 456 396 442 410 424 410 L 88 410 C 70 410 56 396 56 378 Z" fill="#52D7A4" />
+          ${folderBody('#7EE6BC', '#F0FDF8', '#52D7A4')}
           <g filter="url(#${sheetShadowId})">
             <path d="M 204 200 C 195 200 188 207 188 216 L 188 364 C 188 373 195 380 204 380 L 308 380 C 317 380 324 373 324 364 L 324 244 C 324 240 322 236 319 233 L 291 205 C 288 202 284 200 280 200 Z" fill="#F0FDF8" />
             <path d="M 281 201 L 281 232 C 281 238 286 243 292 243 L 323 243" fill="none" stroke="#52D7A4" stroke-width="7" stroke-linecap="round" stroke-linejoin="round" />
@@ -249,9 +237,7 @@ export function getFileKindSvgContent(kind: FileKind, uid = 'drag'): string {
           </filter>
         </defs>
         <g filter="url(#${folderShadowId})">
-          <path d="M 56 378 L 56 128 C 56 112 68 100 84 100 L 162 100 C 178 100 190 108 200 120 C 208 130 218 136 232 136 L 428 136 C 444 136 456 148 456 164 L 456 378 C 456 396 442 410 424 410 L 88 410 C 70 410 56 396 56 378 Z" fill="#CEDDC3" />
-          <path d="M 74 162 L 74 152 C 74 147 78 143 83 143 L 429 143 C 434 143 438 147 438 152 L 438 162 Z" fill="#F8FAF6" />
-          <path d="M 56 168 C 56 156 65 148 76 148 L 436 148 C 447 148 456 156 456 168 L 456 378 C 456 396 442 410 424 410 L 88 410 C 70 410 56 396 56 378 Z" fill="#8CA77B" />
+          ${folderBody('#CEDDC3', '#F8FAF6', '#8CA77B')}
           <g filter="url(#${sheetShadowId})">
             <path d="M 204 200 C 195 200 188 207 188 216 L 188 364 C 188 373 195 380 204 380 L 308 380 C 317 380 324 373 324 364 L 324 244 C 324 240 322 236 319 233 L 291 205 C 288 202 284 200 280 200 Z" fill="#F8FAF6" />
             <path d="M 281 201 L 281 232 C 281 238 286 243 292 243 L 323 243" fill="none" stroke="#8CA77B" stroke-width="7" stroke-linecap="round" stroke-linejoin="round" />
@@ -275,9 +261,7 @@ export function getFileKindSvgContent(kind: FileKind, uid = 'drag'): string {
           </filter>
         </defs>
         <g filter="url(#${folderShadowId})">
-          <path d="M 56 378 L 56 128 C 56 112 68 100 84 100 L 162 100 C 178 100 190 108 200 120 C 208 130 218 136 232 136 L 428 136 C 444 136 456 148 456 164 L 456 378 C 456 396 442 410 424 410 L 88 410 C 70 410 56 396 56 378 Z" fill="#94A3B8" />
-          <path d="M 74 162 L 74 152 C 74 147 78 143 83 143 L 429 143 C 434 143 438 147 438 152 L 438 162 Z" fill="#F8FAFC" />
-          <path d="M 56 168 C 56 156 65 148 76 148 L 436 148 C 447 148 456 156 456 168 L 456 378 C 456 396 442 410 424 410 L 88 410 C 70 410 56 396 56 378 Z" fill="#64748B" />
+          ${folderBody('#94A3B8', '#F8FAFC', '#64748B')}
           <g filter="url(#${sheetShadowId})">
             <rect x="176" y="224" width="160" height="128" rx="20" fill="#F8FAFC" />
             <rect x="192" y="240" width="16" height="16" rx="4" fill="#64748B" />
@@ -306,9 +290,7 @@ export function getFileKindSvgContent(kind: FileKind, uid = 'drag'): string {
           </filter>
         </defs>
         <g filter="url(#${folderShadowId})">
-          <path d="M 56 378 L 56 128 C 56 112 68 100 84 100 L 162 100 C 178 100 190 108 200 120 C 208 130 218 136 232 136 L 428 136 C 444 136 456 148 456 164 L 456 378 C 456 396 442 410 424 410 L 88 410 C 70 410 56 396 56 378 Z" fill="#FDE68A" />
-          <path d="M 74 162 L 74 152 C 74 147 78 143 83 143 L 429 143 C 434 143 438 147 438 152 L 438 162 Z" fill="#FFFDF5" />
-          <path d="M 56 168 C 56 156 65 148 76 148 L 436 148 C 447 148 456 156 456 168 L 456 378 C 456 396 442 410 424 410 L 88 410 C 70 410 56 396 56 378 Z" fill="#FBBF24" />
+          ${folderBody('#FDE68A', '#FFFDF5', '#FBBF24')}
           <g filter="url(#${glyphShadowId})">
             <line x1="256" y1="178" x2="256" y2="284" stroke="#FFFDF5" stroke-width="6" stroke-linecap="round" />
             <rect x="236" y="184" width="20" height="6" rx="3" fill="#FFFDF5" />
@@ -342,9 +324,7 @@ export function getFileKindSvgContent(kind: FileKind, uid = 'drag'): string {
           </filter>
         </defs>
         <g filter="url(#${folderShadowId})">
-          <path d="M 56 378 L 56 128 C 56 112 68 100 84 100 L 162 100 C 178 100 190 108 200 120 C 208 130 218 136 232 136 L 428 136 C 444 136 456 148 456 164 L 456 378 C 456 396 442 410 424 410 L 88 410 C 70 410 56 396 56 378 Z" fill="#D4DFE9" />
-          <path d="M 74 162 L 74 152 C 74 147 78 143 83 143 L 429 143 C 434 143 438 147 438 152 L 438 162 Z" fill="#F8FAFC" />
-          <path d="M 56 168 C 56 156 65 148 76 148 L 436 148 C 447 148 456 156 456 168 L 456 378 C 456 396 442 410 424 410 L 88 410 C 70 410 56 396 56 378 Z" fill="#B0C0D0" />
+          ${folderBody('#D4DFE9', '#F8FAFC', '#B0C0D0')}
           <g filter="url(#${sheetShadowId})">
             <path d="M 204 200 C 195 200 188 207 188 216 L 188 364 C 188 373 195 380 204 380 L 308 380 C 317 380 324 373 324 364 L 324 244 C 324 240 322 236 319 233 L 291 205 C 288 202 284 200 280 200 Z" fill="#F8FAFC" />
             <path d="M 281 201 L 281 232 C 281 238 286 243 292 243 L 323 243" fill="none" stroke="#B0C0D0" stroke-width="7" stroke-linecap="round" stroke-linejoin="round" />

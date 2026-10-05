@@ -27,7 +27,6 @@ export interface EdgeApi {
   deleteBatchItems: (ids: string[]) => Promise<import('./types').ClipboardItemDto[]>
   clearItems: () => Promise<import('./types').ClipboardItemDto[]>
   getFullText: (id: string) => Promise<string>
-  removeSubitem: (req: DragRequest) => Promise<boolean>
   copyItem: (id: string) => Promise<boolean>
   copySubitem: (req: DragRequest) => Promise<boolean>
   pasteItem: (id: string, opts?: import('./types').PasteOptions) => Promise<boolean>
@@ -53,8 +52,6 @@ export interface EdgeApi {
    * so drag initiation is 0ms.
    */
   prestageDrag: (req: DragRequest) => void
-  addFiles: (paths: string[]) => Promise<import('./types').ClipboardItemDto[]>
-  addItemData: (data: import('./types').ItemData) => Promise<import('./types').ClipboardItemDto[]>
   mergeItems: (sourceId: string, targetId: string) => Promise<import('./types').MergeResult>
   splitItem: (req: import('./types').DragRequest) => Promise<boolean>
   updateSettings: (patch: Partial<Settings>) => Promise<Settings>
@@ -63,7 +60,6 @@ export interface EdgeApi {
   setPreviewMode: (active: boolean) => Promise<void>
   pauseHotkey: (paused: boolean) => Promise<void>
   revealFile: (path: string) => Promise<boolean>
-  minimizeWindow: () => Promise<void>
   focusWindow: (focusable?: boolean) => Promise<void>
   getDisplays: () => Promise<import('./types').DisplayInfo[]>
   getAccessibilityStatus: () => Promise<boolean | null>
@@ -92,7 +88,6 @@ export interface EdgeApi {
   pinMulti: (ids: string[], pinned: boolean) => Promise<import('./types').ClipboardItemDto[]>
   startDragMulti: (ids: string[]) => void
   setInternalDrag: (active: boolean) => void
-  broadcastTutorialStep: (step: number) => void
 
   /* Main -> Renderer */
   onItems: (cb: (items: import('./types').ClipboardItemDto[], meta?: { reason?: 'usage' | 'capture' }) => void) => () => void
@@ -116,7 +111,6 @@ export interface EdgeApi {
   onPanelDragPlacement: (cb: (placement: import('./types').PanelDragPlacement) => void) => () => void
   onToast: (cb: (toast: { id: string; message: string; tone: 'info' | 'error'; params?: Record<string, string | number> }) => void) => () => void
   onCopyFlare: (cb: () => void) => () => void
-  onTutorialStep: (cb: (step: number) => void) => () => void
   onUpdateAvailable: (cb: (info: { version: string }) => void) => () => void
   onUpdateProgress: (cb: (progress: { percent: number; bytesPerSecond?: number; transferred?: number; total?: number }) => void) => () => void
   onUpdateDownloaded: (cb: (info: { version: string }) => void) => () => void

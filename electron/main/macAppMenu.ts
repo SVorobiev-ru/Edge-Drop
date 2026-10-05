@@ -1,7 +1,7 @@
 import { Menu, app } from 'electron'
 import { loadSettings } from '../store/settings'
 import { openSettingsFromShell } from './tray'
-import { mainText } from './language'
+import { mainText, onMainLanguageLoaded } from './language'
 
 export function installMacAppMenu(): void {
   if (process.platform !== 'darwin') return
@@ -44,3 +44,5 @@ export function installMacAppMenu(): void {
     ])
   )
 }
+
+onMainLanguageLoaded(installMacAppMenu)

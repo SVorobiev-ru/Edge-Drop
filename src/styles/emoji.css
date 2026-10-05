@@ -92,37 +92,6 @@
   filter: drop-shadow(0 2px 5px rgba(0, 0, 0, 0.4));
 }
 
-/* Fast Category Glass Tooltip */
-.emoji-cat-tooltip {
-  position: absolute;
-  top: 48px;
-  z-index: 10;
-  padding: 4px 10px;
-  border-radius: 999px;
-  background: var(--bg-2);
-  border: none;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.55);
-  transform: translateX(-50%);
-  pointer-events: none;
-  white-space: nowrap;
-  font-size: 11.5px;
-  font-weight: 500;
-  color: rgb(var(--ink) / max(0.92, var(--text-alpha-floor)));
-  letter-spacing: 0.01em;
-  animation: emojiCatTooltipFade 0.12s cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-@keyframes emojiCatTooltipFade {
-  from {
-    opacity: 0;
-    transform: translate(-50%, -4px) scale(0.96);
-  }
-  to {
-    opacity: 1;
-    transform: translate(-50%, 0) scale(1);
-  }
-}
-
 /* Recents Clear Button */
 .emoji-recents-footer {
   display: flex;
@@ -240,12 +209,6 @@
   gap: 0;
   box-shadow: none;
   overflow: visible;
-}
-
-.emoji-picker.horizontal .emoji-cat-tooltip {
-  top: 34px;
-  padding: 3px 8px;
-  font-size: 11px;
 }
 
 .emoji-picker.horizontal .emoji-grid {

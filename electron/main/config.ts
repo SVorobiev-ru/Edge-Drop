@@ -16,6 +16,28 @@ export const runtime = {
  */
 export const STORE_STARTUP_TASK_ID = 'EdgeDropStartup'
 
+const packageStoreStamps = new Map<string, boolean>()
+
+function packageHasStoreStamp(pkgPath: string): boolean {
+  const known = packageStoreStamps.get(pkgPath)
+  if (known !== undefined) return known
+  let stamped = false
+  try {
+    if (existsSync(pkgPath)) {
+      const pkg = JSON.parse(readFileSync(pkgPath, 'utf8')) as { buildTarget?: string }
+      stamped = pkg.buildTarget === 'store'
+    }
+  } catch {
+    return false
+  }
+  packageStoreStamps.set(pkgPath, stamped)
+  return stamped
+}
+
+export function resetStoreBuildCache(): void {
+  packageStoreStamps.clear()
+}
+
 /**
  * True when running as the Microsoft Store / MSIX package.
  * The GitHub NSIS .exe never sets these signals.
@@ -34,14 +56,8 @@ export function isStoreBuild(): boolean {
     return true
   }
   try {
-    if (app.isPackaged) {
-      const pkgPath = join(app.getAppPath(), 'package.json')
-      if (existsSync(pkgPath)) {
-        const pkg = JSON.parse(readFileSync(pkgPath, 'utf8')) as { buildTarget?: string }
-        if (pkg.buildTarget === 'store') {
-          return true
-        }
-      }
+    if (app.isPackaged && packageHasStoreStamp(join(app.getAppPath(), 'package.json'))) {
+      return true
     }
   } catch {
     /* unpackaged tests / app-not-ready */

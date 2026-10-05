@@ -14,7 +14,7 @@ vi.mock('electron', () => ({
   }
 }))
 
-import { languageFromSystemLocale, resolveUiLanguage } from '../electron/main/language'
+import { getMainLocale, isMainLanguageLoaded, languageFromSystemLocale, loadMainLanguage, mainText, onMainLanguageLoaded, resolveUiLanguage, warmMainLanguage } from '../electron/main/language'
 import { getResolvedLanguage } from '../src/i18n'
 import { LANGUAGES, TRANSLATIONS } from '../src/i18n/translations'
 
@@ -105,5 +105,40 @@ describe('resolveUiLanguage', () => {
     mocks.throws = true
     expect(resolveUiLanguage('system')).toBe('en')
     expect(console.error).toHaveBeenCalled()
+  })
+})
+
+describe('lazy main locales', () => {
+  it('serves English until the locale chunk arrives, then the localized text', async () => {
+    const loaded = vi.fn()
+    const off = onMainLanguageLoaded(loaded)
+    expect(isMainLanguageLoaded('de')).toBe(false)
+    expect(getMainLocale('de')).toBeUndefined()
+    expect(mainText('de', 'tray.settings', undefined, { mac: false })).toBe(TRANSLATIONS.en.tray.settings)
+    await warmMainLanguage('de')
+    off()
+    expect(loaded).toHaveBeenCalledTimes(1)
+    expect(isMainLanguageLoaded('de')).toBe(true)
+    expect(getMainLocale('de')).toEqual(TRANSLATIONS.de)
+    expect(mainText('de', 'tray.settings', undefined, { mac: false })).toBe(TRANSLATIONS.de.tray.settings)
+  })
+
+  it('warms the locale the system setting resolves to', async () => {
+    mocks.systemLanguages = ['it-IT']
+    expect(isMainLanguageLoaded('system')).toBe(false)
+    await warmMainLanguage('system')
+    expect(getMainLocale('it')).toEqual(TRANSLATIONS.it)
+  })
+
+  it.each(Object.keys(TRANSLATIONS))('loads %s with the same strings as the static table', async (code) => {
+    await loadMainLanguage(code)
+    expect(getMainLocale(code)).toEqual(TRANSLATIONS[code])
+  })
+
+  it('treats English and unknown codes as ready', async () => {
+    expect(isMainLanguageLoaded('en')).toBe(true)
+    expect(isMainLanguageLoaded('xx')).toBe(true)
+    await loadMainLanguage('xx')
+    expect(mainText('xx', 'tray.settings', undefined, { mac: false })).toBe(TRANSLATIONS.en.tray.settings)
   })
 })

@@ -10,7 +10,8 @@ import { electronBackupIo, exportPinnedHistory, importPinnedHistory, type Backup
 import { wakeImageTextRecognition } from './ocr'
 import { handle } from './ipcHandle'
 import { toast } from './toast'
-import { copyItem, copySubitem, deleteItem, pasteItem, pasteQueue, pasteSubitem, removeSubitem } from './ipc'
+import { copyItem, copySubitem, pasteItem, pasteQueue, pasteSubitem } from './pastePipeline'
+import { deleteItem, removeSubitem } from './itemOps'
 import { showSelectionMenu } from './selectionOps'
 
 function storedImagePath(imageId: string, ext?: string): string | null {
