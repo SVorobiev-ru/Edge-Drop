@@ -500,6 +500,7 @@ describe('dropped image URL limits', () => {
   })
 
   it('item:add-data ignores a refused URL with a toast instead of adding an empty image', async () => {
+    setPlatform('darwin')
     const result = await invoke('item:add-data', { kind: 'image', imageUrl: 'http://example.com/a.png' })
     expect(mocks.storeAdd).not.toHaveBeenCalled()
     expect(mocks.netFetch).not.toHaveBeenCalled()

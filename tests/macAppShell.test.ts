@@ -82,6 +82,8 @@ vi.mock('electron', () => ({
   })
 }))
 
+vi.mock('koffi', () => import('./helpers/koffiMock'))
+
 vi.mock('node:os', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:os')>()
   return { ...actual, uptime: () => mocks.uptime() }

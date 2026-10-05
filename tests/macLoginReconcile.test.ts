@@ -3,6 +3,7 @@ import { restorePlatform, setPlatform } from './helpers/platform'
 
 const mocks = vi.hoisted(() => ({
   isPackaged: true,
+  release: '23.0.0',
   status: 'not-registered' as string | undefined,
   registerSticks: true,
   queryThrows: false,
@@ -26,6 +27,11 @@ vi.mock('electron', () => ({
 }))
 
 vi.mock('../electron/store/settings', async () => (await import('./helpers/settingsMock')).settingsModuleMock(mocks))
+
+vi.mock('node:os', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:os')>()
+  return { ...actual, release: () => mocks.release, default: { ...actual, release: () => mocks.release } }
+})
 
 vi.mock('node:child_process', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:child_process')>()

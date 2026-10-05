@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { execFileSync } from 'node:child_process'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 
 const exec = vi.hoisted(() => ({
   calls: [] as string[][],
@@ -195,7 +195,7 @@ describe('installer script', () => {
     expect(timeout).toContain('/bin/rm -rf "$WORK"')
   })
 
-  it('is valid sh', () => {
+  it.skipIf(process.platform === 'win32')('is valid sh', () => {
     const dir = mkdtempSync(join(tmpdir(), 'edge-drop-script-'))
     try {
       const file = join(dir, 'install.sh')
@@ -214,8 +214,8 @@ describe('installer script', () => {
 
 describe('app bundle location', () => {
   it('resolves the bundle from the executable path', () => {
-    expect(currentAppBundle('/Applications/Edge-Drop.app/Contents/MacOS/Edge-Drop')).toBe('/Applications/Edge-Drop.app')
-    expect(currentAppBundle('/Users/me/Apps/My Edge.app/Contents/MacOS/Edge-Drop')).toBe('/Users/me/Apps/My Edge.app')
+    expect(currentAppBundle('/Applications/Edge-Drop.app/Contents/MacOS/Edge-Drop')).toBe(resolve('/Applications/Edge-Drop.app'))
+    expect(currentAppBundle('/Users/me/Apps/My Edge.app/Contents/MacOS/Edge-Drop')).toBe(resolve('/Users/me/Apps/My Edge.app'))
   })
 
   it('returns null outside an app bundle', () => {

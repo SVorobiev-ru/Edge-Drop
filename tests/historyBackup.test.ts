@@ -1,7 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, sep } from 'node:path'
 
 vi.mock('electron', () => ({
   app: { getPath: () => '/mock/Documents', focus: vi.fn() },
@@ -98,7 +98,9 @@ describe('exportPinnedHistory', () => {
     const { d, toast, writes } = deps()
     const result = await exportPinnedHistory(d)
 
-    expect(d.chooseSavePath).toHaveBeenCalledWith(expect.stringMatching(/^\/Users\/me\/Documents\/edge-drop-pinned-\d{4}-\d{2}-\d{2}\.json$/))
+    expect(d.chooseSavePath).toHaveBeenCalledTimes(1)
+    const suggested = vi.mocked(d.chooseSavePath).mock.calls[0][0]
+    expect(suggested.split(sep).join('/')).toMatch(/^\/Users\/me\/Documents\/edge-drop-pinned-\d{4}-\d{2}-\d{2}\.json$/)
     expect(result).toEqual({ ok: true, path: writes[0].path, count: 1 })
     expect(JSON.parse(writes[0].data)).toEqual(validDoc)
     expect(toast).toHaveBeenCalledWith('toast.exported', 'info', { count: 1 })

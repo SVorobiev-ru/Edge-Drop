@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { existsSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { restorePlatform, setPlatform } from './helpers/platform'
 
 type Handler = (...args: any[]) => any
@@ -143,6 +144,7 @@ beforeEach(() => {
   mocks.reconcile.mockResolvedValue({})
   mocks.persistSync.mockImplementation(() => mocks.calls.push('persistSync'))
   mocks.getStore.mockReturnValue({ persistSync: mocks.persistSync, list: () => [] })
+  vi.stubEnv('ELECTRON_OVERRIDE_DIST_PATH', tmpdir())
   written = []
   vi.spyOn(process.stdout, 'write').mockImplementation(((chunk: string) => {
     written.push(String(chunk))
@@ -157,6 +159,7 @@ afterEach(() => {
   process.argv = realArgv
   vi.useRealTimers()
   vi.restoreAllMocks()
+  vi.unstubAllEnvs()
   restorePlatform()
 })
 

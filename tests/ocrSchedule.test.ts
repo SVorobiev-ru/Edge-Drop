@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   setOcrText: vi.fn(() => true)
 }))
 
+vi.mock('koffi', () => import('./helpers/koffiMock'))
 vi.mock('electron', () => ({ powerMonitor: { getSystemIdleTime: () => 0 } }))
 vi.mock('../electron/main/state', () => ({
   getStore: () => ({

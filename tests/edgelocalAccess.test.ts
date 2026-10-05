@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, normalize, sep } from 'node:path'
 import { collectItemFilePaths, isPathInside, isServableLocalPath, resolveRealPath } from '../electron/main/edgelocalAccess'
 import type { ItemData } from '../shared/types'
 
@@ -23,9 +23,9 @@ describe('edgelocal path allow-list', () => {
 
   it('collects normalized paths of file items only', () => {
     expect([...allowed.itemPaths].sort()).toEqual([
-      '/Users/me/Desktop/photo.png',
-      '/Users/me/Documents/report.pdf',
-      '/Users/me/Movies/clip.mov'
+      normalize('/Users/me/Desktop/photo.png'),
+      normalize('/Users/me/Documents/report.pdf'),
+      normalize('/Users/me/Movies/clip.mov')
     ])
   })
 
@@ -140,6 +140,6 @@ describe('edgelocal allow-list on the real file system', () => {
   it('resolves the existing part of a missing path', () => {
     const { root } = setup()
     expect(resolveRealPath(join(root, 'missing', 'x.png'))).toBe(join(realpathSync.native(root), 'missing', 'x.png'))
-    expect(resolveRealPath('/definitely-missing-edge-drop/x')).toBe('/definitely-missing-edge-drop/x')
+    expect(resolveRealPath('/definitely-missing-edge-drop/x')).toBe(join(realpathSync.native(sep), 'definitely-missing-edge-drop', 'x'))
   })
 })
